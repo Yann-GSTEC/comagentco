@@ -7606,12 +7606,12 @@ function renderDashboard(){
     .map(c=>({client:c, ca:clientCaMap[c.id]})).sort((a,b)=>b.ca-a.ca).slice(0,8);
   const topInstall = state.clients.filter(c=>clientFamType(c)==='installateur' && clientCaMap[c.id]>0)
     .map(c=>({client:c, ca:clientCaMap[c.id]})).sort((a,b)=>b.ca-a.ca).slice(0,8);
-  const topListHtml = rows => rows.length===0
+  const topListHtml = (rows) => rows.length===0
     ? '<div class="helper">Aucun devis accepté sur cette période pour ce périmètre.</div>'
     : `<div class="table-wrap"><table>
         <thead><tr><th style="width:36px;">#</th><th>Client</th><th class="num">CA HT</th></tr></thead>
         <tbody>
-          ${rows.map((r,i)=>`<tr>
+          ${rows.map((r,i)=>`<tr style="cursor:pointer;" onclick="drillDownClient(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.client.id}')" title="Voir le détail des devis acceptés de ce client">
             <td>${i+1}</td>
             <td>${escapeHtml(clientSocieteLabel(r.client.id))}</td>
             <td class="num" style="font-weight:700;">${fmtMoney(r.ca)}</td>
@@ -7630,7 +7630,7 @@ function renderDashboard(){
     'top-distrib': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients distributeurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (devis acceptés), société de famille Grossiste/Distributeur.</div>${topListHtml(topDistrib)}`,
     'top-install': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients installateurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (devis acceptés), société de famille Installateur.</div>${topListHtml(topInstall)}`,
     'chart-correlation': `<h3 style="margin:0 0 4px 0;font-size:15px;">Corrélation devis réalisés / CA généré</h3><div class="helper" style="margin-bottom:12px;">Par mois sur ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}. Barres : nombre de devis/marchés créés (tous statuts). Ligne : CA généré (devis acceptés).</div><div class="chart-wrap"><canvas id="chartCorrelation"></canvas></div>`,
-    'table-apporteur': `<h3 style="margin:0 0 4px 0;font-size:15px;">Nombre de devis/marchés par marque et par apporteur d'affaire</h3><div class="helper" style="margin-bottom:12px;">Année ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}, tous statuts confondus.</div>${brandApporteurRows.length===0?'<div class="helper">Aucun devis/marché sur cette période pour ce périmètre.</div>':`<div class="table-wrap"><table><thead><tr><th>Marque</th><th class="num">Agent</th><th class="num">Distributeur</th><th class="num">Non précisé</th><th class="num">Total</th></tr></thead><tbody>${brandApporteurRows.map(r=>`<tr><td><span class="chip" style="background:${brandColor(r.brand.id)}"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td><td class="num">${r.agent}</td><td class="num">${r.distrib}</td><td class="num">${r.nonPrecise}</td><td class="num" style="font-weight:700;">${r.total}</td></tr>`).join('')}</tbody></table></div>`}`,
+    'table-apporteur': `<h3 style="margin:0 0 4px 0;font-size:15px;">Nombre de devis/marchés par marque et par apporteur d'affaire</h3><div class="helper" style="margin-bottom:12px;">Année ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}, tous statuts confondus. Cliquez sur un nombre pour voir le détail.</div>${brandApporteurRows.length===0?'<div class="helper">Aucun devis/marché sur cette période pour ce périmètre.</div>':`<div class="table-wrap"><table><thead><tr><th>Marque</th><th class="num">Agent</th><th class="num">Distributeur</th><th class="num">Non précisé</th><th class="num">Total</th></tr></thead><tbody>${brandApporteurRows.map(r=>`<tr><td style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)"><span class="chip" style="background:${brandColor(r.brand.id)}"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Agent')">${r.agent}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Distributeur')">${r.distrib}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'nonPrecise')">${r.nonPrecise}</td><td class="num" style="font-weight:700;cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)">${r.total}</td></tr>`).join('')}</tbody></table></div>`}`,
   };
   const dashBlocked = brandFilter==='all' && clientFilter==='all';
   const widgetCardsHtml = state.dashboardLayout.order.map(id=>{
@@ -7643,6 +7643,15 @@ function renderDashboard(){
     if(id==='kpi-cavva'){
       styleExtra = dashBlocked ? 'cursor:not-allowed;opacity:.7;' : 'cursor:pointer;';
       extraAttrs = ` onclick="openCaVvaModal(${y}, '${brandFilter}', '${clientFilter}')" title="${dashBlocked?'Sélectionnez une marque ou un client pour saisir le CA (VVA)':'Cliquer pour saisir/consulter le détail mensuel'}"`;
+    } else if(id==='kpi-ca'){
+      styleExtra = 'cursor:pointer;';
+      extraAttrs = ` onclick="drillDownAccepted(${y}, '${cmId}', '${brandFilter}', '${clientFilter}')" title="Voir le détail des devis acceptés"`;
+    } else if(id==='kpi-encours'){
+      styleExtra = 'cursor:pointer;';
+      extraAttrs = ` onclick="drillDownEnCours('${cmId}', '${brandFilter}', '${clientFilter}')" title="Voir le détail des devis en cours"`;
+    } else if(id==='kpi-panier'){
+      styleExtra = 'cursor:pointer;';
+      extraAttrs = ` onclick="drillDownAccepted(${y}, '${cmId}', '${brandFilter}', '${clientFilter}')" title="Voir le détail des devis acceptés utilisés pour ce calcul"`;
     }
     return `
   <div class="card ${extraClass} dash-card" draggable="true" data-widget="${id}"
@@ -7688,6 +7697,91 @@ function renderDashboard(){
   <div class="dash-grid">${widgetCardsHtml}</div>
   `;
 }
+
+/* ============================= DRILL-DOWN TABLEAU DE BORD ============================= */
+/* Système en entonnoir : clic sur un agrégat (KPI, barre de graphique, ligne de tableau) → liste
+   des devis/marchés concernés → clic sur un devis de cette liste → ouverture du devis en détail. */
+function dashScopeFilter(cmId, brandFilter, clientFilter){
+  return d => devisMatchesCommercial(d, cmId)
+    && (brandFilter==='all' || (d.lines||[]).some(l=>l.brandId===brandFilter))
+    && (clientFilter==='all' || d.clientId===clientFilter);
+}
+function dashScopeDescription(year, cmId, brandFilter, clientFilter){
+  const parts = [];
+  if(year) parts.push('Année '+year);
+  if(cmId && cmId!=='all'){ const cm = state.commerciaux.find(x=>x.id===cmId); if(cm) parts.push(commercialDisplayName(cm)); }
+  if(brandFilter && brandFilter!=='all') parts.push(brandName(brandFilter));
+  if(clientFilter && clientFilter!=='all') parts.push(clientSocieteLabel(clientFilter));
+  return parts.join(' — ');
+}
+function openDevisDrillDownModal(title, subtitle, devisList){
+  const list = devisList.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const totalSum = list.reduce((s,d)=>s+devisTotal(d).ht,0);
+  const rows = list.map(d=>{
+    const c = state.clients.find(x=>x.id===d.clientId);
+    const brandsInvolved = [...new Set((d.lines||[]).map(l=>l.brandId))].map(id=>state.brands.find(b=>b.id===id)).filter(Boolean);
+    return `<tr style="cursor:pointer;" onclick="closeModal(); openDevisForm('${d.id}');">
+      <td style="font-weight:600;">${escapeHtml(d.number)}</td>
+      <td>${fmtDate(d.date)}</td>
+      <td>${escapeHtml(c?clientSocieteLabel(c.id):'—')}</td>
+      <td>${brandsInvolved.map(b=>`<span class="chip" style="background:${brandColor(b.id)};margin-right:3px;"><span class="sq"></span>${escapeHtml(b.name)}</span>`).join('')||'—'}</td>
+      <td><span class="status-pill status-${d.status}">${escapeHtml(d.status)}</span></td>
+      <td class="num" style="font-weight:700;">${fmtMoney(devisTotal(d).ht)}</td>
+    </tr>`;
+  }).join('');
+  openModal(`
+    <div class="modal-head"><h3>${escapeHtml(title)}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      ${subtitle?`<div class="helper" style="margin-bottom:14px;">${escapeHtml(subtitle)}</div>`:''}
+      ${list.length===0?'<div class="helper">Aucun devis / marché ne correspond à cette sélection.</div>':`
+      <div class="table-wrap"><table>
+        <thead><tr><th>Numéro</th><th>Date</th><th>Client</th><th>Marque(s)</th><th>Statut</th><th class="num">Total HT</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <div class="helper" style="margin-top:10px;text-align:right;">${list.length} devis/marché(s) — total : <strong>${fmtMoney(totalSum)}</strong></div>
+      <div class="helper" style="margin-top:6px;">Cliquez sur une ligne pour ouvrir le devis en détail.</div>
+      `}
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Fermer</button>
+    </div>
+  `);
+}
+function drillDownAccepted(year, cmId, brandFilter, clientFilter){
+  const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
+  const list = state.devis.filter(d=>d.status==='Accepté' && yearOf(d.date)===year && inScope(d));
+  openDevisDrillDownModal(`CA ${year} — devis acceptés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
+}
+function drillDownEnCours(cmId, brandFilter, clientFilter){
+  const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
+  const list = state.devis.filter(d=>(d.status==='Envoyé'||d.status==='Brouillon') && inScope(d));
+  openDevisDrillDownModal('Devis en cours', dashScopeDescription(null, cmId, brandFilter, clientFilter), list);
+}
+function drillDownBrand(year, cmId, brandFilter, clientFilter, targetBrandId){
+  const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
+  const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && (d.lines||[]).some(l=>l.brandId===targetBrandId) && d.status==='Accepté');
+  openDevisDrillDownModal(`${escapeHtml(brandName(targetBrandId))} — devis acceptés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
+}
+function drillDownClient(year, cmId, brandFilter, clientFilter, targetClientId){
+  const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
+  const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && d.clientId===targetClientId && d.status==='Accepté');
+  openDevisDrillDownModal(`${escapeHtml(clientSocieteLabel(targetClientId))} — devis acceptés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
+}
+function drillDownMonth(year, month, cmId, brandFilter, clientFilter){
+  const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
+  const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && parseInt((d.date||'').slice(5,7),10)===month);
+  const monthNames = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  openDevisDrillDownModal(`${monthNames[month-1]} ${year} — devis/marchés`, dashScopeDescription(null, cmId, brandFilter, clientFilter), list);
+}
+function drillDownApporteur(year, cmId, brandFilter, clientFilter, targetBrandId, apporteur){
+  const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
+  let list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && (d.lines||[]).some(l=>l.brandId===targetBrandId));
+  let label = `${brandName(targetBrandId)} — tous devis/marchés`;
+  if(apporteur==='nonPrecise'){ list = list.filter(d=>d.apporteurAffaire!=='Agent' && d.apporteurAffaire!=='Distributeur'); label = `${brandName(targetBrandId)} — apporteur non précisé`; }
+  else if(apporteur){ list = list.filter(d=>d.apporteurAffaire===apporteur); label = `${brandName(targetBrandId)} — apporteur ${apporteur}`; }
+  openDevisDrillDownModal(escapeHtml(label), dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
+}
+
 function initDashboardCharts(){
   const y = ui.dashboardYear;
   const cmId = ui.dashboardCommercial;
@@ -7726,6 +7820,12 @@ function initDashboardCharts(){
       type:'bar',
       data:{labels:brandData.map(x=>x.label), datasets:[{data:brandData.map(x=>x.value), backgroundColor:brandData.map(x=>x.color), borderRadius:5, maxBarThickness:28}]},
       options:{indexAxis:'y', responsive:true, maintainAspectRatio:false,
+        onClick:(evt, elements)=>{
+          if(!elements.length) return;
+          const targetBrand = state.brands.find(b=>b.name===brandData[elements[0].index].label);
+          if(targetBrand) drillDownBrand(y, cmId, brandFilter, clientFilter, targetBrand.id);
+        },
+        onHover:(evt, elements)=>{ evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
         plugins:{legend:{display:false}, tooltip:{callbacks:{label:(ctx)=>fmtMoney(ctx.parsed.x)}}},
         scales:{x:{ticks:{callback:(v)=>v+' €'}, grid:{color:'#EEEBE0'}}, y:{grid:{display:false}}}
       }
@@ -7738,6 +7838,12 @@ function initDashboardCharts(){
       type:'bar',
       data:{labels:clientData.map(x=>x.label), datasets:[{data:clientData.map(x=>x.value), backgroundColor:'#B8863B', borderRadius:5, maxBarThickness:28}]},
       options:{indexAxis:'y', responsive:true, maintainAspectRatio:false,
+        onClick:(evt, elements)=>{
+          if(!elements.length) return;
+          const targetClient = clientsInScope.find(c=>c.name===clientData[elements[0].index].label);
+          if(targetClient) drillDownClient(y, cmId, brandFilter, clientFilter, targetClient.id);
+        },
+        onHover:(evt, elements)=>{ evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
         plugins:{legend:{display:false}, tooltip:{callbacks:{label:(ctx)=>fmtMoney(ctx.parsed.x)}}},
         scales:{x:{ticks:{callback:(v)=>v+' €'}, grid:{color:'#EEEBE0'}}, y:{grid:{display:false}}}
       }
@@ -7769,6 +7875,11 @@ function initDashboardCharts(){
         },
         options:{
           responsive:true, maintainAspectRatio:false,
+          onClick:(evt, elements)=>{
+            if(!elements.length) return;
+            drillDownMonth(y, elements[0].index+1, cmId, brandFilter, clientFilter);
+          },
+          onHover:(evt, elements)=>{ evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
           plugins:{
             legend:{display:true, position:'bottom', labels:{boxWidth:12, font:{size:11}}},
             tooltip:{callbacks:{label:(ctx)=> ctx.dataset.yAxisID==='yCa' ? ('CA : '+fmtMoney(ctx.parsed.y)) : ('Devis : '+ctx.parsed.y)}}
