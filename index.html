@@ -1457,32 +1457,19 @@ function renderMarques(){
     <button class="btn btn-primary" onclick="openBrandForm()">+ Ajouter une marque</button>
   </div>
   ${state.brands.length===0 ? emptyState('◆','Aucune marque pour le moment','Ajoutez les marques que vous représentez pour commencer.') : `
-  <div class="grid grid-3">
+  <div class="grid grid-4">
     ${(()=>{ const tarifCounts = tarifCountsByBrand(); return state.brands.map(b=>{
       const ca = caForBrand(b.id, null);
       const nbTarifs = tarifCounts.get(b.id)||0;
-      const contactLine = [b.civilite, b.prenom, (b.prenom||b.civilite)?'':null].filter(x=>x!==null).join(' ').trim();
-      const contactFull = [b.civilite, b.prenom].filter(Boolean).join(' ');
       return `
-      <div class="card card-pad" style="cursor:pointer;" onclick="openBrandForm('${b.id}')">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
-          <div style="display:flex;align-items:center;gap:9px;min-width:0;">
-            ${b.logo?`<img src="${b.logo}" alt="" style="width:32px;height:32px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff;flex-shrink:0;">`:''}
-            <div class="chip" style="background:${brandColor(b.id)}"><span class="sq"></span>${escapeHtml(b.name)}</div>
-          </div>
+      <div class="card card-pad" style="cursor:pointer;" onclick="openBrandForm('${b.id}')" title="Cliquer pour voir le détail">
+        <div style="display:flex;align-items:center;gap:9px;min-width:0;">
+          ${b.logo?`<img src="${b.logo}" alt="" style="width:30px;height:30px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff;flex-shrink:0;">`:''}
+          <div class="chip" style="background:${brandColor(b.id)};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span class="sq"></span>${escapeHtml(b.name)}</div>
         </div>
-        <div style="margin-top:14px;font-size:12.5px;color:var(--ink-soft);line-height:1.7;">
-          ${b.code ? `<div>Code : ${escapeHtml(b.code)}</div>`:''}
-          ${contactFull ? `<div>👤 ${escapeHtml(contactFull)}</div>`:''}
-          ${(b.ville||b.codePostal) ? `<div>⌂ ${escapeHtml([b.codePostal,b.ville].filter(Boolean).join(' '))}</div>`:''}
-          ${b.email ? `<div>✉ ${escapeHtml(b.email)}</div>`:''}
-          ${(b.telephone||b.portable) ? `<div>☎ ${escapeHtml(b.telephone||b.portable)}</div>`:''}
-          ${b.commentaire ? `<div style="margin-top:4px;font-style:italic;color:var(--muted);">"${escapeHtml(b.commentaire.slice(0,80))}${b.commentaire.length>80?'…':''}"</div>`:''}
-        </div>
-        <div class="divider"></div>
-        <div style="display:flex;justify-content:space-between;font-size:12.5px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px;font-size:12px;">
           <span style="color:var(--muted);">${nbTarifs} référence(s)</span>
-          <span class="num" style="font-weight:700;">${fmtMoney(ca)} CA</span>
+          <span class="num" style="font-weight:700;">${fmtMoney(ca)}</span>
         </div>
       </div>`;
     }).join(''); })()}
@@ -5270,7 +5257,7 @@ function renderDevisListInner(){
   if(list.length===0) return emptyState('▧','Aucun devis','Créez votre premier devis à partir de vos listes de prix.');
   return `
   <div class="card table-wrap"><table>
-    <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Marque(s)</th><th>Total HT</th><th>Statut</th></tr></thead>
+    <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Marque(s)</th><th>Total HT</th><th>Apporteur</th><th>Statut</th></tr></thead>
     <tbody>
       ${list.map(d=>{
         const t = devisTotal(d);
@@ -5284,6 +5271,13 @@ function renderDevisListInner(){
           <td>${brandIds.slice(0,3).map(bid=>`<span class="chip" style="background:${brandColor(bid)};margin-right:3px;"><span class="sq"></span>${escapeHtml(brandName(bid))}</span>`).join('')}${brandIds.length>3?`<span class="helper">+${brandIds.length-3}</span>`:''}</td>
           <td class="num" style="font-weight:700;">${fmtMoney(t.ht)}</td>
           <td onclick="event.stopPropagation();">
+            <select onchange="changeDevisApporteur('${d.id}', this.value)" style="width:auto;padding:4px 8px;font-size:11.5px;">
+              <option value="" ${!d.apporteurAffaire?'selected':''}>—</option>
+              <option value="Agent" ${d.apporteurAffaire==='Agent'?'selected':''}>Agent</option>
+              <option value="Distributeur" ${d.apporteurAffaire==='Distributeur'?'selected':''}>Distributeur</option>
+            </select>
+          </td>
+          <td onclick="event.stopPropagation();">
             <select onchange="changeDevisStatus('${d.id}', this.value)" style="width:auto;padding:4px 8px;font-size:11.5px;font-weight:700;border-radius:20px;" class="status-pill status-${d.status}">
               ${STATUTS.map(s=>`<option value="${s}" ${s===d.status?'selected':''}>${s}</option>`).join('')}
             </select>
@@ -5293,6 +5287,18 @@ function renderDevisListInner(){
     </tbody>
   </table></div>
   `;
+}
+function changeDevisApporteur(id, apporteur){
+  const d = state.devis.find(x=>x.id===id);
+  const old = d.apporteurAffaire||'';
+  d.apporteurAffaire = apporteur||'';
+  if(old!==d.apporteurAffaire){
+    d.history = Array.isArray(d.history) ? d.history : [];
+    d.history.push({ ts: new Date().toISOString(), type:'modified', changes:[`Apporteur de l'affaire : ${old||'—'} → ${d.apporteurAffaire||'—'}`] });
+  }
+  persist('devis');
+  render();
+  showToast('Apporteur mis à jour.');
 }
 function changeDevisStatus(id, status){
   const d = state.devis.find(x=>x.id===id);
@@ -7716,6 +7722,9 @@ function dashScopeDescription(year, cmId, brandFilter, clientFilter){
 }
 function openDevisDrillDownModal(title, subtitle, devisList){
   const list = devisList.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  renderDrillDownModalBody(title, subtitle, list);
+}
+function renderDrillDownModalBody(title, subtitle, list){
   const totalSum = list.reduce((s,d)=>s+devisTotal(d).ht,0);
   const rows = list.map(d=>{
     const c = state.clients.find(x=>x.id===d.clientId);
@@ -7724,8 +7733,20 @@ function openDevisDrillDownModal(title, subtitle, devisList){
       <td style="font-weight:600;">${escapeHtml(d.number)}</td>
       <td>${fmtDate(d.date)}</td>
       <td>${escapeHtml(c?clientSocieteLabel(c.id):'—')}</td>
+      <td>${escapeHtml(d.objet||'—')}</td>
       <td>${brandsInvolved.map(b=>`<span class="chip" style="background:${brandColor(b.id)};margin-right:3px;"><span class="sq"></span>${escapeHtml(b.name)}</span>`).join('')||'—'}</td>
-      <td><span class="status-pill status-${d.status}">${escapeHtml(d.status)}</span></td>
+      <td onclick="event.stopPropagation();">
+        <select onchange="changeDrillDownApporteur('${d.id}', this.value, '${escapeJsStr(title)}', '${escapeJsStr(subtitle||'')}')" style="width:auto;padding:4px 8px;font-size:11.5px;">
+          <option value="" ${!d.apporteurAffaire?'selected':''}>—</option>
+          <option value="Agent" ${d.apporteurAffaire==='Agent'?'selected':''}>Agent</option>
+          <option value="Distributeur" ${d.apporteurAffaire==='Distributeur'?'selected':''}>Distributeur</option>
+        </select>
+      </td>
+      <td onclick="event.stopPropagation();">
+        <select onchange="changeDrillDownStatus('${d.id}', this.value, '${escapeJsStr(title)}', '${escapeJsStr(subtitle||'')}')" style="width:auto;padding:4px 8px;font-size:11.5px;font-weight:700;border-radius:20px;" class="status-pill status-${d.status}">
+          ${STATUTS.map(s=>`<option value="${s}" ${s===d.status?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </td>
       <td class="num" style="font-weight:700;">${fmtMoney(devisTotal(d).ht)}</td>
     </tr>`;
   }).join('');
@@ -7735,7 +7756,7 @@ function openDevisDrillDownModal(title, subtitle, devisList){
       ${subtitle?`<div class="helper" style="margin-bottom:14px;">${escapeHtml(subtitle)}</div>`:''}
       ${list.length===0?'<div class="helper">Aucun devis / marché ne correspond à cette sélection.</div>':`
       <div class="table-wrap"><table>
-        <thead><tr><th>Numéro</th><th>Date</th><th>Client</th><th>Marque(s)</th><th>Statut</th><th class="num">Total HT</th></tr></thead>
+        <thead><tr><th>Numéro</th><th>Date</th><th>Client</th><th>Objet</th><th>Marque(s)</th><th>Apporteur</th><th>Statut</th><th class="num">Total HT</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
       <div class="helper" style="margin-top:10px;text-align:right;">${list.length} devis/marché(s) — total : <strong>${fmtMoney(totalSum)}</strong></div>
@@ -7746,6 +7767,48 @@ function openDevisDrillDownModal(title, subtitle, devisList){
       <button class="btn" onclick="closeModal()">Fermer</button>
     </div>
   `);
+}
+function escapeJsStr(s){
+  return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+}
+function changeDrillDownApporteur(id, apporteur, title, subtitle){
+  const d = state.devis.find(x=>x.id===id);
+  if(!d) return;
+  const old = d.apporteurAffaire||'';
+  d.apporteurAffaire = apporteur||'';
+  if(old!==d.apporteurAffaire){
+    d.history = Array.isArray(d.history) ? d.history : [];
+    d.history.push({ ts: new Date().toISOString(), type:'modified', changes:[`Apporteur de l'affaire : ${old||'—'} → ${d.apporteurAffaire||'—'}`] });
+  }
+  persist('devis');
+  refreshDrillDownAfterChange(title, subtitle);
+}
+function changeDrillDownStatus(id, status, title, subtitle){
+  const d = state.devis.find(x=>x.id===id);
+  if(!d) return;
+  const oldStatus = d.status;
+  d.status = status;
+  if(oldStatus!==status){
+    d.history = Array.isArray(d.history) ? d.history : [];
+    d.history.push({ ts: new Date().toISOString(), type:'modified', changes:[`Statut : ${oldStatus||'—'} → ${status}`] });
+  }
+  persist('devis');
+  refreshDrillDownAfterChange(title, subtitle);
+}
+function refreshDrillDownAfterChange(title, subtitle){
+  // Les devis affichés dans la fenêtre restent les mêmes (on ne recalcule pas le filtre d'origine),
+  // seules leurs valeurs modifiées sont reflétées — la vue générale (KPI, graphiques) se recalculera
+  // à la fermeture de la fenêtre puisque render() est appelé maintenant en tâche de fond.
+  // On retrouve la liste actuelle affichée via les lignes déjà présentes n'est pas fiable après
+  // modification : on relit directement les devis via leurs numéros affichés dans le tableau.
+  const box = document.getElementById('modalBox');
+  if(box){
+    const numbers = Array.from(box.querySelectorAll('tbody tr td:first-child')).map(td=>td.textContent.trim());
+    const list = numbers.map(n=>state.devis.find(d=>d.number===n)).filter(Boolean);
+    renderDrillDownModalBody(title, subtitle, list);
+  }
+  render();
+  showToast('Mise à jour enregistrée.');
 }
 function drillDownAccepted(year, cmId, brandFilter, clientFilter){
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
