@@ -3811,7 +3811,7 @@ function renderListesPrixNets(){
           ${listes.length===0?'<span class="helper">Aucune liste pour cette marque — cliquez pour en créer une.</span>':listes.map(l=>{
             const nb = countsByListe.get(l.id)||0;
             const nbC = pnAssignedClientsForListe(l.id).length;
-            return `<span class="chip" style="background:${brandColor(b.id)};cursor:pointer;" onclick="event.stopPropagation(); ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();" title="${nb} référence(s) · ${nbC} client(s)${listeDatesRangeLabel(l)?' · '+listeDatesRangeLabel(l):''}"><span class="sq"></span>${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</span>`;
+            return `<span class="chip" style="background:var(--surface-2);color:var(--ink-soft);border:1px solid var(--line);cursor:pointer;" onclick="event.stopPropagation(); ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();" title="${nb} référence(s) · ${nbC} client(s)${listeDatesRangeLabel(l)?' · '+listeDatesRangeLabel(l):''}"><span class="sq" style="background:${brandColor(b.id)};"></span>${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</span>`;
           }).join('')}
         </div>
       </div>`;
