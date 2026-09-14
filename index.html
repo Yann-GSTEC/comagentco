@@ -744,6 +744,17 @@ function reindexSearchKeys(){
   state.listesPrixNets.forEach(t=>{ t._sk = (t.reference+' '+(t.designation||'')).toLowerCase(); });
 }
 function tarifSK(t){ return t._sk || (t._sk = (t.reference+' '+(t.designation||'')).toLowerCase()); }
+function normalizeRefQuery(s){
+  return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'');
+}
+function tarifSKNorm(t){ return t._skn || (t._skn = normalizeRefQuery((t.reference||'')+' '+(t.designation||''))); }
+function tarifMatchesQuery(t, q, qNorm){
+  // Recherche tolérante : "P6" doit retrouver "P-6", "P.6", "P 6", "P_6"… (séparateurs ignorés),
+  // en plus de la correspondance texte classique.
+  if(tarifSK(t).includes(q)) return true;
+  if(qNorm && tarifSKNorm(t).includes(qNorm)) return true;
+  return false;
+}
 function fastRefCompare(a,b){ return a.reference < b.reference ? -1 : a.reference > b.reference ? 1 : 0; }
 let tarifsSortedCache = null;
 function getSortedTarifs(){
@@ -3670,7 +3681,7 @@ function filteredTarifs(){
   let list = getSortedTarifs(); // déjà trié une seule fois (comparateur rapide, mis en cache)
   if(ui.tarifsBrandFilter!=='all') list = list.filter(t=>t.brandId===ui.tarifsBrandFilter);
   const q = ui.tarifsSearch.trim().toLowerCase();
-  if(q) list = list.filter(t=>tarifSK(t).includes(q));
+  if(q){ const qNorm = normalizeRefQuery(q); list = list.filter(t=>tarifMatchesQuery(t, q, qNorm)); }
   return list;
 }
 function margeInfo(t){
@@ -3760,7 +3771,7 @@ function filteredListesPrixNets(){
   if(ui.pnBrandFilter!=='all') list = list.filter(t=>t.brandId===ui.pnBrandFilter);
   if(ui.pnListeFilter) list = list.filter(t=>t.listeId===ui.pnListeFilter);
   const q = ui.pnSearch.trim().toLowerCase();
-  if(q) list = list.filter(t=>tarifSK(t).includes(q));
+  if(q){ const qNorm = normalizeRefQuery(q); list = list.filter(t=>tarifMatchesQuery(t, q, qNorm)); }
   return list;
 }
 function renderListesPrixNets(){
@@ -3788,36 +3799,21 @@ function renderListesPrixNets(){
       const listes = listesForBrand(b.id);
       const totalRefs = countsByBrand.get(b.id)||0;
       const assigned = pnAssignedClientsForBrand(b.id);
+      const defaultListeId = listes[0] ? listes[0].id : null;
       return `
-      <div class="card card-pad">
+      <div class="card card-pad" style="cursor:pointer;" onclick="ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${defaultListeId}'; ui.pnSearch=''; render();" title="Cliquer pour ouvrir cette marque">
         <div style="display:flex;align-items:center;gap:8px;">
-          ${b.logo?`<img src="${b.logo}" alt="" style="width:32px;height:32px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff;flex-shrink:0;">`:''}
+          ${b.logo?`<img src="${b.logo}" alt="" style="width:28px;height:28px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff;flex-shrink:0;">`:''}
           <div class="chip" style="background:${brandColor(b.id)}"><span class="sq"></span>${escapeHtml(b.name)}</div>
+          <div style="margin-left:auto;font-size:11.5px;color:var(--ink-soft);white-space:nowrap;">${totalRefs} réf. · ${assigned.length} client(s)</div>
         </div>
-        <div style="margin-top:12px;font-size:12.5px;color:var(--ink-soft);">
-          <strong style="color:var(--ink);font-size:15px;">${totalRefs}</strong> référence(s) · <strong style="color:var(--ink);font-size:15px;">${assigned.length}</strong> client(s) au total
-        </div>
-        <div class="divider"></div>
-        <div style="font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;margin-bottom:6px;">Listes de prix nets</div>
-        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
-          ${listes.length===0?'<span class="helper">Aucune liste pour cette marque.</span>':listes.map(l=>{
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;">
+          ${listes.length===0?'<span class="helper">Aucune liste pour cette marque — cliquez pour en créer une.</span>':listes.map(l=>{
             const nb = countsByListe.get(l.id)||0;
             const nbC = pnAssignedClientsForListe(l.id).length;
-            return `
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;">
-              <div style="min-width:0;">
-                <div style="font-weight:600;font-size:12.5px;">${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</div>
-                <div class="helper">${nb} réf. · ${nbC} client(s)${listeDatesRangeLabel(l)?' · '+listeDatesRangeLabel(l):''}</div>
-              </div>
-              <div style="display:flex;gap:4px;flex-shrink:0;">
-                <button class="btn btn-sm" onclick="ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();">Ouvrir</button>
-                <button class="btn btn-sm btn-ghost" title="Renommer" onclick="renamePrixNetListe('${l.id}')">✎</button>
-                <button class="btn btn-sm btn-ghost btn-danger" title="Supprimer" onclick="if(deletePrixNetListe('${l.id}')) render();">✕</button>
-              </div>
-            </div>`;
+            return `<span class="chip" style="background:${brandColor(b.id)};cursor:pointer;" onclick="event.stopPropagation(); ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();" title="${nb} référence(s) · ${nbC} client(s)${listeDatesRangeLabel(l)?' · '+listeDatesRangeLabel(l):''}"><span class="sq"></span>${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</span>`;
           }).join('')}
         </div>
-        <button class="btn btn-sm btn-brass" style="width:100%;" onclick="createPrixNetListe('${b.id}')">+ Nouvelle liste de prix nets</button>
       </div>`;
     }).join(''); })()}
   </div>
@@ -3848,7 +3844,10 @@ function renderListesPrixNetsDetail(){
   ${backupRiskBannerHtml()}
   ${listes.length===0?emptyState('▥','Aucune liste pour cette marque','Créez une première liste de prix nets pour commencer.'):`
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
-    ${listes.map(l=>`<button class="btn btn-sm ${l.id===ui.pnListeFilter?'active':''}" onclick="ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();">${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</button>`).join('')}
+    ${listes.map(l=>{
+      const selected = l.id===ui.pnListeFilter;
+      return `<span class="chip" style="cursor:pointer;${selected?`background:${brandColor(b.id)};`:`background:var(--surface-2);color:var(--ink-soft);`}" onclick="ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();">${selected?'<span class="sq"></span>':''}${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</span>`;
+    }).join('')}
     <button class="btn btn-sm btn-ghost" onclick="createPrixNetListe('${ui.pnBrandFilter}')">+ Nouvelle liste</button>
   </div>
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
@@ -4160,7 +4159,7 @@ function savePrixNet(id){
   if(id){
     Object.assign(state.listesPrixNets.find(x=>x.id===id), data);
     const edited = state.listesPrixNets.find(x=>x.id===id);
-    edited._sk = null; // référence/désignation modifiées : la clé de recherche sera recalculée au prochain filtrage
+    edited._sk = null; edited._skn = null; // référence/désignation modifiées : les clés de recherche seront recalculées au prochain filtrage
   } else {
     state.listesPrixNets.push({id:uid(), ...data});
   }
@@ -4332,7 +4331,7 @@ function confirmImportPN(){
       const existing = index.get(key);
       if(existing){
         existing.prixNet = prix;
-        if(designation){ existing.designation = designation; existing._sk = null; }
+        if(designation){ existing.designation = designation; existing._sk = null; existing._skn = null; }
         updated++;
       } else {
         const newEntry = {id:uid(), brandId, listeId, reference, designation, prixNet:prix, prixAchatDistributeur:0};
@@ -4435,7 +4434,7 @@ function saveTarif(id){
   if(id){
     Object.assign(state.tarifs.find(x=>x.id===id), data);
     const edited = state.tarifs.find(x=>x.id===id);
-    edited._sk = null; // référence/désignation modifiées : la clé de recherche sera recalculée au prochain filtrage
+    edited._sk = null; edited._skn = null; // référence/désignation modifiées : les clés de recherche seront recalculées au prochain filtrage
   } else {
     state.tarifs.push({id:uid(), ...data});
   }
@@ -4593,7 +4592,7 @@ function confirmImport(){
       const existing = index.get(key);
       if(existing){
         existing[targetField] = prix;
-        if(designation){ existing.designation = designation; existing._sk = null; }
+        if(designation){ existing.designation = designation; existing._sk = null; existing._skn = null; }
         if(codeFamilleArticle) existing.codeFamilleArticle = codeFamilleArticle;
         if(codeSousFamilleArticle) existing.codeSousFamilleArticle = codeSousFamilleArticle;
         updated++;
@@ -5681,6 +5680,10 @@ function openDevisForm(id, presetClientId){
   if(draft.apporteurAffaire===undefined) draft.apporteurAffaire = '';
   if(draft.attentionA===undefined) draft.attentionA = '';
   if(!draft.pdfColumns) draft.pdfColumns = {...DEFAULT_PDF_COLUMNS};
+  if(draft.filterBrandId===undefined){
+    const brandIds = [...new Set((draft.lines||[]).map(l=>l.brandId))].filter(Boolean);
+    draft.filterBrandId = brandIds.length===1 ? brandIds[0] : '';
+  }
   openModal(devisFormHtml(), {full:true});
   document.addEventListener('keydown', devisFormKeydownHandler);
 }
@@ -5798,6 +5801,13 @@ function devisFormHtml(){
             <option value="Marché" ${draft.type==='Marché'?'selected':''}>Marché</option>
           </select>
         </div>
+        <div class="field" style="max-width:200px;"><label>Marque</label>
+          <select id="d_filterBrand" onchange="draft.filterBrandId=this.value; refreshDevisModal();">
+            <option value="" ${!draft.filterBrandId?'selected':''}>Toutes les marques</option>
+            ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${draft.filterBrandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+          </select>
+          <div class="helper">Filtre la recherche de référence ci-dessous.</div>
+        </div>
         <div class="field"><label>Client (société) *</label>
           <div class="autocomplete">
             <input type="text" id="d_clientSearch" placeholder="Rechercher une société…" value="${escapeHtml(currentClientLabel())}" oninput="devisSearchClients(this.value)" onfocus="devisSearchClients('')" onblur="setTimeout(()=>{const b=document.getElementById('d_clientResults'); if(b) b.innerHTML='';},180)" autocomplete="off">
@@ -5837,8 +5847,24 @@ function devisFormHtml(){
         <button type="button" class="btn btn-sm" onclick="refreshDevisLinePrices()" title="Recalcule chaque ligne avec le tarif actuel et la liste de prix nets en vigueur à la date du devis">↻ Réactualiser les prix</button>
       </div>
       <div class="autocomplete" style="margin-bottom:12px;">
-        <input type="text" id="d_search" placeholder="Rechercher une référence à ajouter…" oninput="debouncedDevisSearchRefs(this.value)" autocomplete="off">
+        <input type="text" id="d_search" placeholder="Rechercher une référence ou une désignation à ajouter…" oninput="debouncedDevisSearchRefs(this.value)" autocomplete="off">
         <div id="d_searchResults"></div>
+      </div>
+      <div style="margin-top:-8px;margin-bottom:12px;">
+        <a href="#" onclick="event.preventDefault(); toggleFreeLineForm();" style="font-size:12.5px;font-weight:600;">+ Ajouter un produit hors catalogue (référence et/ou désignation libres)</a>
+        <div id="d_freeLineForm" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);">
+          <div class="field-row">
+            <div class="field" style="margin-bottom:8px;"><label>Référence</label><input type="text" id="fl_ref" placeholder="Ex. DIVERS-01"></div>
+            <div class="field" style="margin-bottom:8px;"><label>Désignation</label><input type="text" id="fl_desig" placeholder="Ex. Prestation sur mesure"></div>
+            <div class="field" style="margin-bottom:8px;max-width:220px;"><label>Marque</label>
+              <select id="fl_brand">${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${(draft.filterBrandId||devisSoleBrandId())===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button type="button" class="btn btn-sm btn-primary" onclick="addFreeDevisLine()">Ajouter la ligne</button>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="toggleFreeLineForm(false)">Annuler</button>
+          </div>
+        </div>
       </div>
       <div class="helper" style="margin-top:-8px;margin-bottom:12px;">Cliquer sur la désignation de la référence concernée puis : <strong>F3</strong> historique prix (ce client) · <strong>F4</strong> (département) · <strong>F5</strong> (tous les clients) · <strong>F6</strong> (famille / sous-famille)</div>
       <div class="table-wrap lines-table">
@@ -6082,13 +6108,67 @@ function applyUniformMarge(){
   if(impossible>0) showToast(`Marge appliquée à ${applied}/${draft.lines.length} ligne(s) — les lignes sans Prix d'achat HT n'ont pas pu être calculées.`);
   else showToast(`Marge de ${marge}% appliquée à ${applied} ligne(s) — ajustable ligne par ligne si besoin.`);
 }
+function devisSoleBrandId(){
+  const ids = [...new Set((draft && draft.lines || []).map(l=>l.brandId))];
+  return ids.length===1 ? ids[0] : (state.brands[0] ? state.brands[0].id : '');
+}
+function toggleFreeLineForm(show){
+  const el = document.getElementById('d_freeLineForm');
+  if(!el) return;
+  const willShow = show!==undefined ? show : (el.style.display==='none');
+  el.style.display = willShow ? 'block' : 'none';
+  if(willShow) setTimeout(()=>{ const r=document.getElementById('fl_ref'); if(r) r.focus(); },30);
+}
+function addFreeDevisLine(){
+  const ref = (document.getElementById('fl_ref').value||'').trim();
+  const desig = (document.getElementById('fl_desig').value||'').trim();
+  if(!ref && !desig){ showToast('Indiquez au moins une référence ou une désignation.'); return; }
+  const brandId = document.getElementById('fl_brand').value;
+  draft.lines.push({
+    id:uid(), tarifId:null, brandId,
+    reference: ref || '(sans référence)', designation: desig || '',
+    qty:1, prixUnitaire:0,
+    remisePct1:0, remisePct2:0, remisePct3:0,
+    prixClient:0, prixNetApplied:false, prixNetTarget:null, netPriceOverride:null,
+  });
+  document.getElementById('fl_ref').value='';
+  document.getElementById('fl_desig').value='';
+  toggleFreeLineForm(false);
+  refreshDevisModal();
+  showToast('Ligne libre ajoutée — pensez à renseigner le prix.');
+}
+function brandIdsMatchingName(brandId){
+  // Tolère les doublons de fiches marque (même nom, identifiants internes différents) :
+  // renvoie tous les identifiants de marque partageant le même nom que celui sélectionné.
+  const ref = state.brands.find(b=>b.id===brandId);
+  if(!ref) return [brandId];
+  const name = ref.name.trim().toLowerCase();
+  return state.brands.filter(b=>b.name.trim().toLowerCase()===name).map(b=>b.id);
+}
 function devisSearchRefsRun(q){
   q = q.trim().toLowerCase();
+  const qNorm = normalizeRefQuery(q);
   const box = document.getElementById('d_searchResults');
   if(!box) return;
   if(!q){ box.innerHTML=''; return; }
-  const results = state.tarifs.filter(t=>tarifSK(t).includes(q)).slice(0,20);
-  if(results.length===0){ box.innerHTML = `<div class="autocomplete-list"><div class="autocomplete-item">Aucun résultat</div></div>`; return; }
+  let pool = state.tarifs;
+  let noBrandMatch = false;
+  if(draft.filterBrandId){
+    const matchingIds = brandIdsMatchingName(draft.filterBrandId);
+    const filtered = pool.filter(t=>matchingIds.includes(t.brandId));
+    // Si le filtre marque ne renvoie rien du tout, on retente sans filtre pour distinguer
+    // "aucun résultat" de "résultat existant mais rattaché à une autre fiche marque".
+    const wouldMatchWithoutFilter = pool.some(t=>tarifMatchesQuery(t, q, qNorm));
+    if(filtered.filter(t=>tarifMatchesQuery(t, q, qNorm)).length===0 && wouldMatchWithoutFilter) noBrandMatch = true;
+    pool = filtered;
+  }
+  const results = pool.filter(t=>tarifMatchesQuery(t, q, qNorm)).slice(0,20);
+  if(results.length===0){
+    const brandNote = draft.filterBrandId ? ` (filtré sur ${escapeHtml(brandName(draft.filterBrandId))})` : '';
+    const dupHint = noBrandMatch ? `<div class="autocomplete-item" style="color:var(--danger,#B3392C);">⚠ Cette référence existe mais sous une <strong>autre fiche marque</strong> — vérifiez s'il n'y a pas deux fiches "${escapeHtml(brandName(draft.filterBrandId))}" dans l'onglet Marques, ou repassez sur "Toutes les marques" ci-dessus.</div>` : '';
+    box.innerHTML = `<div class="autocomplete-list">${dupHint}<div class="autocomplete-item" style="cursor:pointer;" onmousedown="prefillFreeLine('${escapeJsStr(q)}')">Aucun résultat pour « ${escapeHtml(q)} »${brandNote} — <strong>ajouter comme ligne hors catalogue</strong></div></div>`;
+    return;
+  }
   box.innerHTML = `<div class="autocomplete-list">${results.map(t=>`
     <div class="autocomplete-item" onclick="addDevisLine('${t.id}')">
       <span class="chip" style="background:${brandColor(t.brandId)};font-size:10px;margin-right:6px;">${escapeHtml(brandName(t.brandId))}</span>
@@ -6096,6 +6176,15 @@ function devisSearchRefsRun(q){
       <div class="desig">${escapeHtml(t.designation||'')}</div>
     </div>
   `).join('')}</div>`;
+}
+function prefillFreeLine(q){
+  toggleFreeLineForm(true);
+  const desigEl = document.getElementById('fl_desig');
+  if(desigEl && !desigEl.value) desigEl.value = q;
+  const searchBox = document.getElementById('d_search');
+  if(searchBox) searchBox.value = '';
+  const results = document.getElementById('d_searchResults');
+  if(results) results.innerHTML = '';
 }
 function findClientNetPriceEntry(clientId, brandId, reference, dateStr){
   const c = state.clients.find(x=>x.id===clientId);
