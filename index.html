@@ -191,17 +191,25 @@ tbody tr:hover{background:var(--surface-2);}
 .contacts-sheet tr.row-b{background:#F1F6FB;}
 .contacts-sheet tr:hover{filter:brightness(0.97);}
 .table-wrap{overflow-x:auto;}
+.col-custom-table{table-layout:fixed;}
+.col-th{position:relative;cursor:grab;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.col-th:active{cursor:grabbing;}
+.col-th-label{pointer-events:none;}
+.col-th-dragover{background:var(--surface-2);outline:2px dashed var(--accent);outline-offset:-2px;}
+.col-resize-handle{position:absolute;right:-3px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:2;}
+.col-resize-handle:hover{background:var(--accent);opacity:.4;}
+.col-custom-table td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.col-custom-table td.wrap-cell{white-space:normal;}
+.rapport-canvas{position:relative;min-height:200px;}
+.rapport-widget{position:absolute;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;}
+.rapport-widget-drag{cursor:move;padding:5px 10px;font-size:11px;font-weight:600;color:var(--muted);background:var(--surface-2);border-bottom:1px solid var(--line);user-select:none;flex-shrink:0;letter-spacing:.04em;}
+.rapport-widget-body{flex:1;overflow:auto;padding:16px;}
+.rapport-widget-resize{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;background:linear-gradient(135deg, transparent 50%, var(--line) 50%);z-index:2;}
+.rapport-widget-resize:hover{background:linear-gradient(135deg, transparent 50%, var(--accent) 50%);}
+.card-resize-handle{position:absolute;right:2px;bottom:2px;width:14px;height:14px;cursor:ns-resize;z-index:3;background:linear-gradient(135deg, transparent 50%, var(--line) 50%);border-bottom-right-radius:10px;}
+.card-resize-handle:hover{background:linear-gradient(135deg, transparent 50%, var(--accent) 50%);}
+.card{position:relative;}
 .table-actions{display:flex;gap:6px;justify-content:flex-end;}
-table[data-resize-key]{table-layout:fixed;}
-table[data-resize-key] th{overflow:hidden;text-overflow:ellipsis;}
-.col-resize-handle{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;z-index:3;}
-.col-resize-handle:hover,.col-resize-handle.active{background:rgba(47,93,80,.35);}
-[data-resize-card]{position:relative;}
-.card-resize-handle{
-  position:absolute;bottom:3px;right:5px;width:15px;height:15px;cursor:ns-resize;
-  color:var(--muted);opacity:.4;font-size:13px;line-height:15px;text-align:right;user-select:none;
-}
-.card-resize-handle:hover{opacity:.9;}
 
 .chip{
   display:inline-flex;align-items:center;gap:6px;
@@ -387,7 +395,7 @@ let state = {
   paramLists: emptyParamLists(),
   commissions: {},
   caVva: {},
-  dashboardLayout: {order:[], sizes:{}},
+  dashboardLayout: {order:[], sizes:{}, heights:{}},
   loaded:false
 };
 
@@ -1385,86 +1393,6 @@ function attachGlobalHandlers(){
 }
 function afterRenderHook(){
   if(ui.tab==='dashboard') initDashboardCharts();
-  initResizers();
-}
-/* ============================= REDIMENSIONNEMENT MANUEL (colonnes de tableau + hauteur des cartes) ============================= */
-function uiSizing(){
-  if(!state.settings.uiSizing) state.settings.uiSizing = {colWidths:{}, cardHeights:{}};
-  if(!state.settings.uiSizing.colWidths) state.settings.uiSizing.colWidths = {};
-  if(!state.settings.uiSizing.cardHeights) state.settings.uiSizing.cardHeights = {};
-  return state.settings.uiSizing;
-}
-function initColumnResizers(root){
-  (root||document).querySelectorAll('table[data-resize-key]').forEach(table=>{
-    if(table.dataset.resizerBound) return;
-    table.dataset.resizerBound = '1';
-    const key = table.getAttribute('data-resize-key');
-    const stored = uiSizing().colWidths[key] || {};
-    const ths = table.querySelectorAll('thead th');
-    ths.forEach((th,i)=>{
-      if(stored[i]) th.style.width = stored[i]+'px';
-      if(!th.style.position) th.style.position = 'relative';
-      if(i===ths.length-1) return; // pas de poignée sur la dernière colonne (généralement les actions)
-      const handle = document.createElement('span');
-      handle.className = 'col-resize-handle';
-      th.appendChild(handle);
-      handle.addEventListener('mousedown', function(e){
-        e.preventDefault(); e.stopPropagation();
-        handle.classList.add('active');
-        const startX = e.clientX, startW = th.offsetWidth;
-        function onMove(ev){ th.style.width = Math.max(36, startW + (ev.clientX-startX))+'px'; }
-        function onUp(){
-          document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', onUp);
-          handle.classList.remove('active');
-          const sizing = uiSizing();
-          if(!sizing.colWidths[key]) sizing.colWidths[key] = {};
-          sizing.colWidths[key][i] = th.offsetWidth;
-          persist('settings');
-        }
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
-      });
-    });
-  });
-}
-function initCardResizers(root){
-  (root||document).querySelectorAll('[data-resize-card]').forEach(card=>{
-    if(card.dataset.resizerBound) return;
-    card.dataset.resizerBound = '1';
-    const key = card.getAttribute('data-resize-card');
-    const sizing = uiSizing();
-    if(sizing.cardHeights[key]){ card.style.height = sizing.cardHeights[key]+'px'; card.style.overflow = 'auto'; }
-    const handle = document.createElement('span');
-    handle.className = 'card-resize-handle';
-    handle.title = 'Glisser pour redimensionner';
-    handle.textContent = '⋰';
-    card.appendChild(handle);
-    handle.addEventListener('mousedown', function(e){
-      e.preventDefault(); e.stopPropagation();
-      const startY = e.clientY, startH = card.offsetHeight;
-      card.style.overflow = 'auto';
-      function onMove(ev){ card.style.height = Math.max(90, startH + (ev.clientY-startY))+'px'; }
-      function onUp(){
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        uiSizing().cardHeights[key] = card.offsetHeight;
-        persist('settings');
-      }
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    });
-  });
-}
-function initResizers(root){
-  initColumnResizers(root);
-  initCardResizers(root);
-}
-function resetUiSizing(){
-  state.settings.uiSizing = {colWidths:{}, cardHeights:{}};
-  persist('settings');
-  render();
-  showToast('Largeurs de colonnes et hauteurs de cartes réinitialisées.');
 }
 </script>
 <script>
@@ -2158,7 +2086,7 @@ function renderEmailing(){
       <button class="btn" onclick="downloadEmailingTxt()">⇩ Télécharger .txt</button>
       <button class="btn" onclick="exportEmailingExcel()">⇩ Exporter en Excel</button>
     </div>
-    <div class="table-wrap"><table data-resize-key="emailing-results">
+    <div class="table-wrap"><table>
       <thead><tr><th>Client</th><th>Société</th><th>Email</th><th>Type</th><th>Contact</th></tr></thead>
       <tbody>
         ${rows.map(r=>`<tr><td>${escapeHtml(r.client)}</td><td>${escapeHtml(r.societe||'—')}</td><td style="font-family:'Space Grotesk';">${escapeHtml(r.email)}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.type==='Contact'?r.contact:'—')}</td></tr>`).join('')}
@@ -2170,7 +2098,7 @@ function renderEmailing(){
 }
 function updateEmailingTableOnly(){
   const wrap = document.getElementById('emailingTableWrap');
-  if(wrap){ wrap.innerHTML = renderEmailingTableInner(); initResizers(wrap); }
+  if(wrap) wrap.innerHTML = renderEmailingTableInner();
 }
 function renderEmailingTableInner(){
   const list = visibleEmailingList();
@@ -2178,7 +2106,7 @@ function renderEmailingTableInner(){
   if(list.length===0) return emptyState('✉','Aucun client trouvé','Ajustez votre recherche ou vos filtres.');
   const allChecked = list.length>0 && list.every(c=>ui.emailingSelected[c.id]);
   return `
-    <div class="table-wrap"><table data-resize-key="emailing">
+    <div class="table-wrap"><table>
       <thead><tr>
         <th style="width:36px;"><input type="checkbox" ${allChecked?'checked':''} onchange="toggleEmailingSelectAll(this.checked)"></th>
         <th>Client</th><th>Société</th><th>Email principal</th><th>Autres contacts</th>
@@ -2416,7 +2344,7 @@ function renderClientsTableInner(){
   }).join('');
 
   return `
-    <div class="table-wrap"><table data-resize-key="clients">
+    <div class="table-wrap"><table>
       <thead><tr>
         <th style="width:36px;"><input type="checkbox" ${allChecked?'checked':''} onchange="toggleClientSelectAll(this.checked)"></th>
         <th>Société</th>
@@ -2430,7 +2358,7 @@ function renderClientsTableInner(){
 }
 function updateClientsTableOnly(){
   const wrap = document.getElementById('clientsTableWrap');
-  if(wrap){ wrap.innerHTML = renderClientsTableInner(); initResizers(wrap); }
+  if(wrap) wrap.innerHTML = renderClientsTableInner();
 }
 
 let clientDraftContacts = [];
@@ -2491,7 +2419,7 @@ function openClientForm(id){
 
       <div class="section-title">Remise tarif par défaut <span class="helper" style="display:inline;">(appliquée automatiquement aux lignes de devis pour ce client, sauf si une liste de prix nets s'applique)</span></div>
       <div class="table-wrap lines-table">
-        <table data-resize-key="client-remises">
+        <table>
           <thead><tr><th style="width:180px;">Marque</th><th style="width:180px;">Famille article</th><th>Remise 1 (%)</th><th>Remise 2 (%)</th><th>Remise 3 (%)</th><th></th></tr></thead>
           <tbody id="clientRemisesBody">${clientRemisesRowsHtml()}</tbody>
         </table>
@@ -2501,7 +2429,7 @@ function openClientForm(id){
       <div class="section-title">Personnes à contacter chez le client</div>
       ${datalistHtml('dl_fonctionsContacts','fonctionsContacts')}
       <div class="table-wrap lines-table">
-        <table class="contacts-sheet" data-resize-key="client-contacts">
+        <table class="contacts-sheet">
           <thead><tr><th style="width:90px;">Civilité</th><th>Nom</th><th>Prénom</th><th>Fonction</th><th>Téléphone</th><th>Portable</th><th>Email</th><th>Commentaire</th><th style="width:70px;">Inactif</th><th></th></tr></thead>
           <tbody id="clientContactsBody">${clientContactsRowsHtml()}</tbody>
         </table>
@@ -2739,7 +2667,7 @@ function openClientDetail(id){
 
       <div class="section-title">Devis</div>
       ${devisList.length===0?'<div class="helper">Aucun devis pour ce client.</div>':`
-      <div class="table-wrap"><table data-resize-key="client-devis">
+      <div class="table-wrap"><table>
         <thead><tr><th>N°</th><th>Date</th><th>Statut</th><th>Total HT</th><th></th></tr></thead>
         <tbody>${devisList.map(d=>`
           <tr>
@@ -3560,7 +3488,7 @@ function renderCommerciauxTableInner(){
   const list = filteredCommerciaux();
   if(list.length===0) return emptyState('♟','Aucun commercial','Ajoutez les commerciaux de votre équipe pour pouvoir les rattacher à vos clients.');
   return `
-    <div class="table-wrap"><table data-resize-key="commerciaux">
+    <div class="table-wrap"><table>
       <thead><tr>
         <th>Code</th><th>Nom</th><th>Ville</th><th>Téléphone</th><th>Email</th><th style="width:70px;"></th><th></th>
       </tr></thead>
@@ -3584,7 +3512,7 @@ function renderCommerciauxTableInner(){
 }
 function updateCommerciauxTableOnly(){
   const wrap = document.getElementById('commerciauxTableWrap');
-  if(wrap){ wrap.innerHTML = renderCommerciauxTableInner(); initResizers(wrap); }
+  if(wrap) wrap.innerHTML = renderCommerciauxTableInner();
 }
 function openCommercialForm(id){
   const cm = id ? state.commerciaux.find(x=>x.id===id) : null;
@@ -3765,7 +3693,7 @@ function renderTarifsDetail(){
 }
 function updateTarifsTableOnly(){
   const wrap = document.getElementById('tarifsTableWrap');
-  if(wrap){ wrap.innerHTML = renderTarifsTableInner(); initResizers(wrap); }
+  if(wrap) wrap.innerHTML = renderTarifsTableInner();
 }
 function filteredTarifs(){
   let list = getSortedTarifs(); // déjà trié une seule fois (comparateur rapide, mis en cache)
@@ -3781,6 +3709,141 @@ function margeInfo(t){
   const pct = distrib>0 ? (amount/distrib*100) : 0;
   return { amount, pct, has: !!(distrib||conseille) };
 }
+/* ============================= COLONNES PERSONNALISABLES (largeur + ordre) ============================= */
+/* Système générique réutilisable pour rendre les tableaux redimensionnables (glisser le bord d'un
+   en-tête) et réordonnables (glisser-déposer un en-tête). Les préférences sont mémorisées par tableau
+   (state.settings.columnPrefs[tableId]) et persistées comme le reste des paramètres. */
+function getColumnOrder(tableId, defaultCols){
+  const stored = state.settings.columnPrefs && state.settings.columnPrefs[tableId];
+  const byKey = {}; defaultCols.forEach(c=>byKey[c.key]=c);
+  if(!stored || !stored.length) return defaultCols.map(c=>({key:c.key, width:c.defaultWidth}));
+  const merged = stored.filter(s=>byKey[s.key]).map(s=>({key:s.key, width:s.width||byKey[s.key].defaultWidth}));
+  defaultCols.forEach(c=>{ if(!merged.some(m=>m.key===c.key)) merged.push({key:c.key, width:c.defaultWidth}); });
+  return merged;
+}
+function resetColumnPrefs(tableId){
+  if(state.settings.columnPrefs) delete state.settings.columnPrefs[tableId];
+  persist('settings');
+  render();
+}
+function renderCustomizableTable(tableId, defaultCols, rows, opts){
+  opts = opts || {};
+  const visibleDefaultCols = defaultCols.filter(c=> !c.showIf || c.showIf());
+  const order = getColumnOrder(tableId, visibleDefaultCols);
+  const byKey = {}; visibleDefaultCols.forEach(c=>byKey[c.key]=c);
+  const cols = order.filter(o=>byKey[o.key]).map(o=>({...byKey[o.key], width:o.width||byKey[o.key].defaultWidth}));
+  visibleDefaultCols.forEach(c=>{ if(!cols.some(x=>x.key===c.key)) cols.push({...c, width:c.defaultWidth}); });
+  const leading = opts.leadingCols || [];
+
+  const colgroup = `<colgroup>${leading.map(lc=>`<col style="width:${lc.width||36}px;">`).join('')}${cols.map(c=>`<col style="width:${c.width}px;">`).join('')}${opts.actionsCol?`<col style="width:${opts.actionsWidth||150}px;">`:''}</colgroup>`;
+  const leadingTh = leading.map(lc=>`<th${lc.headClass?` class="${lc.headClass}"`:''}>${lc.head||''}</th>`).join('');
+  const thead = `<thead><tr>${leadingTh}${cols.map(c=>`
+    <th class="col-th" draggable="true" data-table="${tableId}" data-key="${c.key}"
+        ondragstart="colDragStart(event)" ondragover="colDragOver(event)" ondragleave="colDragLeave(event)" ondrop="colDrop(event)" ondragend="colDragEnd(event)"
+        title="Glisser pour réordonner">
+      <span class="col-th-label">${escapeHtml(c.label)}</span>
+      <span class="col-resize-handle" draggable="false" onmousedown="startColResize(event,'${tableId}')" title="Glisser pour redimensionner"></span>
+    </th>`).join('')}${opts.actionsCol?'<th></th>':''}</tr></thead>`;
+
+  const tbody = `<tbody>${rows.map(row=>{
+    const leadingTd = leading.map(lc=>`<td${lc.onClick?` onclick="${lc.onClick}"`:''}>${lc.cell(row)}</td>`).join('');
+    const dataCells = cols.map(c=>{
+      const cls = (typeof c.cellClass==='function' ? c.cellClass(row) : c.cellClass) || '';
+      const style = (typeof c.cellStyle==='function' ? c.cellStyle(row) : c.cellStyle) || '';
+      const tdClick = (typeof c.tdOnClick==='function' ? c.tdOnClick(row) : c.tdOnClick) || '';
+      return `<td${cls?` class="${cls}"`:''}${style?` style="${style}"`:''}${tdClick?` onclick="${tdClick}"`:''}>${c.cell(row)}</td>`;
+    }).join('');
+    const actionsTd = opts.actionsCol ? `<td class="table-actions"${opts.actionsOnClick?` onclick="${opts.actionsOnClick}"`:''}>${opts.actionsCol(row)}</td>` : '';
+    const afterRowHtml = (typeof opts.afterRow==='function') ? (opts.afterRow(row)||'') : '';
+    return `<tr${opts.rowAttrs?` ${opts.rowAttrs(row)}`:''}>${leadingTd}${dataCells}${actionsTd}</tr>${afterRowHtml}`;
+  }).join('')}</tbody>`;
+
+  return `<div class="table-wrap"><table class="col-custom-table">${colgroup}${thead}${tbody}</table></div>
+  <button class="btn btn-sm btn-ghost" style="margin-top:8px;" onclick="resetColumnPrefs('${tableId}')">↺ Réinitialiser les colonnes de ce tableau</button>`;
+}
+
+/* ---- Redimensionnement (glisser le bord droit d'un en-tête) ---- */
+let colResizeState = null;
+function startColResize(evt, tableId){
+  evt.stopPropagation(); evt.preventDefault();
+  const th = evt.target.closest('th');
+  const table = th.closest('table');
+  const idx = Array.from(th.parentElement.children).indexOf(th);
+  const col = table.querySelectorAll('colgroup col')[idx];
+  if(!col) return;
+  colResizeState = { tableId, key: th.dataset.key, startX: evt.clientX, startWidth: col.offsetWidth, col };
+  document.addEventListener('mousemove', onColResizeMove);
+  document.addEventListener('mouseup', onColResizeEnd);
+}
+function onColResizeMove(evt){
+  if(!colResizeState) return;
+  const delta = evt.clientX - colResizeState.startX;
+  const newWidth = Math.max(60, colResizeState.startWidth + delta);
+  colResizeState.col.style.width = newWidth+'px';
+  colResizeState.newWidth = newWidth;
+}
+function onColResizeEnd(){
+  if(!colResizeState) return;
+  document.removeEventListener('mousemove', onColResizeMove);
+  document.removeEventListener('mouseup', onColResizeEnd);
+  const { tableId, key, newWidth } = colResizeState;
+  if(newWidth){
+    state.settings.columnPrefs = state.settings.columnPrefs || {};
+    const order = state.settings.columnPrefs[tableId] || [];
+    const existing = order.find(o=>o.key===key);
+    if(existing) existing.width = newWidth; else order.push({key, width:newWidth});
+    state.settings.columnPrefs[tableId] = order;
+    persist('settings');
+  }
+  colResizeState = null;
+}
+
+/* ---- Réordonnancement (glisser-déposer un en-tête entier) ---- */
+let colDragKey = null;
+function colDragStart(evt){
+  colDragKey = evt.currentTarget.dataset.key;
+  evt.dataTransfer.effectAllowed = 'move';
+  try{ evt.dataTransfer.setData('text/plain', colDragKey); }catch(e){}
+}
+function colDragOver(evt){
+  evt.preventDefault();
+  evt.dataTransfer.dropEffect = 'move';
+  evt.currentTarget.classList.add('col-th-dragover');
+}
+function colDragLeave(evt){
+  evt.currentTarget.classList.remove('col-th-dragover');
+}
+function colDrop(evt){
+  evt.preventDefault();
+  evt.currentTarget.classList.remove('col-th-dragover');
+  const tableId = evt.currentTarget.dataset.table;
+  const targetKey = evt.currentTarget.dataset.key;
+  if(!colDragKey || colDragKey===targetKey){ colDragKey=null; return; }
+  const table = evt.currentTarget.closest('table');
+  const ths = Array.from(table.querySelectorAll('th[data-key]'));
+  const existingPrefs = (state.settings.columnPrefs && state.settings.columnPrefs[tableId]) || [];
+  const order = ths.map(th=>{
+    const k = th.dataset.key;
+    const found = existingPrefs.find(o=>o.key===k);
+    return { key:k, width: found ? found.width : th.offsetWidth };
+  });
+  const fromIdx = order.findIndex(o=>o.key===colDragKey);
+  const toIdx = order.findIndex(o=>o.key===targetKey);
+  if(fromIdx>=0 && toIdx>=0){
+    const [moved] = order.splice(fromIdx,1);
+    order.splice(toIdx,0,moved);
+    state.settings.columnPrefs = state.settings.columnPrefs || {};
+    state.settings.columnPrefs[tableId] = order;
+    persist('settings');
+  }
+  colDragKey = null;
+  render();
+}
+function colDragEnd(evt){
+  colDragKey = null;
+  document.querySelectorAll('.col-th-dragover').forEach(el=>el.classList.remove('col-th-dragover'));
+}
+
 function renderTarifsTableInner(){
   const list = filteredTarifs(); // déjà trié par référence (voir getSortedTarifs)
   const showBrandCol = ui.tarifsBrandFilter==='all';
@@ -3808,7 +3871,7 @@ function renderTarifsTableInner(){
   `;
   return `
     ${pager}
-    <div class="table-wrap"><table data-resize-key="tarifs">
+    <div class="table-wrap"><table>
       <thead><tr>
         ${showBrandCol?'<th>Marque</th>':''}
         <th>Référence</th><th>Désignation</th><th>Prix Catalogue</th>
@@ -3901,7 +3964,7 @@ function renderListesPrixNets(){
           ${listes.length===0?'<span class="helper">Aucune liste pour cette marque — cliquez pour en créer une.</span>':listes.map(l=>{
             const nb = countsByListe.get(l.id)||0;
             const nbC = pnAssignedClientsForListe(l.id).length;
-            return `<span class="chip" style="background:${brandColor(b.id)};cursor:pointer;" onclick="event.stopPropagation(); ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();" title="${nb} référence(s) · ${nbC} client(s)${listeDatesRangeLabel(l)?' · '+listeDatesRangeLabel(l):''}"><span class="sq"></span>${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</span>`;
+            return `<span class="chip" style="background:var(--surface-2);color:var(--ink-soft);border:1px solid var(--line);cursor:pointer;" onclick="event.stopPropagation(); ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();" title="${nb} référence(s) · ${nbC} client(s)${listeDatesRangeLabel(l)?' · '+listeDatesRangeLabel(l):''}"><span class="sq" style="background:${brandColor(b.id)};"></span>${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</span>`;
           }).join('')}
         </div>
       </div>`;
@@ -4139,7 +4202,7 @@ function renderListesPrixNetsTableInner(){
   const capped = list.slice(0,RENDER_CAP);
   if(list.length===0) return emptyState('▥','Aucune référence','Ajoutez une référence ou importez un fichier Excel/CSV.');
   return `
-    <div class="table-wrap"><table data-resize-key="listesprixnets">
+    <div class="table-wrap"><table>
       <thead><tr>
         ${showBrandCol?'<th>Marque</th>':''}
         <th>Référence</th><th>Désignation</th><th>Prix Net</th>
@@ -4169,7 +4232,7 @@ function renderListesPrixNetsTableInner(){
 }
 function updateListesPrixNetsTableOnly(){
   const wrap = document.getElementById('pnTableWrap');
-  if(wrap){ wrap.innerHTML = renderListesPrixNetsTableInner(); initResizers(wrap); }
+  if(wrap) wrap.innerHTML = renderListesPrixNetsTableInner();
 }
 function renderListesPrixNetsTable(){
   render();
@@ -4729,7 +4792,7 @@ function renderRechercheResultsInner(results,q){
   if(!q) return `<div class="helper" style="text-align:center;padding:40px;">Commencez à taper pour rechercher parmi ${state.tarifs.length} références.</div>`;
   if(results.length===0) return emptyState('⌕','Aucun résultat','Aucune référence ne correspond à cette recherche.');
   return `
-    <div class="table-wrap card"><table data-resize-key="recherche">
+    <div class="table-wrap card"><table>
       <thead><tr><th>Marque</th><th>Référence</th><th>Désignation</th><th>Prix HT</th></tr></thead>
       <tbody>
         ${results.map(t=>`
@@ -4748,9 +4811,7 @@ function renderRechercheResultsInner(results,q){
 function renderRechercheResults(){
   const q = ui.rechercheQuery.trim().toLowerCase();
   const results = q ? state.tarifs.filter(t=>(t.reference+' '+(t.designation||'')).toLowerCase().includes(q)).slice(0,200) : [];
-  const box = document.getElementById('rechercheResults');
-  box.innerHTML = renderRechercheResultsInner(results,q);
-  initResizers(box);
+  document.getElementById('rechercheResults').innerHTML = renderRechercheResultsInner(results,q);
 }
 
 /* ============================= PARAMETRES ============================= */
@@ -4884,7 +4945,7 @@ function renderParamListPanel(){
       <button class="btn btn-sm btn-primary" onclick="openParamItemForm('${def.key}')">+ Ajouter</button>
     </div>
     ${items.length===0?`<div class="helper" style="padding:14px 0;">Aucun élément pour l'instant.</div>`:`
-    <div class="table-wrap"><table data-resize-key="param-list">
+    <div class="table-wrap"><table>
       <thead><tr><th>Code</th><th>Libellé</th>${hasBrand?'<th>Marque</th>':''}${hasFamille?'<th>Famille</th>':''}<th></th></tr></thead>
       <tbody>
         ${items.map(it=>`
@@ -5114,7 +5175,7 @@ function renderDevis(){
 }
 function updateDevisListOnly(){
   const wrap = document.getElementById('devisListWrap');
-  if(wrap){ wrap.innerHTML = renderDevisListInner(); initResizers(wrap); }
+  if(wrap) wrap.innerHTML = renderDevisListInner();
 }
 
 /* ============================= IMPORT DEVIS (Excel / CSV) ============================= */
@@ -5347,7 +5408,7 @@ function renderDevisListInner(){
   list.sort((a,b)=>b.date.localeCompare(a.date) || b.number.localeCompare(a.number));
   if(list.length===0) return emptyState('▧','Aucun devis','Créez votre premier devis à partir de vos listes de prix.');
   return `
-  <div class="card table-wrap"><table data-resize-key="devis">
+  <div class="card table-wrap"><table>
     <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Marque(s)</th><th>Total HT</th><th>Apporteur</th><th>Statut</th></tr></thead>
     <tbody>
       ${list.map(d=>{
@@ -5518,15 +5579,17 @@ function renderCommissionsTop5(){
   `;
   return `
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:22px;">
-    <div class="card card-pad" data-resize-card="commissions-top5-ca">
+    <div class="card card-pad" style="${getCardHeight('commissions','top5-ca')?`height:${getCardHeight('commissions','top5-ca')}px;overflow:auto;`:''}">
       <h3 style="margin:0 0 3px;font-size:14.5px;">🏆 Top 5 marques — CA</h3>
       <div class="helper" style="margin-bottom:12px;">${periodLabel}</div>
       ${renderList(topCa, 'ca', 'var(--accent)')}
+      ${cardResizeHandleHtml('commissions','top5-ca')}
     </div>
-    <div class="card card-pad" data-resize-card="commissions-top5-commission">
+    <div class="card card-pad" style="${getCardHeight('commissions','top5-commission')?`height:${getCardHeight('commissions','top5-commission')}px;overflow:auto;`:''}">
       <h3 style="margin:0 0 3px;font-size:14.5px;">🏆 Top 5 marques — Commission</h3>
       <div class="helper" style="margin-bottom:12px;">${periodLabel}</div>
       ${renderList(topCommission, 'commission', 'var(--success)')}
+      ${cardResizeHandleHtml('commissions','top5-commission')}
     </div>
   </div>
   `;
@@ -5580,12 +5643,12 @@ function renderCommissions(){
     </div>
   </div>
   ${renderCommissionsTop5()}
-  <div class="card" data-resize-card="commissions-table">${renderCommissionsTableInner()}</div>
+  <div class="card" style="${getCardHeight('commissions','table')?`height:${getCardHeight('commissions','table')}px;overflow:auto;`:''}" id="commissionsTableCard">${renderCommissionsTableInner()}${cardResizeHandleHtml('commissions','table')}</div>
   `;
 }
 function updateCommissionsTableOnly(){
   const wrap = document.getElementById('commissionsTableWrap');
-  if(wrap){ wrap.innerHTML = renderCommissionsTableInner(); initResizers(wrap); }
+  if(wrap) wrap.innerHTML = renderCommissionsTableInner();
 }
 function renderCommissionsTableInner(){
   if(state.brands.length===0) return emptyState('%','Aucune marque','Ajoutez vos marques / fournisseurs pour saisir leurs commissions.');
@@ -5604,19 +5667,12 @@ function renderCommissionsTableInner(){
         return sortDir==='asc' ? av-bv : bv-av;
       });
     return `
-      <div class="table-wrap" id="commissionsTableWrap"><table data-resize-key="commissions-month">
-        <thead><tr><th>Marque</th><th>CA (${MOIS_LABELS[month-1]} ${year})</th><th>Montant commission</th><th>Commentaire</th></tr></thead>
-        <tbody>
-          ${rows.map(r=>`
-            <tr>
-              <td><span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span></td>
-              <td><input type="number" step="0.01" min="0" value="${r.entry.ca||''}" placeholder="0" style="max-width:140px;" onchange="setCommissionEntry('${r.b.id}',${year},${month},'ca',this.value); render();"></td>
-              <td><input type="number" step="0.01" min="0" value="${r.entry.commission||''}" placeholder="0" style="max-width:140px;font-weight:700;color:var(--success);" onchange="setCommissionEntry('${r.b.id}',${year},${month},'commission',this.value); render();"></td>
-              <td><input type="text" value="${escapeHtml(r.entry.commentaire||'')}" placeholder="—" onchange="setCommissionComment('${r.b.id}',${year},${month},this.value);"></td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table></div>
+      <div id="commissionsTableWrap">${renderCustomizableTable('commissionsMonth', [
+        {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
+        {key:'ca', label:`CA (${MOIS_LABELS[month-1]} ${year})`, defaultWidth:150, cell:r=>`<input type="number" step="0.01" min="0" value="${r.entry.ca||''}" placeholder="0" style="max-width:140px;" onchange="setCommissionEntry('${r.b.id}',${year},${month},'ca',this.value); render();">`},
+        {key:'commission', label:'Montant commission', defaultWidth:170, cell:r=>`<input type="number" step="0.01" min="0" value="${r.entry.commission||''}" placeholder="0" style="max-width:140px;font-weight:700;color:var(--success);" onchange="setCommissionEntry('${r.b.id}',${year},${month},'commission',this.value); render();">`},
+        {key:'commentaire', label:'Commentaire', defaultWidth:260, cell:r=>`<input type="text" value="${escapeHtml(r.entry.commentaire||'')}" placeholder="—" onchange="setCommissionComment('${r.b.id}',${year},${month},this.value);">`},
+      ], rows)}</div>
     `;
   }
 
@@ -5632,23 +5688,16 @@ function renderCommissionsTableInner(){
       return sortDir==='asc' ? av-bv : bv-av;
     });
     return `
-      <div class="table-wrap" id="commissionsTableWrap"><table data-resize-key="commissions-year">
-        <thead><tr><th>#</th><th>Marque</th><th>CA (${year})</th><th>Montant commission</th><th></th></tr></thead>
-        <tbody>
-          ${rows.map((r,i)=>`
-            <tr>
-              <td class="helper" style="font-weight:700;">${i+1}</td>
-              <td><span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span></td>
-              <td class="num" style="font-weight:600;">${fmtMoney(r.ca)}</td>
-              <td class="num" style="font-weight:700;color:var(--success);">${fmtMoney(r.commission)}</td>
-              <td class="table-actions"><button class="btn btn-sm btn-ghost" onclick="toggleCommissionDetail('${r.b.id}')">${ui.commissionsExpanded[r.b.id]?'Masquer':'Saisir par mois'}</button></td>
-            </tr>
-            ${ui.commissionsExpanded[r.b.id]?`
-            <tr><td></td><td colspan="4" style="padding:0 0 14px 0;">${renderCommissionMonthlyDetail(r.b, year)}</td></tr>
-            `:''}
-          `).join('')}
-        </tbody>
-      </table></div>
+      <div id="commissionsTableWrap">${renderCustomizableTable('commissionsYear', [
+        {key:'rang', label:'#', defaultWidth:50, cellStyle:'font-weight:700;color:var(--muted);', cell:(r)=>String(rows.indexOf(r)+1)},
+        {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
+        {key:'ca', label:`CA (${year})`, defaultWidth:150, cellClass:'num', cellStyle:'font-weight:600;', cell:r=>fmtMoney(r.ca)},
+        {key:'commission', label:'Montant commission', defaultWidth:170, cellClass:'num', cellStyle:'font-weight:700;color:var(--success);', cell:r=>fmtMoney(r.commission)},
+      ], rows, {
+        actionsWidth:150,
+        actionsCol: r=>`<button class="btn btn-sm btn-ghost" onclick="toggleCommissionDetail('${r.b.id}')">${ui.commissionsExpanded[r.b.id]?'Masquer':'Saisir par mois'}</button>`,
+        afterRow: r=> ui.commissionsExpanded[r.b.id] ? `<tr><td colspan="99" style="padding:0 0 14px 20px;border-bottom:none;">${renderCommissionMonthlyDetail(r.b, year)}</td></tr>` : ''
+      })}</div>
     `;
   }
 
@@ -5670,19 +5719,12 @@ function renderCommissionsTableInner(){
   if(rows.length===0) return emptyState('%','Aucune commission saisie','Sélectionnez une année et un mois pour commencer la saisie.');
   return `
     <div class="helper" style="margin-bottom:10px;">Vue cumulée sur toutes les années saisies. Sélectionnez une année pour modifier les montants.</div>
-    <div class="table-wrap" id="commissionsTableWrap"><table data-resize-key="commissions-allyears">
-      <thead><tr><th>#</th><th>Marque</th><th>CA cumulé</th><th>Commission cumulée</th></tr></thead>
-      <tbody>
-        ${rows.map((r,i)=>`
-          <tr>
-            <td class="helper" style="font-weight:700;">${i+1}</td>
-            <td><span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span></td>
-            <td class="num" style="font-weight:600;">${fmtMoney(r.ca)}</td>
-            <td class="num" style="font-weight:700;color:var(--success);">${fmtMoney(r.commission)}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table></div>
+    <div id="commissionsTableWrap">${renderCustomizableTable('commissionsAllYears', [
+      {key:'rang', label:'#', defaultWidth:50, cellStyle:'font-weight:700;color:var(--muted);', cell:(r)=>String(rows.indexOf(r)+1)},
+      {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
+      {key:'ca', label:'CA cumulé', defaultWidth:150, cellClass:'num', cellStyle:'font-weight:600;', cell:r=>fmtMoney(r.ca)},
+      {key:'commission', label:'Commission cumulée', defaultWidth:170, cellClass:'num', cellStyle:'font-weight:700;color:var(--success);', cell:r=>fmtMoney(r.commission)},
+    ], rows)}</div>
   `;
 }
 function toggleCommissionDetail(brandId){
@@ -5834,7 +5876,7 @@ function openPriceHistoryModal(reference, scope){
     <div class="modal-body">
       <div class="helper" style="margin-bottom:10px;">Pour ${historyScopeLabel(scope)} — ${rows.length} ligne(s) trouvée(s) sur les devis existants.</div>
       ${rows.length===0?'<div class="helper">Aucun historique trouvé pour cette référence dans ce périmètre.</div>':`
-      <div class="table-wrap"><table data-resize-key="price-history">
+      <div class="table-wrap"><table>
         <thead><tr><th>Date</th><th>N° devis</th><th>Statut</th><th>Client</th><th>Qté</th><th>PU Tarif</th><th>Prix d'achat HT</th><th>Prix de vente HT</th></tr></thead>
         <tbody>${rows.map(r=>`
           <tr>
@@ -5960,7 +6002,7 @@ function devisFormHtml(){
       </div>
       <div class="helper" style="margin-top:-8px;margin-bottom:12px;">Cliquer sur la désignation de la référence concernée puis : <strong>F3</strong> historique prix (ce client) · <strong>F4</strong> (département) · <strong>F5</strong> (tous les clients) · <strong>F6</strong> (famille / sous-famille)</div>
       <div class="table-wrap lines-table">
-        <table data-resize-key="devis-lines">
+        <table>
           <thead><tr>
             <th style="width:80px;">Marque</th><th style="width:70px;">Code article</th><th style="text-align:center;">Désignation</th>
             <th style="width:110px;">Qté</th><th style="width:110px;">PU Tarif</th>
@@ -6571,7 +6613,7 @@ function openDevisHistoryModal(){
   });
   timeline.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
   const timelineHtml = timeline.length===0 ? `<div class="helper">Aucun journal détaillé disponible pour ce devis (créé avant l'activation de cette fonctionnalité).</div>` : `
-    <div class="table-wrap"><table data-resize-key="devis-journal">
+    <div class="table-wrap"><table>
       <thead><tr><th style="width:180px;">Date et heure</th><th style="width:110px;">Version</th><th>Évènement</th></tr></thead>
       <tbody>
         ${timeline.map(h=>`<tr>
@@ -6588,7 +6630,7 @@ function openDevisHistoryModal(){
     <div class="modal-body">
       <div class="section-title">Versions</div>
       <div class="helper" style="margin-bottom:14px;">${versions.length} version${versions.length>1?'s':''} enregistrée${versions.length>1?'s':''} pour ce document${versions.length>1?' — la plus récente est celle à privilégier pour l\'envoi au client':''}.</div>
-      <div class="table-wrap"><table data-resize-key="devis-versions">
+      <div class="table-wrap"><table>
         <thead><tr><th>Numéro</th><th>Date</th><th>Client</th><th>Statut</th><th>Total HT</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
@@ -7303,6 +7345,153 @@ function computeRapportData(brandId, year, month){
   const commissionData = commissionForBrandPeriod(brandId, year, month);
   return {devisForBrand, enCours, gagnes, perdus, montantEnCours, montantGagne, montantPerdu, meetings, lineAmount, commissionData};
 }
+/* ============================= DISPOSITION LIBRE DES CARTES DU RAPPORT ============================= */
+const RAPPORT_WIDGET_DEFAULTS = {
+  'kpi-ca':          {x:0,   y:0,   w:210, h:100},
+  'kpi-encours':     {x:220, y:0,   w:210, h:100},
+  'kpi-gagnes':      {x:440, y:0,   w:210, h:100},
+  'kpi-perdus':      {x:660, y:0,   w:210, h:100},
+  'kpi-commissions': {x:0,   y:110, w:440, h:100},
+  'kpi-rdv':         {x:450, y:110, w:210, h:100},
+  'sec-encours':     {x:0,   y:220, w:880, h:280},
+  'sec-gagnes':      {x:0,   y:510, w:880, h:280},
+  'sec-perdus':      {x:0,   y:800, w:880, h:280},
+  'sec-rdv':         {x:0,   y:1090,w:880, h:320},
+};
+function getRapportLayout(){
+  const stored = state.settings.rapportLayout || {};
+  const layout = {};
+  Object.keys(RAPPORT_WIDGET_DEFAULTS).forEach(k=>{
+    layout[k] = Object.assign({}, RAPPORT_WIDGET_DEFAULTS[k], stored[k]||{});
+  });
+  return layout;
+}
+function saveRapportWidget(id, patch){
+  state.settings.rapportLayout = state.settings.rapportLayout || {};
+  state.settings.rapportLayout[id] = Object.assign({}, state.settings.rapportLayout[id]||{}, patch);
+  persist('settings');
+}
+function resetRapportLayout(){
+  state.settings.rapportLayout = {};
+  persist('settings');
+  render();
+}
+/* ---- Redimensionnement générique de la hauteur d'une carte (Tableau de bord, Commissions) ---- */
+let cardResizeState = null;
+function startCardHeightResize(evt, kind, id){
+  evt.preventDefault(); evt.stopPropagation();
+  const card = evt.target.closest('.card');
+  if(!card) return;
+  cardResizeState = { kind, id, startY: evt.clientY, startHeight: card.offsetHeight, card };
+  document.addEventListener('mousemove', onCardHeightResizeMove);
+  document.addEventListener('mouseup', onCardHeightResizeEnd);
+}
+function onCardHeightResizeMove(evt){
+  if(!cardResizeState) return;
+  const dh = evt.clientY - cardResizeState.startY;
+  const newHeight = Math.max(80, cardResizeState.startHeight + dh);
+  cardResizeState.card.style.height = newHeight+'px';
+  cardResizeState.card.style.overflow = 'auto';
+  cardResizeState.newHeight = newHeight;
+}
+function onCardHeightResizeEnd(){
+  if(!cardResizeState) return;
+  document.removeEventListener('mousemove', onCardHeightResizeMove);
+  document.removeEventListener('mouseup', onCardHeightResizeEnd);
+  const { kind, id, newHeight } = cardResizeState;
+  if(newHeight!=null){
+    if(kind==='dashboard'){
+      if(!state.dashboardLayout.heights) state.dashboardLayout.heights = {};
+      state.dashboardLayout.heights[id] = newHeight;
+      persist('dashboardLayout');
+    } else {
+      state.settings.cardHeights = state.settings.cardHeights || {};
+      state.settings.cardHeights[kind+':'+id] = newHeight;
+      persist('settings');
+    }
+  }
+  cardResizeState = null;
+}
+function cardResizeHandleHtml(kind, id){
+  return `<span class="card-resize-handle" onmousedown="startCardHeightResize(event,'${kind}','${id}')" title="Glisser pour redimensionner la hauteur"></span>`;
+}
+function getCardHeight(kind, id){
+  return (state.settings.cardHeights && state.settings.cardHeights[kind+':'+id]) || null;
+}
+
+function renderRapportWidget(id, layout, label, bodyHtml){
+  const l = layout[id];
+  return `
+  <div class="rapport-widget" id="widget-${id}" style="left:${l.x}px; top:${l.y}px; width:${l.w}px; height:${l.h}px;">
+    <div class="rapport-widget-drag" onmousedown="startWidgetDrag(event,'${id}')" title="Glisser pour déplacer">${escapeHtml(label)}</div>
+    <div class="rapport-widget-body">${bodyHtml}</div>
+    <div class="rapport-widget-resize" onmousedown="startWidgetResize(event,'${id}')" title="Glisser pour redimensionner"></div>
+  </div>`;
+}
+let widgetDragState = null;
+function startWidgetDrag(evt, id){
+  evt.preventDefault(); evt.stopPropagation();
+  const el = document.getElementById('widget-'+id);
+  widgetDragState = { id, startX:evt.clientX, startY:evt.clientY, startLeft:el.offsetLeft, startTop:el.offsetTop, el };
+  document.addEventListener('mousemove', onWidgetDragMove);
+  document.addEventListener('mouseup', onWidgetDragEnd);
+}
+function onWidgetDragMove(evt){
+  if(!widgetDragState) return;
+  const dx = evt.clientX - widgetDragState.startX;
+  const dy = evt.clientY - widgetDragState.startY;
+  const newLeft = Math.max(0, widgetDragState.startLeft + dx);
+  const newTop = Math.max(0, widgetDragState.startTop + dy);
+  widgetDragState.el.style.left = newLeft+'px';
+  widgetDragState.el.style.top = newTop+'px';
+  widgetDragState.newLeft = newLeft; widgetDragState.newTop = newTop;
+  updateRapportCanvasHeight();
+}
+function onWidgetDragEnd(){
+  if(!widgetDragState) return;
+  document.removeEventListener('mousemove', onWidgetDragMove);
+  document.removeEventListener('mouseup', onWidgetDragEnd);
+  const { id, newLeft, newTop } = widgetDragState;
+  if(newLeft!=null) saveRapportWidget(id, {x:newLeft, y:newTop});
+  widgetDragState = null;
+}
+let widgetResizeState = null;
+function startWidgetResize(evt, id){
+  evt.preventDefault(); evt.stopPropagation();
+  const el = document.getElementById('widget-'+id);
+  widgetResizeState = { id, startX:evt.clientX, startY:evt.clientY, startW:el.offsetWidth, startH:el.offsetHeight, el };
+  document.addEventListener('mousemove', onWidgetResizeMove);
+  document.addEventListener('mouseup', onWidgetResizeEnd);
+}
+function onWidgetResizeMove(evt){
+  if(!widgetResizeState) return;
+  const dw = evt.clientX - widgetResizeState.startX;
+  const dh = evt.clientY - widgetResizeState.startY;
+  const newW = Math.max(180, widgetResizeState.startW + dw);
+  const newH = Math.max(90, widgetResizeState.startH + dh);
+  widgetResizeState.el.style.width = newW+'px';
+  widgetResizeState.el.style.height = newH+'px';
+  widgetResizeState.newW = newW; widgetResizeState.newH = newH;
+  updateRapportCanvasHeight();
+}
+function onWidgetResizeEnd(){
+  if(!widgetResizeState) return;
+  document.removeEventListener('mousemove', onWidgetResizeMove);
+  document.removeEventListener('mouseup', onWidgetResizeEnd);
+  const { id, newW, newH } = widgetResizeState;
+  if(newW!=null) saveRapportWidget(id, {w:newW, h:newH});
+  widgetResizeState = null;
+}
+function updateRapportCanvasHeight(){
+  const canvas = document.getElementById('rapportCanvas');
+  if(!canvas) return;
+  let maxBottom = 0;
+  canvas.querySelectorAll('.rapport-widget').forEach(el=>{
+    maxBottom = Math.max(maxBottom, el.offsetTop + el.offsetHeight);
+  });
+  canvas.style.height = (maxBottom+30)+'px';
+}
+
 function renderRapport(){
   if(state.brands.length===0){
     return `<div class="topbar"><div><h1>Rapport</h1><div class="sub">Synthèse d'activité par marque</div></div></div>${emptyState('▩',"Ajoutez d'abord une marque","Le rapport se construit marque par marque.")}`;
@@ -7312,10 +7501,12 @@ function renderRapport(){
   if(!ui.rapportYear || !years.includes(ui.rapportYear)) ui.rapportYear = years[0] || new Date().getFullYear();
   const data = computeRapportData(ui.rapportBrand, ui.rapportYear, ui.rapportMonth);
   const periodLabel = ui.rapportMonth ? `${MOIS_LABELS[ui.rapportMonth-1]} ${ui.rapportYear}` : `Année ${ui.rapportYear}`;
+  const layout = getRapportLayout();
   return `
   <div class="topbar">
     <div><h1>Rapport</h1><div class="sub">Synthèse d'activité par marque, par mois ou par année — ${escapeHtml(periodLabel)}</div></div>
     <div style="display:flex;gap:8px;">
+      <button class="btn btn-sm btn-ghost" onclick="resetRapportLayout()" title="Remettre les cartes à leur position et taille d'origine">↺ Réinitialiser la disposition</button>
       <button class="btn" onclick="openRapportPdfOptionsModal('preview')">Aperçu PDF</button>
       <button class="btn" onclick="openRapportPdfOptionsModal('download')">Télécharger PDF</button>
       <button class="btn btn-primary" onclick="openRapportPdfOptionsModal('send')">Envoyer par email</button>
@@ -7342,31 +7533,26 @@ function renderRapport(){
       </select>
     </div>
   </div>
+  <div class="helper" style="margin-bottom:10px;">Glissez l'en-tête d'une carte pour la déplacer, ou son coin inférieur droit pour la redimensionner — la disposition est mémorisée automatiquement.</div>
 
-  <div class="grid grid-4" style="margin-bottom:12px;">
-    <div class="card kpi"><div class="label">CA gagné (devis)</div><div class="value num">${fmtMoney(data.montantGagne)}</div></div>
-    <div class="card kpi"><div class="label">Devis en cours</div><div class="value num">${data.enCours.length}</div><div class="delta">${fmtMoney(data.montantEnCours)}</div></div>
-    <div class="card kpi"><div class="label">Devis gagnés</div><div class="value num">${data.gagnes.length}</div></div>
-    <div class="card kpi"><div class="label">Devis perdus</div><div class="value num">${data.perdus.length}</div><div class="delta">${fmtMoney(data.montantPerdu)}</div></div>
+  <div class="rapport-canvas" id="rapportCanvas">
+    ${renderRapportWidget('kpi-ca', layout, 'CA gagné', `<div class="label">CA gagné (devis)</div><div class="value num">${fmtMoney(data.montantGagne)}</div>`)}
+    ${renderRapportWidget('kpi-encours', layout, 'Devis en cours', `<div class="label">Devis en cours</div><div class="value num">${data.enCours.length}</div><div class="delta">${fmtMoney(data.montantEnCours)}</div>`)}
+    ${renderRapportWidget('kpi-gagnes', layout, 'Devis gagnés', `<div class="label">Devis gagnés</div><div class="value num">${data.gagnes.length}</div>`)}
+    ${renderRapportWidget('kpi-perdus', layout, 'Devis perdus', `<div class="label">Devis perdus</div><div class="value num">${data.perdus.length}</div><div class="delta">${fmtMoney(data.montantPerdu)}</div>`)}
+    ${renderRapportWidget('kpi-commissions', layout, 'Commissions', `<div class="grid grid-2"><div><div class="label">CA (onglet Commissions)</div><div class="value num">${fmtMoney(data.commissionData.ca)}</div></div><div><div class="label">Commission calculée</div><div class="value num">${fmtMoney(data.commissionData.commission)}</div></div></div>`)}
+    ${renderRapportWidget('kpi-rdv', layout, 'Rendez-vous', `<div class="label">Rendez-vous effectués</div><div class="value num">${data.meetings.length}</div>`)}
+    ${renderRapportWidget('sec-encours', layout, 'Devis en cours — détail', rapportDevisSectionBody(data.enCours, data.lineAmount))}
+    ${renderRapportWidget('sec-gagnes', layout, 'Devis gagnés — détail', rapportDevisSectionBody(data.gagnes, data.lineAmount))}
+    ${renderRapportWidget('sec-perdus', layout, 'Devis perdus — détail', rapportDevisSectionBody(data.perdus, data.lineAmount))}
+    ${renderRapportWidget('sec-rdv', layout, 'Rendez-vous effectués — détail', rapportMeetingsSectionBody(data.meetings))}
   </div>
-  <div class="grid grid-2" style="margin-bottom:12px;max-width:540px;">
-    <div class="card kpi"><div class="label">CA (onglet Commissions)</div><div class="value num">${fmtMoney(data.commissionData.ca)}</div></div>
-    <div class="card kpi"><div class="label">Commission calculée</div><div class="value num">${fmtMoney(data.commissionData.commission)}</div></div>
-  </div>
-  <div class="card kpi" style="max-width:260px;margin-bottom:22px;"><div class="label">Rendez-vous effectués</div><div class="value num">${data.meetings.length}</div></div>
-
-  ${rapportDevisSection('Devis en cours', data.enCours, data.lineAmount)}
-  ${rapportDevisSection('Devis gagnés', data.gagnes, data.lineAmount)}
-  ${rapportDevisSection('Devis perdus', data.perdus, data.lineAmount)}
-  ${rapportMeetingsSection(data.meetings)}
   `;
 }
-function rapportDevisSection(title, list, lineAmount){
+function rapportDevisSectionBody(list, lineAmount){
+  if(list.length===0) return `<div class="helper">Aucun devis dans cette catégorie pour la période sélectionnée.</div>`;
   return `
-  <div class="section-title">${escapeHtml(title)} <span class="helper" style="display:inline;">(${list.length})</span></div>
-  <div class="card" style="margin-bottom:20px;">
-  ${list.length===0?`<div class="helper" style="padding:16px;">Aucun devis dans cette catégorie pour la période sélectionnée.</div>`:`
-  <div class="table-wrap"><table data-resize-key="drilldown-devis">
+  <div class="table-wrap"><table>
     <thead><tr><th>N°</th><th>Date</th><th>Client</th><th>Objet</th><th>Statut</th><th>Montant (marque)</th></tr></thead>
     <tbody>
       ${list.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(d=>`
@@ -7380,15 +7566,14 @@ function rapportDevisSection(title, list, lineAmount){
         </tr>
       `).join('')}
     </tbody>
-  </table></div>`}
-  </div>`;
+  </table></div>`;
 }
 function rapportMeetingsSection(meetings){
   return `
   <div class="section-title">Rendez-vous effectués <span class="helper" style="display:inline;">(${meetings.length})</span></div>
   <div class="card" style="margin-bottom:20px;">
   ${meetings.length===0?`<div class="helper" style="padding:16px;">Aucun rendez-vous enregistré pour la période sélectionnée.</div>`:`
-  <div class="table-wrap"><table data-resize-key="drilldown-rdv">
+  <div class="table-wrap"><table>
     <thead><tr><th style="width:100px;">Date</th><th style="width:130px;">Type</th><th>Client</th><th>Personnes vues</th><th>Tâches</th><th>Compte-rendu</th></tr></thead>
     <tbody>
       ${meetings.map(m=>`
@@ -7699,9 +7884,10 @@ const DASHBOARD_WIDGETS = [
 ];
 const DASH_SIZE_COLS = {sm:1, md:2, lg:4};
 function ensureDashboardLayout(){
-  if(!state.dashboardLayout) state.dashboardLayout = {order:[], sizes:{}};
+  if(!state.dashboardLayout) state.dashboardLayout = {order:[], sizes:{}, heights:{}};
   if(!state.dashboardLayout.order) state.dashboardLayout.order = [];
   if(!state.dashboardLayout.sizes) state.dashboardLayout.sizes = {};
+  if(!state.dashboardLayout.heights) state.dashboardLayout.heights = {};
   const known = new Set(state.dashboardLayout.order);
   DASHBOARD_WIDGETS.forEach(w=>{
     if(!known.has(w.id)) state.dashboardLayout.order.push(w.id);
@@ -7795,7 +7981,7 @@ function renderDashboard(){
     .map(c=>({client:c, ca:clientCaMap[c.id]})).sort((a,b)=>b.ca-a.ca).slice(0,8);
   const topListHtml = (rows) => rows.length===0
     ? '<div class="helper">Aucun devis accepté sur cette période pour ce périmètre.</div>'
-    : `<div class="table-wrap"><table data-resize-key="dash-top-clients">
+    : `<div class="table-wrap"><table>
         <thead><tr><th style="width:36px;">#</th><th>Client</th><th class="num">CA HT</th></tr></thead>
         <tbody>
           ${rows.map((r,i)=>`<tr style="cursor:pointer;" onclick="drillDownClient(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.client.id}')" title="Voir le détail des devis acceptés de ce client">
@@ -7817,7 +8003,7 @@ function renderDashboard(){
     'top-distrib': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients distributeurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (devis acceptés), société de famille Grossiste/Distributeur.</div>${topListHtml(topDistrib)}`,
     'top-install': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients installateurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (devis acceptés), société de famille Installateur.</div>${topListHtml(topInstall)}`,
     'chart-correlation': `<h3 style="margin:0 0 4px 0;font-size:15px;">Corrélation devis réalisés / CA généré</h3><div class="helper" style="margin-bottom:12px;">Par mois sur ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}. Barres : nombre de devis/marchés créés (tous statuts). Ligne : CA généré (devis acceptés).</div><div class="chart-wrap"><canvas id="chartCorrelation"></canvas></div>`,
-    'table-apporteur': `<h3 style="margin:0 0 4px 0;font-size:15px;">Nombre de devis/marchés par marque et par apporteur d'affaire</h3><div class="helper" style="margin-bottom:12px;">Année ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}, tous statuts confondus. Cliquez sur un nombre pour voir le détail.</div>${brandApporteurRows.length===0?'<div class="helper">Aucun devis/marché sur cette période pour ce périmètre.</div>':`<div class="table-wrap"><table data-resize-key="dash-apporteur"><thead><tr><th>Marque</th><th class="num">Agent</th><th class="num">Distributeur</th><th class="num">Non précisé</th><th class="num">Total</th></tr></thead><tbody>${brandApporteurRows.map(r=>`<tr><td style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)"><span class="chip" style="background:${brandColor(r.brand.id)}"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Agent')">${r.agent}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Distributeur')">${r.distrib}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'nonPrecise')">${r.nonPrecise}</td><td class="num" style="font-weight:700;cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)">${r.total}</td></tr>`).join('')}</tbody></table></div>`}`,
+    'table-apporteur': `<h3 style="margin:0 0 4px 0;font-size:15px;">Nombre de devis/marchés par marque et par apporteur d'affaire</h3><div class="helper" style="margin-bottom:12px;">Année ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}, tous statuts confondus. Cliquez sur un nombre pour voir le détail.</div>${brandApporteurRows.length===0?'<div class="helper">Aucun devis/marché sur cette période pour ce périmètre.</div>':`<div class="table-wrap"><table><thead><tr><th>Marque</th><th class="num">Agent</th><th class="num">Distributeur</th><th class="num">Non précisé</th><th class="num">Total</th></tr></thead><tbody>${brandApporteurRows.map(r=>`<tr><td style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)"><span class="chip" style="background:${brandColor(r.brand.id)}"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Agent')">${r.agent}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Distributeur')">${r.distrib}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'nonPrecise')">${r.nonPrecise}</td><td class="num" style="font-weight:700;cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)">${r.total}</td></tr>`).join('')}</tbody></table></div>`}`,
   };
   const dashBlocked = brandFilter==='all' && clientFilter==='all';
   const widgetCardsHtml = state.dashboardLayout.order.map(id=>{
@@ -7840,9 +8026,11 @@ function renderDashboard(){
       styleExtra = 'cursor:pointer;';
       extraAttrs = ` onclick="drillDownAccepted(${y}, '${cmId}', '${brandFilter}', '${clientFilter}')" title="Voir le détail des devis acceptés utilisés pour ce calcul"`;
     }
+    const customHeight = state.dashboardLayout.heights && state.dashboardLayout.heights[id];
+    const heightStyle = customHeight ? `height:${customHeight}px;overflow:auto;` : '';
     return `
-  <div class="card ${extraClass} dash-card" draggable="true" data-widget="${id}" data-resize-card="dash-${id}"
-       style="grid-column:span ${cols};${styleExtra}"
+  <div class="card ${extraClass} dash-card" draggable="true" data-widget="${id}"
+       style="grid-column:span ${cols};${heightStyle}${styleExtra}"
        ondragstart="dashDragStart(event,'${id}')" ondragover="dashDragOver(event)" ondragleave="dashDragLeave(event)" ondrop="dashDrop(event,'${id}')" ondragend="dashDragEnd(event)"${extraAttrs}>
     <div class="dash-card-tools">
       <span class="dash-drag-handle" onclick="event.stopPropagation();" title="Glisser pour déplacer">⠿</span>
@@ -7852,6 +8040,7 @@ function renderDashboard(){
       </span>
     </div>
     ${widgetContent[id]||''}
+    ${cardResizeHandleHtml('dashboard', id)}
   </div>`;
   }).join('');
 
@@ -7878,9 +8067,9 @@ function renderDashboard(){
         ${state.clients.slice().sort((a,b)=>clientSocieteLabel(a.id).localeCompare(clientSocieteLabel(b.id))).map(c=>`<option value="${c.id}" ${clientFilter===c.id?'selected':''}>${escapeHtml(clientSocieteLabel(c.id))}</option>`).join('')}
       </select>
     </div>
-    <button type="button" class="btn btn-sm btn-ghost" onclick="if(confirm('Réinitialiser la disposition du tableau de bord ?')){ state.dashboardLayout={order:[],sizes:{}}; persist('dashboardLayout'); render(); }" title="Réinitialiser l'ordre et la taille des cartes">Réinitialiser la disposition</button>
+    <button type="button" class="btn btn-sm btn-ghost" onclick="if(confirm('Réinitialiser la disposition du tableau de bord ?')){ state.dashboardLayout={order:[],sizes:{},heights:{}}; persist('dashboardLayout'); render(); }" title="Réinitialiser l'ordre, la taille et la hauteur des cartes">Réinitialiser la disposition</button>
   </div>
-  <div class="helper" style="margin-bottom:10px;">Glissez une carte par sa poignée ⠿ pour la déplacer, utilisez − / + pour changer sa taille.</div>
+  <div class="helper" style="margin-bottom:10px;">Glissez une carte par sa poignée ⠿ pour la déplacer, utilisez − / + pour changer sa largeur, ou tirez le coin inférieur droit pour ajuster sa hauteur.</div>
   <div class="dash-grid">${widgetCardsHtml}</div>
   `;
 }
@@ -7936,7 +8125,7 @@ function renderDrillDownModalBody(title, subtitle, list){
     <div class="modal-body">
       ${subtitle?`<div class="helper" style="margin-bottom:14px;">${escapeHtml(subtitle)}</div>`:''}
       ${list.length===0?'<div class="helper">Aucun devis / marché ne correspond à cette sélection.</div>':`
-      <div class="table-wrap"><table data-resize-key="drilldown-apporteur">
+      <div class="table-wrap"><table>
         <thead><tr><th>Numéro</th><th>Date</th><th>Client</th><th>Objet</th><th>Marque(s)</th><th>Apporteur</th><th>Statut</th><th class="num">Total HT</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
