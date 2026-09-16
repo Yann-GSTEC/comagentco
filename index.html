@@ -970,7 +970,10 @@ async function loadAll(){
   }
   // Migration : l'ancien statut de devis "Accepté"/"Refusé" devient l'État de l'affaire, le statut
   // du devis lui-même se limitant désormais au cycle de vie du document (Brouillon / Envoyé).
-  if(!state.settings._migratedStatutsToEtat){
+  // Ce bloc s'exécute à CHAQUE chargement (pas seulement une fois) : il ne fait rien si aucun devis
+  // n'a plus l'ancien statut, donc il est sans risque à rejouer, et il rattrape automatiquement toute
+  // migration qui n'aurait pas pu être enregistrée lors d'un chargement précédent.
+  try{
     const gagnee = (state.paramLists.etatAffaires||[]).find(e=>(e.outcome||'')==='gagnee');
     const perdue = (state.paramLists.etatAffaires||[]).find(e=>(e.outcome||'')==='perdue');
     let migrated = 0;
@@ -986,9 +989,12 @@ async function loadAll(){
       }
       if(d.etatAffaire===undefined) d.etatAffaire = '';
     });
-    state.settings._migratedStatutsToEtat = true;
-    if(migrated>0) persist('devis');
-    persist('settings');
+    if(migrated>0){
+      console.log(`Migration statut → état de l'affaire : ${migrated} devis mis à jour.`);
+      persist('devis');
+    }
+  }catch(e){
+    console.error("Erreur pendant la migration statut → état de l'affaire", e);
   }
   // Réparation : relie rétroactivement les sous-familles déjà créées (sans familleId) aux familles Grossiste / Installateur connues
   if(!state.paramLists._repairedFamilleLinks){
