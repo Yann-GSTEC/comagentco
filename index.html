@@ -7568,11 +7568,9 @@ function rapportDevisSectionBody(list, lineAmount){
     </tbody>
   </table></div>`;
 }
-function rapportMeetingsSection(meetings){
+function rapportMeetingsSectionBody(meetings){
+  if(meetings.length===0) return `<div class="helper">Aucun rendez-vous enregistré pour la période sélectionnée.</div>`;
   return `
-  <div class="section-title">Rendez-vous effectués <span class="helper" style="display:inline;">(${meetings.length})</span></div>
-  <div class="card" style="margin-bottom:20px;">
-  ${meetings.length===0?`<div class="helper" style="padding:16px;">Aucun rendez-vous enregistré pour la période sélectionnée.</div>`:`
   <div class="table-wrap"><table>
     <thead><tr><th style="width:100px;">Date</th><th style="width:130px;">Type</th><th>Client</th><th>Personnes vues</th><th>Tâches</th><th>Compte-rendu</th></tr></thead>
     <tbody>
@@ -7587,8 +7585,7 @@ function rapportMeetingsSection(meetings){
         </tr>
       `).join('')}
     </tbody>
-  </table></div>`}
-  </div>`;
+  </table></div>`;
 }
 async function exportRapportPdf(brandId, year, month, mode, sections){
   sections = sections || ui.rapportSections || {
