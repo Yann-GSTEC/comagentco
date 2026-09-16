@@ -2905,7 +2905,7 @@ function openClientDetail(id){
       <div class="grid grid-3" style="margin-bottom:8px;">
         <div class="card card-pad" style="text-align:center;"><div class="kpi"><div class="label">CA cumulé</div><div class="value num">${fmtMoney(caForClient(id))}</div></div></div>
         <div class="card card-pad" style="text-align:center;"><div class="kpi"><div class="label">Devis</div><div class="value num">${devisList.length}</div></div></div>
-        <div class="card card-pad" style="text-align:center;"><div class="kpi"><div class="label">Acceptés</div><div class="value num">${devisList.filter(d=>isDevisWon(d)).length}</div></div></div>
+        <div class="card card-pad" style="text-align:center;"><div class="kpi"><div class="label">Gagnés</div><div class="value num">${devisList.filter(d=>isDevisWon(d)).length}</div></div></div>
       </div>
       <div style="font-size:12.5px;color:var(--ink-soft);line-height:1.8;margin-bottom:6px;">
         ${(c.adresse1||c.ville)?`<div>⌂ ${escapeHtml([c.adresse1,c.codePostal,c.ville].filter(Boolean).join(' '))}</div>`:''}
@@ -8449,11 +8449,11 @@ function renderDashboard(){
   const topInstall = state.clients.filter(c=>clientFamType(c)==='installateur' && clientCaMap[c.id]>0)
     .map(c=>({client:c, ca:clientCaMap[c.id]})).sort((a,b)=>b.ca-a.ca).slice(0,8);
   const topListHtml = (rows) => rows.length===0
-    ? '<div class="helper">Aucun devis accepté sur cette période pour ce périmètre.</div>'
+    ? '<div class="helper">Aucun devis gagné sur cette période pour ce périmètre.</div>'
     : `<div class="table-wrap"><table>
         <thead><tr><th style="width:36px;">#</th><th>Client</th><th class="num">CA HT</th></tr></thead>
         <tbody>
-          ${rows.map((r,i)=>`<tr style="cursor:pointer;" onclick="drillDownClient(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.client.id}')" title="Voir le détail des devis acceptés de ce client">
+          ${rows.map((r,i)=>`<tr style="cursor:pointer;" onclick="drillDownClient(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.client.id}')" title="Voir le détail des devis gagnés de ce client">
             <td>${i+1}</td>
             <td>${escapeHtml(clientSocieteLabel(r.client.id))}</td>
             <td class="num" style="font-weight:700;">${fmtMoney(r.ca)}</td>
@@ -8464,14 +8464,14 @@ function renderDashboard(){
   ensureDashboardLayout();
   const widgetContent = {
     'kpi-cavva': `<div class="label">CA (VVA) ${y}</div><div class="value num">${fmtMoney(caVvaTotal(y, brandFilter, clientFilter))}</div>`,
-    'kpi-ca': `<div class="label">CA ${y} (devis acceptés)</div><div class="value num">${fmtMoney(caTotal)}</div>`,
+    'kpi-ca': `<div class="label">CA ${y} (devis gagnés)</div><div class="value num">${fmtMoney(caTotal)}</div>`,
     'kpi-encours': `<div class="label">Devis en cours</div><div class="value num">${nbDevisEnCours}</div>`,
     'kpi-panier': `<div class="label">Panier moyen</div><div class="value num">${fmtMoney(panierMoyen)}</div>`,
     'chart-brand': `<h3 style="margin:0 0 14px 0;font-size:15px;">CA par marque</h3><div class="chart-wrap"><canvas id="chartBrand"></canvas></div>`,
     'chart-client': `<h3 style="margin:0 0 14px 0;font-size:15px;">Top clients</h3><div class="chart-wrap"><canvas id="chartClient"></canvas></div>`,
-    'top-distrib': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients distributeurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (devis acceptés), société de famille Grossiste/Distributeur.</div>${topListHtml(topDistrib)}`,
-    'top-install': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients installateurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (devis acceptés), société de famille Installateur.</div>${topListHtml(topInstall)}`,
-    'chart-correlation': `<h3 style="margin:0 0 4px 0;font-size:15px;">Corrélation devis réalisés / CA généré</h3><div class="helper" style="margin-bottom:12px;">Par mois sur ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}. Barres : nombre de devis/marchés créés (tous statuts). Ligne : CA généré (devis acceptés).</div><div class="chart-wrap"><canvas id="chartCorrelation"></canvas></div>`,
+    'top-distrib': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients distributeurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (devis gagnés), société de famille Grossiste/Distributeur.</div>${topListHtml(topDistrib)}`,
+    'top-install': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients installateurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (devis gagnés), société de famille Installateur.</div>${topListHtml(topInstall)}`,
+    'chart-correlation': `<h3 style="margin:0 0 4px 0;font-size:15px;">Corrélation devis réalisés / CA généré</h3><div class="helper" style="margin-bottom:12px;">Par mois sur ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}. Barres : nombre de devis/marchés créés (tous statuts). Ligne : CA généré (devis gagnés).</div><div class="chart-wrap"><canvas id="chartCorrelation"></canvas></div>`,
     'table-apporteur': `<h3 style="margin:0 0 4px 0;font-size:15px;">Nombre de devis/marchés par marque et par apporteur d'affaire</h3><div class="helper" style="margin-bottom:12px;">Année ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}, tous statuts confondus. Cliquez sur un nombre pour voir le détail.</div>${brandApporteurRows.length===0?'<div class="helper">Aucun devis/marché sur cette période pour ce périmètre.</div>':`<div class="table-wrap"><table><thead><tr><th>Marque</th><th class="num">Agent</th><th class="num">Distributeur</th><th class="num">Non précisé</th><th class="num">Total</th></tr></thead><tbody>${brandApporteurRows.map(r=>`<tr><td style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)"><span class="chip" style="background:${brandColor(r.brand.id)}"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Agent')">${r.agent}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Distributeur')">${r.distrib}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'nonPrecise')">${r.nonPrecise}</td><td class="num" style="font-weight:700;cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)">${r.total}</td></tr>`).join('')}</tbody></table></div>`}`,
   };
   const dashBlocked = brandFilter==='all' && clientFilter==='all';
@@ -8487,13 +8487,13 @@ function renderDashboard(){
       extraAttrs = ` onclick="openCaVvaModal(${y}, '${brandFilter}', '${clientFilter}')" title="${dashBlocked?'Sélectionnez une marque ou un client pour saisir le CA (VVA)':'Cliquer pour saisir/consulter le détail mensuel'}"`;
     } else if(id==='kpi-ca'){
       styleExtra = 'cursor:pointer;';
-      extraAttrs = ` onclick="drillDownAccepted(${y}, '${cmId}', '${brandFilter}', '${clientFilter}')" title="Voir le détail des devis acceptés"`;
+      extraAttrs = ` onclick="drillDownAccepted(${y}, '${cmId}', '${brandFilter}', '${clientFilter}')" title="Voir le détail des devis gagnés"`;
     } else if(id==='kpi-encours'){
       styleExtra = 'cursor:pointer;';
       extraAttrs = ` onclick="drillDownEnCours('${cmId}', '${brandFilter}', '${clientFilter}')" title="Voir le détail des devis en cours"`;
     } else if(id==='kpi-panier'){
       styleExtra = 'cursor:pointer;';
-      extraAttrs = ` onclick="drillDownAccepted(${y}, '${cmId}', '${brandFilter}', '${clientFilter}')" title="Voir le détail des devis acceptés utilisés pour ce calcul"`;
+      extraAttrs = ` onclick="drillDownAccepted(${y}, '${cmId}', '${brandFilter}', '${clientFilter}')" title="Voir le détail des devis gagnés utilisés pour ce calcul"`;
     }
     const customHeight = state.dashboardLayout.heights && state.dashboardLayout.heights[id];
     const heightStyle = customHeight ? `height:${customHeight}px;overflow:auto;` : '';
@@ -8652,7 +8652,7 @@ function refreshDrillDownAfterChange(title, subtitle){
 function drillDownAccepted(year, cmId, brandFilter, clientFilter){
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
   const list = state.devis.filter(d=>isDevisWon(d) && yearOf(d.date)===year && inScope(d));
-  openDevisDrillDownModal(`CA ${year} — devis acceptés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
+  openDevisDrillDownModal(`CA ${year} — devis gagnés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
 }
 function drillDownEnCours(cmId, brandFilter, clientFilter){
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
@@ -8662,12 +8662,12 @@ function drillDownEnCours(cmId, brandFilter, clientFilter){
 function drillDownBrand(year, cmId, brandFilter, clientFilter, targetBrandId){
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
   const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && (d.lines||[]).some(l=>l.brandId===targetBrandId) && isDevisWon(d));
-  openDevisDrillDownModal(`${escapeHtml(brandName(targetBrandId))} — devis acceptés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
+  openDevisDrillDownModal(`${escapeHtml(brandName(targetBrandId))} — devis gagnés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
 }
 function drillDownClient(year, cmId, brandFilter, clientFilter, targetClientId){
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
   const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && d.clientId===targetClientId && isDevisWon(d));
-  openDevisDrillDownModal(`${escapeHtml(clientSocieteLabel(targetClientId))} — devis acceptés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
+  openDevisDrillDownModal(`${escapeHtml(clientSocieteLabel(targetClientId))} — devis gagnés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
 }
 function drillDownMonth(year, month, cmId, brandFilter, clientFilter){
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
@@ -8716,7 +8716,7 @@ function initDashboardCharts(){
   }).filter(x=>x.value>0).sort((a,b)=>b.value-a.value).slice(0,8);
 
   if(brandData.length===0){
-    brandCanvas.parentElement.innerHTML = '<div class="helper" style="padding:40px 0;text-align:center;">Aucun devis accepté pour cette année.</div>';
+    brandCanvas.parentElement.innerHTML = '<div class="helper" style="padding:40px 0;text-align:center;">Aucun devis gagné pour cette année.</div>';
   } else {
     chartBrandInstance = new Chart(brandCanvas, {
       type:'bar',
@@ -8734,7 +8734,7 @@ function initDashboardCharts(){
     });
   }
   if(clientData.length===0){
-    clientCanvas.parentElement.innerHTML = '<div class="helper" style="padding:40px 0;text-align:center;">Aucun devis accepté pour cette année.</div>';
+    clientCanvas.parentElement.innerHTML = '<div class="helper" style="padding:40px 0;text-align:center;">Aucun devis gagné pour cette année.</div>';
   } else {
     chartClientInstance = new Chart(clientCanvas, {
       type:'bar',
