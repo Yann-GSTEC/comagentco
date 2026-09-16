@@ -373,9 +373,16 @@ const BRAND_COLORS = ['#2F5D50','#B8863B','#3E6FA6','#AF4B3D','#7A5C8A','#3F8A7B
 const STATUTS = ['Brouillon','Envoyé'];
 function etatAffaireOutcome(d){
   const val = (d.etatAffaire||'').trim().toLowerCase();
-  if(!val) return 'encours';
-  const item = (state.paramLists.etatAffaires||[]).find(e=>(e.libelle||'').trim().toLowerCase()===val);
-  return item ? (item.outcome||'encours') : 'encours';
+  if(val){
+    const item = (state.paramLists.etatAffaires||[]).find(e=>(e.libelle||'').trim().toLowerCase()===val);
+    if(item && item.outcome) return item.outcome;
+  }
+  // Filet de sécurité : si l'État de l'affaire n'est pas (ou plus) reconnu dans la liste de référence
+  // (ex. liste modifiée depuis), on se base directement sur l'ancien statut "Accepté"/"Refusé" conservé
+  // lors de la migration — pour ne jamais perdre de CA déjà comptabilisé.
+  if(d._legacyStatus==='Accepté') return 'gagnee';
+  if(d._legacyStatus==='Refusé') return 'perdue';
+  return 'encours';
 }
 function isDevisWon(d){ return etatAffaireOutcome(d)==='gagnee'; }
 function isDevisLost(d){ return etatAffaireOutcome(d)==='perdue'; }
@@ -387,6 +394,56 @@ function etatAffaireColor(outcome){
 function defaultEtatAffaireEnCours(){
   const item = (state.paramLists.etatAffaires||[]).find(e=>(e.outcome||'encours')==='encours');
   return item ? item.libelle : 'En cours';
+}
+function runEtatAffaireMigration(showFeedback){
+  let migrated = 0;
+  try{
+    const gagnee = (state.paramLists.etatAffaires||[]).find(e=>(e.outcome||'')==='gagnee');
+    const perdue = (state.paramLists.etatAffaires||[]).find(e=>(e.outcome||'')==='perdue');
+    (state.devis||[]).forEach(d=>{
+      if(d.status==='Accepté'){
+        d._legacyStatus = 'Accepté'; // filet de sécurité, conservé même si l'État de l'affaire n'est pas reconnu
+        if(!d.etatAffaire && gagnee) d.etatAffaire = gagnee.libelle;
+        d.status = 'Envoyé';
+        migrated++;
+      } else if(d.status==='Refusé'){
+        d._legacyStatus = 'Refusé';
+        if(!d.etatAffaire && perdue) d.etatAffaire = perdue.libelle;
+        d.status = 'Envoyé';
+        migrated++;
+      }
+      if(d.etatAffaire===undefined) d.etatAffaire = '';
+    });
+    // Rattrapage : si une tentative de migration précédente a déjà basculé le statut vers "Envoyé"
+    // sans avoir pu enregistrer l'État de l'affaire correspondant, on retrouve l'ancien statut
+    // "Accepté"/"Refusé" dans l'historique du devis (conservé par les changements manuels de statut).
+    (state.devis||[]).forEach(d=>{
+      if(d._legacyStatus || d.etatAffaire) return;
+      const hist = Array.isArray(d.history) ? d.history : [];
+      for(let i=hist.length-1;i>=0;i--){
+        const txt = (hist[i].changes||[]).join(' ');
+        const m = txt.match(/Statut\s*:\s*.*?→\s*(Accepté|Refusé)/);
+        if(m){
+          d._legacyStatus = m[1];
+          if(m[1]==='Accepté' && gagnee) d.etatAffaire = gagnee.libelle;
+          else if(m[1]==='Refusé' && perdue) d.etatAffaire = perdue.libelle;
+          migrated++;
+          break;
+        }
+      }
+    });
+    if(migrated>0){
+      console.log(`Migration statut → état de l'affaire : ${migrated} devis mis à jour.`);
+      persist('devis');
+    }
+  }catch(e){
+    console.error("Erreur pendant la migration statut → état de l'affaire", e);
+  }
+  if(showFeedback){
+    render();
+    showToast(migrated>0 ? `${migrated} devis réparé(s) — État de l'affaire restauré.` : "Aucun devis à réparer : tout est déjà à jour.");
+  }
+  return migrated;
 }
 
 const PARAM_LIST_DEFS = [
@@ -973,29 +1030,7 @@ async function loadAll(){
   // Ce bloc s'exécute à CHAQUE chargement (pas seulement une fois) : il ne fait rien si aucun devis
   // n'a plus l'ancien statut, donc il est sans risque à rejouer, et il rattrape automatiquement toute
   // migration qui n'aurait pas pu être enregistrée lors d'un chargement précédent.
-  try{
-    const gagnee = (state.paramLists.etatAffaires||[]).find(e=>(e.outcome||'')==='gagnee');
-    const perdue = (state.paramLists.etatAffaires||[]).find(e=>(e.outcome||'')==='perdue');
-    let migrated = 0;
-    (state.devis||[]).forEach(d=>{
-      if(d.status==='Accepté'){
-        if(!d.etatAffaire && gagnee) d.etatAffaire = gagnee.libelle;
-        d.status = 'Envoyé';
-        migrated++;
-      } else if(d.status==='Refusé'){
-        if(!d.etatAffaire && perdue) d.etatAffaire = perdue.libelle;
-        d.status = 'Envoyé';
-        migrated++;
-      }
-      if(d.etatAffaire===undefined) d.etatAffaire = '';
-    });
-    if(migrated>0){
-      console.log(`Migration statut → état de l'affaire : ${migrated} devis mis à jour.`);
-      persist('devis');
-    }
-  }catch(e){
-    console.error("Erreur pendant la migration statut → état de l'affaire", e);
-  }
+  runEtatAffaireMigration(false);
   // Réparation : relie rétroactivement les sous-familles déjà créées (sans familleId) aux familles Grossiste / Installateur connues
   if(!state.paramLists._repairedFamilleLinks){
     const familleGrossiste = (state.paramLists.famillesClients||[]).find(f=>(f.libelle||'').toLowerCase()==='grossiste');
@@ -5416,6 +5451,7 @@ function renderDevis(){
   <div class="topbar">
     <div><h1>Devis / Marchés</h1><div class="sub">${state.devis.length} document(s) créé(s)</div></div>
     <div style="display:flex;gap:8px;">
+      <button class="btn" onclick="runEtatAffaireMigration(true)" title="Vérifie et corrige les devis dont l'État de l'affaire (Gagnée/Perdue) ne se serait pas correctement enregistré">↺ Réparer les états d'affaire</button>
       <button class="btn" onclick="openImportModalDevis()">⇪ Importer (Excel / CSV)</button>
       <button class="btn btn-primary" onclick="openDevisForm()">+ Nouveau devis</button>
     </div>
