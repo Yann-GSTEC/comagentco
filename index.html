@@ -320,6 +320,10 @@ label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-
 .rich-toolbar select{background:#fff;border:none;border-radius:5px;font-size:11px;padding:2px 4px;height:24px;}
 .rich-toolbar-swatches{display:flex;gap:3px;}
 .rich-toolbar-swatches button{width:18px;height:18px;border-radius:4px;border:1px solid rgba(255,255,255,.4);min-width:0;padding:0;}
+.devis-drag-handle-cell{width:26px;text-align:center;color:var(--muted);cursor:grab;user-select:none;font-size:14px;}
+.devis-drag-handle-cell:active{cursor:grabbing;}
+.lines-table tbody tr.devis-line-dragging{opacity:.4;}
+.lines-table tbody tr.devis-line-dragover td{border-top:2px solid var(--accent);}
 .totals-box{margin-top:16px;margin-left:auto;max-width:280px;}
 .totals-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13.5px;}
 .totals-row.total{font-weight:700;font-size:16px;border-top:1px solid var(--line);margin-top:6px;padding-top:10px;}
@@ -366,7 +370,24 @@ label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-
 /* ============================= DONNEES & ETAT ============================= */
 const BRAND_COLORS = ['#2F5D50','#B8863B','#3E6FA6','#AF4B3D','#7A5C8A','#3F8A7B','#C08A34','#5C7A3E','#9C5B76','#4E6B9C','#A66B3E','#4C8A6B','#6B5C9C','#8A6B3E'];
 
-const STATUTS = ['Brouillon','Envoyé','Accepté','Refusé'];
+const STATUTS = ['Brouillon','Envoyé'];
+function etatAffaireOutcome(d){
+  const val = (d.etatAffaire||'').trim().toLowerCase();
+  if(!val) return 'encours';
+  const item = (state.paramLists.etatAffaires||[]).find(e=>(e.libelle||'').trim().toLowerCase()===val);
+  return item ? (item.outcome||'encours') : 'encours';
+}
+function isDevisWon(d){ return etatAffaireOutcome(d)==='gagnee'; }
+function isDevisLost(d){ return etatAffaireOutcome(d)==='perdue'; }
+function etatAffaireColor(outcome){
+  if(outcome==='gagnee') return {bg:'#E3F1E9', fg:'var(--success)'};
+  if(outcome==='perdue') return {bg:'#F7E7E4', fg:'var(--danger)'};
+  return {bg:'#EDEBE2', fg:'#6B6552'};
+}
+function defaultEtatAffaireEnCours(){
+  const item = (state.paramLists.etatAffaires||[]).find(e=>(e.outcome||'encours')==='encours');
+  return item ? item.libelle : 'En cours';
+}
 
 const PARAM_LIST_DEFS = [
   {key:'canauxDistribution', label:'Canaux de distribution'},
@@ -514,6 +535,101 @@ function stripHtml(html){
   tmp.innerHTML = html;
   return tmp.textContent || tmp.innerText || '';
 }
+/* ---- Reproduction de la mise en forme riche (gras, couleur, surlignage, taille) dans le PDF ---- */
+function hexToRgb(hex){
+  hex = String(hex||'').trim().replace('#','');
+  if(hex.length===3) hex = hex.split('').map(c=>c+c).join('');
+  const num = parseInt(hex,16);
+  if(isNaN(num)) return [35,35,35];
+  return [(num>>16)&255, (num>>8)&255, num&255];
+}
+function parseRichRuns(html){
+  if(!html) return [];
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  const runs = [];
+  function walk(node, style){
+    if(node.nodeType===3){
+      if(node.textContent) runs.push(Object.assign({text:node.textContent}, style));
+      return;
+    }
+    if(node.nodeType!==1) return;
+    const s = Object.assign({}, style);
+    const tag = node.tagName.toLowerCase();
+    if(tag==='b' || tag==='strong') s.bold = true;
+    const inline = node.getAttribute('style')||'';
+    if(/font-weight\s*:\s*(bold|[6-9]00)/i.test(inline)) s.bold = true;
+    const colorMatch = inline.match(/(?:^|;)\s*color\s*:\s*([^;]+)/i);
+    if(colorMatch) s.color = colorMatch[1].trim();
+    const bgMatch = inline.match(/background-color\s*:\s*([^;]+)/i);
+    if(bgMatch && bgMatch[1].trim().toLowerCase()!=='transparent') s.bg = bgMatch[1].trim();
+    const fsMatch = inline.match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/i);
+    if(fsMatch) s.fontSize = parseFloat(fsMatch[1]);
+    node.childNodes.forEach(child=>walk(child, s));
+  }
+  Array.from(container.childNodes).forEach(n=>walk(n, {bold:false, color:null, bg:null, fontSize:null}));
+  return runs;
+}
+function reflowRunsToLines(runs, wrappedLines){
+  // Répartit les runs (texte + style) sur les lignes déjà calculées par jsPDF-autotable pour le texte brut
+  // équivalent, en consommant le même nombre de caractères par ligne.
+  const flat = [];
+  runs.forEach(r=>{ for(const ch of r.text){ flat.push({ch, style:r}); } });
+  let pos = 0;
+  return wrappedLines.map(line=>{
+    const target = line.length;
+    const segs = [];
+    let segStyle = null, segText = '';
+    let consumed = 0;
+    while(pos < flat.length && consumed < target){
+      const {ch, style} = flat[pos];
+      if(segStyle && style!==segStyle){ segs.push({text:segText, style:segStyle}); segText=''; }
+      segStyle = style; segText += ch;
+      pos++; consumed++;
+    }
+    if(segText) segs.push({text:segText, style:segStyle});
+    if(pos < flat.length && flat[pos].ch===' ') pos++; // espace de coupure ignoré entre deux lignes
+    return segs;
+  });
+}
+function drawRichCellText(doc, linesOut, x, y, lineHeight, baseFontSize, baseColorRgb){
+  linesOut.forEach((segs, li)=>{
+    let cx = x;
+    const ly = y + li*lineHeight;
+    segs.forEach(seg=>{
+      const fs = (seg.style && seg.style.fontSize) || baseFontSize;
+      doc.setFontSize(fs);
+      doc.setFont('helvetica', (seg.style && seg.style.bold) ? 'bold' : 'normal');
+      const w = doc.getTextWidth(seg.text);
+      if(seg.style && seg.style.bg){
+        const rgb = hexToRgb(seg.style.bg);
+        doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+        doc.rect(cx, ly - fs*0.3528*0.72, w, fs*0.3528*0.92, 'F');
+      }
+      const color = (seg.style && seg.style.color) ? hexToRgb(seg.style.color) : baseColorRgb;
+      doc.setTextColor(color[0], color[1], color[2]);
+      doc.text(seg.text, cx, ly);
+      cx += w;
+    });
+  });
+  doc.setFontSize(baseFontSize);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(baseColorRgb[0], baseColorRgb[1], baseColorRgb[2]);
+}
+function drawRichDesignationCell(doc, data, html, baseColorRgb){
+  const runs = parseRichRuns(html);
+  if(runs.length===0) return false;
+  const plainWrapped = data.cell.text;
+  if(!plainWrapped || plainWrapped.length===0) return false;
+  const linesOut = reflowRunsToLines(runs, plainWrapped);
+  const pad = data.cell.styles.cellPadding || {top:2.6,left:2.6};
+  const padTop = (typeof pad==='object') ? (pad.top||2.6) : pad;
+  const padLeft = (typeof pad==='object') ? (pad.left||2.6) : pad;
+  const fs = data.cell.styles.fontSize || 8.5;
+  const lh = fs*0.3528*1.15;
+  drawRichCellText(doc, linesOut, data.cell.x+padLeft, data.cell.y+padTop+fs*0.3528*0.8, lh, fs, baseColorRgb);
+  return true;
+}
 
 /* ============================= MINI-BARRE DE MISE EN FORME (zones "rich-editable") ============================= */
 /* S'affiche au survol d'une sélection de texte dans une zone .rich-editable (désignations de lignes de
@@ -526,10 +642,6 @@ function ensureRichToolbar(){
   richToolbarEl.className = 'rich-toolbar';
   richToolbarEl.innerHTML = `
     <button type="button" onmousedown="event.preventDefault();" onclick="richApplyBold()" title="Gras"><b>G</b></button>
-    <select onmousedown="event.preventDefault();" onchange="richApplyFontSize(this.value); this.value='';" title="Taille du texte">
-      <option value="">Taille</option>
-      ${[10,11,12,13,14,16,18,20,24].map(s=>`<option value="${s}">${s}px</option>`).join('')}
-    </select>
     <span class="rich-toolbar-swatches">${['#1E2A2C','#AF4B3D','#2F5D50','#3E6FA6','#B8863B'].map(c=>`<button type="button" onmousedown="event.preventDefault();" onclick="richApplyColor('${c}')" style="background:${c};" title="Couleur du texte"></button>`).join('')}</span>
     <span class="rich-toolbar-swatches">${['#FFF3A0','#C8F0D8','#FDD9C8','#D8E4FF'].map(c=>`<button type="button" onmousedown="event.preventDefault();" onclick="richApplyHighlight('${c}')" style="background:${c};" title="Surligner"></button>`).join('')}<button type="button" onmousedown="event.preventDefault();" onclick="richApplyHighlight('transparent')" style="background:#fff;border-style:dashed;" title="Retirer le surlignage">✕</button></span>
   `;
@@ -594,11 +706,6 @@ function wrapRichSelectionWithStyle(styleStr){
 function richApplyBold(){
   if(!restoreRichSelection()) return;
   document.execCommand('bold');
-  syncRichEditableSource();
-}
-function richApplyFontSize(px){
-  if(!px || !restoreRichSelection()) return;
-  wrapRichSelectionWithStyle('font-size:'+px+'px;');
   syncRichEditableSource();
 }
 function richApplyColor(color){
@@ -850,6 +957,38 @@ async function loadAll(){
     });
     state.paramLists._seededInstallateurs = true;
     persist('paramLists');
+  }
+  if((state.paramLists.etatAffaires||[]).length===0 && !state.paramLists._seededEtatAffaires){
+    state.paramLists.etatAffaires = [
+      {id:uid(), code:'ENCOURS', libelle:'En cours', outcome:'encours'},
+      {id:uid(), code:'GAGNEE', libelle:'Gagnée', outcome:'gagnee'},
+      {id:uid(), code:'PERDUE', libelle:'Perdue', outcome:'perdue'},
+      {id:uid(), code:'ANNULEE', libelle:'Annulée', outcome:'perdue'},
+    ];
+    state.paramLists._seededEtatAffaires = true;
+    persist('paramLists');
+  }
+  // Migration : l'ancien statut de devis "Accepté"/"Refusé" devient l'État de l'affaire, le statut
+  // du devis lui-même se limitant désormais au cycle de vie du document (Brouillon / Envoyé).
+  if(!state.settings._migratedStatutsToEtat){
+    const gagnee = (state.paramLists.etatAffaires||[]).find(e=>(e.outcome||'')==='gagnee');
+    const perdue = (state.paramLists.etatAffaires||[]).find(e=>(e.outcome||'')==='perdue');
+    let migrated = 0;
+    (state.devis||[]).forEach(d=>{
+      if(d.status==='Accepté'){
+        if(!d.etatAffaire && gagnee) d.etatAffaire = gagnee.libelle;
+        d.status = 'Envoyé';
+        migrated++;
+      } else if(d.status==='Refusé'){
+        if(!d.etatAffaire && perdue) d.etatAffaire = perdue.libelle;
+        d.status = 'Envoyé';
+        migrated++;
+      }
+      if(d.etatAffaire===undefined) d.etatAffaire = '';
+    });
+    state.settings._migratedStatutsToEtat = true;
+    if(migrated>0) persist('devis');
+    persist('settings');
   }
   // Réparation : relie rétroactivement les sous-familles déjà créées (sans familleId) aux familles Grossiste / Installateur connues
   if(!state.paramLists._repairedFamilleLinks){
@@ -2725,7 +2864,7 @@ function openClientDetail(id){
       <div class="grid grid-3" style="margin-bottom:8px;">
         <div class="card card-pad" style="text-align:center;"><div class="kpi"><div class="label">CA cumulé</div><div class="value num">${fmtMoney(caForClient(id))}</div></div></div>
         <div class="card card-pad" style="text-align:center;"><div class="kpi"><div class="label">Devis</div><div class="value num">${devisList.length}</div></div></div>
-        <div class="card card-pad" style="text-align:center;"><div class="kpi"><div class="label">Acceptés</div><div class="value num">${devisList.filter(d=>d.status==='Accepté').length}</div></div></div>
+        <div class="card card-pad" style="text-align:center;"><div class="kpi"><div class="label">Acceptés</div><div class="value num">${devisList.filter(d=>isDevisWon(d)).length}</div></div></div>
       </div>
       <div style="font-size:12.5px;color:var(--ink-soft);line-height:1.8;margin-bottom:6px;">
         ${(c.adresse1||c.ville)?`<div>⌂ ${escapeHtml([c.adresse1,c.codePostal,c.ville].filter(Boolean).join(' '))}</div>`:''}
@@ -5051,12 +5190,14 @@ function renderParamListPanel(){
   const def = PARAM_LIST_DEFS.find(d=>d.key===ui.paramListSelected) || PARAM_LIST_DEFS[0];
   const hasBrand = def.key==='famillesArticles';
   const hasFamille = def.key==='sousFamillesClients';
+  const hasOutcome = def.key==='etatAffaires';
   const items = (state.paramLists[def.key]||[]).slice().sort((a,b)=>(a.libelle||'').localeCompare(b.libelle||''));
   const familleLabel = (fid)=>{
     if(!fid) return '<span class="helper">Aucune famille</span>';
     const f = (state.paramLists.famillesClients||[]).find(x=>x.id===fid);
     return f ? escapeHtml(f.libelle) : '<span class="helper">Famille supprimée</span>';
   };
+  const outcomeLabel = (o)=>({encours:'En cours', gagnee:'Affaire gagnée', perdue:'Affaire perdue'}[o]||'En cours');
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
       <div style="font-weight:700;font-size:13px;">${escapeHtml(def.label)} <span class="helper" style="display:inline;">(${items.length})</span></div>
@@ -5064,20 +5205,23 @@ function renderParamListPanel(){
     </div>
     ${items.length===0?`<div class="helper" style="padding:14px 0;">Aucun élément pour l'instant.</div>`:`
     <div class="table-wrap"><table>
-      <thead><tr><th>Code</th><th>Libellé</th>${hasBrand?'<th>Marque</th>':''}${hasFamille?'<th>Famille</th>':''}<th></th></tr></thead>
+      <thead><tr><th>Code</th><th>Libellé</th>${hasBrand?'<th>Marque</th>':''}${hasFamille?'<th>Famille</th>':''}${hasOutcome?'<th>Catégorie</th>':''}<th></th></tr></thead>
       <tbody>
-        ${items.map(it=>`
+        ${items.map(it=>{
+          const oc = hasOutcome ? etatAffaireColor(it.outcome||'encours') : null;
+          return `
           <tr>
             <td style="font-weight:600;font-family:'Space Grotesk';">${escapeHtml(it.code||'—')}</td>
             <td>${escapeHtml(it.libelle||'')}</td>
             ${hasBrand?`<td>${it.brandId?`<span class="chip" style="background:${brandColor(it.brandId)};"><span class="sq"></span>${escapeHtml(brandName(it.brandId))}</span>`:'<span class="helper">Toutes marques</span>'}</td>`:''}
             ${hasFamille?`<td>${familleLabel(it.familleId)}</td>`:''}
+            ${hasOutcome?`<td><span class="status-pill" style="background:${oc.bg};color:${oc.fg};">${outcomeLabel(it.outcome||'encours')}</span></td>`:''}
             <td class="table-actions">
               <button class="btn btn-sm btn-ghost" onclick="openParamItemForm('${def.key}','${it.id}')">Modifier</button>
               <button class="btn btn-sm btn-ghost btn-danger" onclick="deleteParamItem('${def.key}','${it.id}')">Suppr.</button>
             </td>
           </tr>
-        `).join('')}
+        `;}).join('')}
       </tbody>
     </table></div>`}
   `;
@@ -5090,6 +5234,7 @@ function openParamItemForm(listKey, id){
   const def = PARAM_LIST_DEFS.find(d=>d.key===listKey);
   const hasBrand = listKey==='famillesArticles';
   const hasFamille = listKey==='sousFamillesClients';
+  const hasOutcome = listKey==='etatAffaires';
   const it = id ? (state.paramLists[listKey]||[]).find(x=>x.id===id) : null;
   openModal(`
     <div class="modal-head"><h3>${it?'Modifier':'Ajouter'} — ${escapeHtml(def.label)}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
@@ -5109,6 +5254,14 @@ function openParamItemForm(listKey, id){
         </select>
         <div class="helper" style="margin-top:4px;">Permet de filtrer les sous-familles proposées selon la famille sélectionnée sur la fiche client.</div>
       </div>`:''}
+      ${hasOutcome?`<div class="field"><label>Catégorie</label>
+        <select id="pi_outcome">
+          <option value="encours" ${(!it||it.outcome==='encours'||!it.outcome)?'selected':''}>En cours (n'affecte pas le CA)</option>
+          <option value="gagnee" ${it&&it.outcome==='gagnee'?'selected':''}>Affaire gagnée (compte dans le CA / devis gagnés)</option>
+          <option value="perdue" ${it&&it.outcome==='perdue'?'selected':''}>Affaire perdue (compte dans les devis perdus)</option>
+        </select>
+        <div class="helper" style="margin-top:4px;">Détermine comment cet état est pris en compte dans le CA, le Rapport et le Tableau de bord — le libellé lui-même reste entièrement personnalisable.</div>
+      </div>`:''}
     </div>
     <div class="modal-foot">
       ${it?`<button class="btn btn-danger" onclick="deleteParamItem('${listKey}','${it.id}')" style="margin-right:auto;">Supprimer</button>`:''}
@@ -5126,11 +5279,13 @@ function saveParamItem(listKey, id){
   const brandId = brandEl ? brandEl.value : undefined;
   const familleEl = document.getElementById('pi_famille');
   const familleId = familleEl ? (familleEl.value || null) : undefined;
+  const outcomeEl = document.getElementById('pi_outcome');
+  const outcome = outcomeEl ? outcomeEl.value : undefined;
   state.paramLists[listKey] = state.paramLists[listKey] || [];
   if(id){
-    Object.assign(state.paramLists[listKey].find(x=>x.id===id), {code, libelle, ...(brandEl?{brandId}:{}), ...(familleEl?{familleId}:{})});
+    Object.assign(state.paramLists[listKey].find(x=>x.id===id), {code, libelle, ...(brandEl?{brandId}:{}), ...(familleEl?{familleId}:{}), ...(outcomeEl?{outcome}:{})});
   } else {
-    state.paramLists[listKey].push({id:uid(), code, libelle, ...(brandEl?{brandId}:{}), ...(familleEl?{familleId}:{})});
+    state.paramLists[listKey].push({id:uid(), code, libelle, ...(brandEl?{brandId}:{}), ...(familleEl?{familleId}:{}), ...(outcomeEl?{outcome}:{})});
   }
   persist('paramLists');
   closeModal();
@@ -5202,7 +5357,7 @@ function devisMatchesCommercial(d, commercialId){
 }
 function caForBrand(brandId, year, commercialId){
   let total = 0;
-  state.devis.filter(d=>d.status==='Accepté').forEach(d=>{
+  state.devis.filter(d=>isDevisWon(d)).forEach(d=>{
     if(year && yearOf(d.date)!==year) return;
     if(!devisMatchesCommercial(d, commercialId)) return;
     (d.lines||[]).forEach(l=>{ if(l.brandId===brandId) total += lineTotalHT(l, d.destinataire); });
@@ -5211,7 +5366,7 @@ function caForBrand(brandId, year, commercialId){
 }
 function caForBrandMonth(brandId, year, month, commercialId){
   let total = 0;
-  state.devis.filter(d=>d.status==='Accepté').forEach(d=>{
+  state.devis.filter(d=>isDevisWon(d)).forEach(d=>{
     if(year && yearOf(d.date)!==year) return;
     if(month && parseInt(d.date.slice(5,7))!==month) return;
     if(!devisMatchesCommercial(d, commercialId)) return;
@@ -5221,7 +5376,7 @@ function caForBrandMonth(brandId, year, month, commercialId){
 }
 function caForClient(clientId, year, commercialId){
   let total = 0;
-  state.devis.filter(d=>d.status==='Accepté' && d.clientId===clientId).forEach(d=>{
+  state.devis.filter(d=>isDevisWon(d) && d.clientId===clientId).forEach(d=>{
     if(year && yearOf(d.date)!==year) return;
     if(!devisMatchesCommercial(d, commercialId)) return;
     total += devisTotal(d).ht;
@@ -5335,9 +5490,19 @@ function matchStatutByLabel(label){
   const exact = STATUTS.find(s=>s.toLowerCase()===norm);
   if(exact) return exact;
   if(/envoy/.test(norm)) return 'Envoyé';
-  if(/accept|gagn|valid|command/.test(norm)) return 'Accepté';
-  if(/refus|perdu|annul/.test(norm)) return 'Refusé';
   return 'Brouillon';
+}
+function matchEtatAffaireByLabel(label){
+  const norm = (label||'').trim().toLowerCase();
+  if(!norm) return '';
+  const exact = (state.paramLists.etatAffaires||[]).find(e=>(e.libelle||'').toLowerCase()===norm);
+  if(exact) return exact.libelle;
+  let outcome = null;
+  if(/accept|gagn|valid|command/.test(norm)) outcome = 'gagnee';
+  else if(/refus|perdu|annul/.test(norm)) outcome = 'perdue';
+  if(!outcome) return '';
+  const match = (state.paramLists.etatAffaires||[]).find(e=>(e.outcome||'encours')===outcome);
+  return match ? match.libelle : '';
 }
 function openImportModalDevis(){
   if(state.clients.length===0){ showToast('Ajoutez d\'abord vos clients (l\'import de devis a besoin de les retrouver par société).'); return; }
@@ -5453,6 +5618,7 @@ function confirmImportDevis(){
         objet: get(row,cObjet),
         reference: get(row,cReference),
         statut: matchStatutByLabel(get(row,cStatut)),
+        etat: matchEtatAffaireByLabel(get(row,cStatut)),
         notes: get(row,cNotes),
         lines: [],
       });
@@ -5490,7 +5656,7 @@ function confirmImportDevis(){
       id: uid(), number: finalNumber, type: 'Devis', date: grp.date,
       objet: grp.objet, reference: grp.reference, clientId: grp.client.id,
       validUntil: defaultValidUntil('Devis', grp.date), validUntilAuto: true,
-      status: grp.statut, destinataire: '', attentionA: '', tvaPct: 0,
+      status: grp.statut, etatAffaire: grp.etat||'', destinataire: '', attentionA: '', tvaPct: 0,
       notes: grp.notes, lines: grp.lines, pdfColumns: {...DEFAULT_PDF_COLUMNS},
       history: [{ ts: new Date().toISOString(), type:'created', detail:'Import Excel / CSV' }],
     });
@@ -5527,11 +5693,12 @@ function renderDevisListInner(){
   if(list.length===0) return emptyState('▧','Aucun devis','Créez votre premier devis à partir de vos listes de prix.');
   return `
   <div class="card table-wrap"><table>
-    <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Marque(s)</th><th>Total HT</th><th>Apporteur</th><th>Statut</th></tr></thead>
+    <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Marque(s)</th><th>Total HT</th><th>Apporteur</th><th>Statut devis</th><th>État de l'affaire</th></tr></thead>
     <tbody>
       ${list.map(d=>{
         const t = devisTotal(d);
         const brandIds = [...new Set((d.lines||[]).map(l=>l.brandId))];
+        const oc = etatAffaireColor(etatAffaireOutcome(d));
         return `<tr style="cursor:pointer;" onclick="openDevisForm('${d.id}')" title="Cliquer pour ouvrir">
           <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(d.number)}</td>
           <td><span class="helper" style="font-weight:600;">${escapeHtml(d.type||'Devis')}</span></td>
@@ -5552,11 +5719,29 @@ function renderDevisListInner(){
               ${STATUTS.map(s=>`<option value="${s}" ${s===d.status?'selected':''}>${s}</option>`).join('')}
             </select>
           </td>
+          <td onclick="event.stopPropagation();">
+            <select onchange="changeDevisEtatAffaire('${d.id}', this.value)" style="width:auto;padding:4px 8px;font-size:11.5px;font-weight:700;border-radius:20px;background:${oc.bg};color:${oc.fg};border-color:transparent;">
+              <option value="" ${!d.etatAffaire?'selected':''}>—</option>
+              ${(state.paramLists.etatAffaires||[]).map(e=>`<option value="${escapeHtml(e.libelle)}" ${d.etatAffaire===e.libelle?'selected':''}>${escapeHtml(e.libelle)}</option>`).join('')}
+            </select>
+          </td>
         </tr>`;
       }).join('')}
     </tbody>
   </table></div>
   `;
+}
+function changeDevisEtatAffaire(id, etat){
+  const d = state.devis.find(x=>x.id===id);
+  const old = d.etatAffaire||'';
+  d.etatAffaire = etat||'';
+  if(old!==d.etatAffaire){
+    d.history = Array.isArray(d.history) ? d.history : [];
+    d.history.push({ ts: new Date().toISOString(), type:'modified', changes:[`État de l'affaire : ${old||'—'} → ${d.etatAffaire||'—'}`] });
+  }
+  persist('devis');
+  render();
+  showToast("État de l'affaire mis à jour.");
 }
 function changeDevisApporteur(id, apporteur){
   const d = state.devis.find(x=>x.id===id);
@@ -5918,6 +6103,7 @@ function openDevisForm(id, presetClientId){
     validUntil: defaultValidUntil('Devis', todayStr()),
     validUntilAuto: true,
     status: 'Brouillon',
+    etatAffaire: defaultEtatAffaireEnCours(),
     destinataire: '',
     apporteurAffaire: '',
     attentionA: '',
@@ -6124,6 +6310,7 @@ function devisFormHtml(){
       <div class="table-wrap lines-table">
         <table>
           <thead><tr>
+            <th style="width:26px;"></th>
             <th style="width:80px;">Marque</th><th style="width:70px;">Code article</th><th style="text-align:center;">Désignation</th>
             <th style="width:110px;">Qté</th><th style="width:110px;">PU Tarif</th>
             <th style="width:100px;">Remise 1</th><th style="width:100px;">Remise 2</th><th style="width:100px;">Remise 3</th>
@@ -6272,9 +6459,13 @@ function setDevisAttention(contactId){
 }
 function devisLinesRowsHtml(){
   return draft.lines.map((l,i)=>{
+    const dragHandle = `<td class="devis-drag-handle-cell" draggable="true"
+        ondragstart="devisLineDragStart(event,${i})" ondragover="devisLineDragOver(event)" ondragleave="devisLineDragLeave(event)" ondrop="devisLineDrop(event,${i})" ondragend="devisLineDragEnd(event)"
+        title="Rester appuyé et glisser pour changer l'ordre de cette ligne">⠿</td>`;
     if(l.isTitleLine){
       return `
       <tr data-title-row="1">
+        ${dragHandle}
         <td colspan="12" style="background:var(--surface-2);padding:4px 8px;">
           <div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Titre de section ou commentaire libre…" style="font-weight:700;" oninput="draft.lines[${i}].designation=this.innerHTML;">${l.designation||''}</div>
         </td>
@@ -6291,6 +6482,7 @@ function devisLinesRowsHtml(){
     const displayMarge = (l.margeTarget!=null) ? l.margeTarget : m.pct;
     return `
     <tr data-reference="${escapeHtml(l.reference||'')}" title="Curseur sur cette ligne : F3 historique client, F4 département, F5 tous clients, F6 famille/sous-famille">
+      ${dragHandle}
       <td><span class="chip" style="background:${brandColor(l.brandId)};font-size:9.5px;padding:3px 6px;white-space:normal;line-height:1.25;">${escapeHtml(brandName(l.brandId))}</span></td>
       <td style="font-weight:700;font-family:'Space Grotesk';font-size:12px;">${escapeHtml(l.reference)}${l.prixNetApplied?' <span class="chip" style="background:var(--success, #3F8A7B);font-size:8px;padding:1px 5px;display:inline-block;margin-top:2px;" title="Prix net client appliqué automatiquement">Prix net</span>':''}</td>
       <td><div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Désignation…" title="F3 historique prix (ce client) · F4 (département) · F5 (tous les clients) · F6 (famille / sous-famille)" oninput="draft.lines[${i}].designation=this.innerHTML;">${l.designation||''}</div></td>
@@ -6428,6 +6620,40 @@ function addDevisTitleLine(){
     const last = els[els.length-1];
     if(last) last.focus();
   }, 60);
+}
+let devisLineDragIndex = null;
+function devisLineDragStart(evt, idx){
+  devisLineDragIndex = idx;
+  evt.dataTransfer.effectAllowed = 'move';
+  try{ evt.dataTransfer.setData('text/plain', String(idx)); }catch(e){}
+  const tr = evt.currentTarget.closest('tr');
+  if(tr) tr.classList.add('devis-line-dragging');
+}
+function devisLineDragOver(evt){
+  evt.preventDefault();
+  evt.dataTransfer.dropEffect = 'move';
+  const tr = evt.currentTarget.closest('tr');
+  if(tr) tr.classList.add('devis-line-dragover');
+}
+function devisLineDragLeave(evt){
+  const tr = evt.currentTarget.closest('tr');
+  if(tr) tr.classList.remove('devis-line-dragover');
+}
+function devisLineDrop(evt, idx){
+  evt.preventDefault();
+  const tr = evt.currentTarget.closest('tr');
+  if(tr) tr.classList.remove('devis-line-dragover');
+  if(devisLineDragIndex===null || devisLineDragIndex===idx) return;
+  const item = draft.lines[devisLineDragIndex];
+  draft.lines.splice(devisLineDragIndex, 1);
+  draft.lines.splice(idx, 0, item);
+  devisLineDragIndex = null;
+  refreshDevisModal();
+}
+function devisLineDragEnd(evt){
+  devisLineDragIndex = null;
+  document.querySelectorAll('.devis-line-dragging').forEach(el=>el.classList.remove('devis-line-dragging'));
+  document.querySelectorAll('.devis-line-dragover').forEach(el=>el.classList.remove('devis-line-dragover'));
 }
 function brandIdsMatchingName(brandId){
   // Tolère les doublons de fiches marque (même nom, identifiants internes différents) :
@@ -6850,6 +7076,7 @@ function confirmSaveDevisNewVersion(){
   draft.id = uid();
   draft.number = newNumber;
   draft.status = 'Brouillon';
+  draft.etatAffaire = defaultEtatAffaireEnCours();
   draft.duplicatedFromId = originalId;
   draft.history = [{ ts, type:'duplicated_from', detail:originalNumber, clientLabel }];
   finalizeSaveDraftDevis(true);
@@ -7072,6 +7299,7 @@ async function exportDevisPdf(id, mode){
     columnStyles[i] = { halign:c.align, cellWidth: c.width==='auto'?'auto':c.width };
   });
 
+  const desigColIdx = colDefs.findIndex(cd=>cd.key==='desig');
   doc.autoTable({
     startY: y,
     head: [colDefs.map(c=>c.head)],
@@ -7082,6 +7310,26 @@ async function exportDevisPdf(id, mode){
     alternateRowStyles:{fillColor:[244,248,253]},
     columnStyles: columnStyles,
     margin:{left:LEFT, right:PAGE_W-RIGHT, top:26, bottom:24},
+    didDrawCell: (data)=>{
+      if(data.section!=='body') return;
+      const line = (d.lines||[])[data.row.index];
+      if(!line || !line.designation) return;
+      if(line.isTitleLine){
+        // Cellule fusionnée (colSpan) : sa mise en forme (gras, fond) est déjà posée ; on ajoute les
+        // couleurs/tailles/surlignages éventuels de la sélection par-dessus.
+        drawRichDesignationCell(doc, data, line.designation, [30,30,30]);
+        return;
+      }
+      if(data.column.index !== desigColIdx) return;
+      const bg = (data.row.index % 2 === 1) ? [244,248,253] : [255,255,255];
+      const drew = (()=>{
+        // On ne repeint le fond (pour masquer le texte brut déjà tracé) que si une mise en forme existe réellement.
+        if(!/[<]/.test(line.designation)) return false;
+        doc.setFillColor(bg[0], bg[1], bg[2]);
+        doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
+        return drawRichDesignationCell(doc, data, line.designation, [35,35,35]);
+      })();
+    },
     didDrawPage: (data)=>{
       if(data.pageNumber>1){
         doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(30);
@@ -7342,6 +7590,15 @@ function openSendDevisModal(id){
 function escapeHtmlBody(s){
   return escapeHtml(s).replace(/\n/g, '<br>');
 }
+function markDevisSent(id){
+  const d = state.devis.find(x=>x.id===id);
+  if(!d || d.status==='Envoyé') return;
+  const old = d.status;
+  d.status = 'Envoyé';
+  d.history = Array.isArray(d.history) ? d.history : [];
+  d.history.push({ ts: new Date().toISOString(), type:'modified', changes:[`Statut : ${old||'—'} → Envoyé (via Enregistrer et envoyer)`] });
+  persist('devis');
+}
 async function confirmSendDevisMail(id, soleBrandId){
   const toRaw = document.getElementById('sendmail_to').value.trim();
   if(!toRaw){ showToast('Renseignez au moins un destinataire.'); return; }
@@ -7361,8 +7618,10 @@ async function confirmSendDevisMail(id, soleBrandId){
     const pdf = await exportDevisPdf(id, 'base64');
     if(!pdf) throw new Error('Impossible de générer le PDF du devis.');
     await sendMailViaGraph(token, { toEmails, subject, body: htmlBody, isHtml:true, attachmentName: pdf.filename, attachmentBase64: pdf.base64 });
+    markDevisSent(id);
     closeModal();
-    showToast('Devis envoyé par email via Outlook.');
+    render();
+    showToast('Devis envoyé par email via Outlook — statut passé à "Envoyé".');
   }catch(e){
     console.error(e);
     if(btn){ btn.disabled = false; btn.textContent = 'Envoyer'; }
@@ -7379,8 +7638,10 @@ async function confirmSendDevisMailFallback(id, signaturePlain){
     await exportDevisPdf(id); // téléchargement classique du PDF (aucune configuration requise)
     const mailto = `mailto:${encodeURIComponent(toRaw)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.location.href = mailto;
+    markDevisSent(id);
     closeModal();
-    showToast('PDF téléchargé — glissez-le dans le brouillon qui vient de s\'ouvrir.', 5000);
+    render();
+    showToast('PDF téléchargé et statut passé à "Envoyé" — glissez le PDF dans le brouillon qui vient de s\'ouvrir.', 5500);
   }catch(e){
     console.error(e);
     if(btn){ btn.disabled = false; btn.textContent = 'Télécharger le PDF + ouvrir le brouillon'; }
@@ -7486,8 +7747,8 @@ function computeRapportData(brandId, year, month){
   const devisForBrand = state.devis.filter(d=> periodMatchesReport(d.date,year,month) && (d.lines||[]).some(l=>l.brandId===brandId));
   const lineAmount = (d)=> (d.lines||[]).filter(l=>l.brandId===brandId).reduce((s,l)=>s+lineTotalHT(l, d.destinataire),0);
   const enCours = devisForBrand.filter(d=>d.status==='Brouillon'||d.status==='Envoyé');
-  const gagnes = devisForBrand.filter(d=>d.status==='Accepté');
-  const perdus = devisForBrand.filter(d=>d.status==='Refusé');
+  const gagnes = devisForBrand.filter(d=>isDevisWon(d));
+  const perdus = devisForBrand.filter(d=>isDevisLost(d));
   const montantEnCours = enCours.reduce((s,d)=>s+lineAmount(d),0);
   const montantGagne = gagnes.reduce((s,d)=>s+lineAmount(d),0);
   const montantPerdu = perdus.reduce((s,d)=>s+lineAmount(d),0);
@@ -7720,18 +7981,20 @@ function rapportDevisSectionBody(list, lineAmount){
   if(list.length===0) return `<div class="helper">Aucun devis dans cette catégorie pour la période sélectionnée.</div>`;
   return `
   <div class="table-wrap"><table>
-    <thead><tr><th>N°</th><th>Date</th><th>Client</th><th>Objet</th><th>Statut</th><th>Montant (marque)</th></tr></thead>
+    <thead><tr><th>N°</th><th>Date</th><th>Client</th><th>Objet</th><th>État de l'affaire</th><th>Montant (marque)</th></tr></thead>
     <tbody>
-      ${list.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(d=>`
+      ${list.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(d=>{
+        const oc = etatAffaireColor(etatAffaireOutcome(d));
+        return `
         <tr style="cursor:pointer;" onclick="openDevisForm('${d.id}')">
           <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(d.number)}</td>
           <td>${fmtDate(d.date)}</td>
           <td>${escapeHtml(clientDisplayName(state.clients.find(c=>c.id===d.clientId)||{}))}</td>
           <td>${escapeHtml(d.objet||'—')}</td>
-          <td><span class="status-pill status-${d.status}">${d.status}</span></td>
+          <td><span class="status-pill" style="background:${oc.bg};color:${oc.fg};">${escapeHtml(d.etatAffaire||'—')}</span></td>
           <td class="num" style="font-weight:600;">${fmtMoney(lineAmount(d))}</td>
         </tr>
-      `).join('')}
+      `;}).join('')}
     </tbody>
   </table></div>`;
 }
@@ -8113,7 +8376,7 @@ function renderDashboard(){
     && (brandFilter==='all' || (d.lines||[]).some(l=>l.brandId===brandFilter))
     && (clientFilter==='all' || d.clientId===clientFilter);
 
-  const accepted = state.devis.filter(d=>d.status==='Accepté' && yearOf(d.date)===y && inDashboardScope(d));
+  const accepted = state.devis.filter(d=>isDevisWon(d) && yearOf(d.date)===y && inDashboardScope(d));
   const caTotal = accepted.reduce((s,d)=>s+devisTotal(d).ht,0);
   const nbDevisEnCours = state.devis.filter(d=>(d.status==='Envoyé'||d.status==='Brouillon') && inDashboardScope(d)).length;
   const panierMoyen = accepted.length ? caTotal/accepted.length : 0;
@@ -8346,7 +8609,7 @@ function refreshDrillDownAfterChange(title, subtitle){
 }
 function drillDownAccepted(year, cmId, brandFilter, clientFilter){
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
-  const list = state.devis.filter(d=>d.status==='Accepté' && yearOf(d.date)===year && inScope(d));
+  const list = state.devis.filter(d=>isDevisWon(d) && yearOf(d.date)===year && inScope(d));
   openDevisDrillDownModal(`CA ${year} — devis acceptés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
 }
 function drillDownEnCours(cmId, brandFilter, clientFilter){
@@ -8356,12 +8619,12 @@ function drillDownEnCours(cmId, brandFilter, clientFilter){
 }
 function drillDownBrand(year, cmId, brandFilter, clientFilter, targetBrandId){
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
-  const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && (d.lines||[]).some(l=>l.brandId===targetBrandId) && d.status==='Accepté');
+  const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && (d.lines||[]).some(l=>l.brandId===targetBrandId) && isDevisWon(d));
   openDevisDrillDownModal(`${escapeHtml(brandName(targetBrandId))} — devis acceptés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
 }
 function drillDownClient(year, cmId, brandFilter, clientFilter, targetClientId){
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
-  const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && d.clientId===targetClientId && d.status==='Accepté');
+  const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && d.clientId===targetClientId && isDevisWon(d));
   openDevisDrillDownModal(`${escapeHtml(clientSocieteLabel(targetClientId))} — devis acceptés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
 }
 function drillDownMonth(year, month, cmId, brandFilter, clientFilter){
@@ -8395,7 +8658,7 @@ function initDashboardCharts(){
   const correlationCanvas = document.getElementById('chartCorrelation');
   if(!brandCanvas || !clientCanvas) return;
 
-  const acceptedYear = state.devis.filter(d=>d.status==='Accepté' && yearOf(d.date)===y && inDashboardScope(d));
+  const acceptedYear = state.devis.filter(d=>isDevisWon(d) && yearOf(d.date)===y && inDashboardScope(d));
 
   const brandData = state.brands.filter(b=>brandFilter==='all'||b.id===brandFilter).map(b=>{
     let total = 0;
@@ -8455,7 +8718,7 @@ function initDashboardCharts(){
       const m = parseInt((d.date||'').slice(5,7),10);
       if(m>=1 && m<=12) monthly[m-1].nb += 1;
     });
-    scopedYearDevis.filter(d=>d.status==='Accepté').forEach(d=>{
+    scopedYearDevis.filter(d=>isDevisWon(d)).forEach(d=>{
       const m = parseInt((d.date||'').slice(5,7),10);
       if(m>=1 && m<=12) monthly[m-1].ca += devisTotal(d).ht;
     });
