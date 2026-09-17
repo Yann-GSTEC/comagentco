@@ -533,6 +533,7 @@ let state = {
   commissions: {},
   caVva: {},
   dashboardLayout: {order:[], sizes:{}, heights:{}},
+  rapportLayout: {order:[], sizes:{}, heights:{}},
   loaded:false
 };
 
@@ -956,7 +957,7 @@ async function loadAll(){
     try{ folderData = await readFolderBackupData(); }catch(e){ folderData = null; }
   }
   try{
-    const keys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','settings','paramLists','commissions','caVva','dashboardLayout'];
+    const keys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
     for(const k of keys){
       if(folderData && folderData[k]!==undefined){
         state[k] = folderData[k];
@@ -1428,7 +1429,7 @@ function fullBackupPayload(){
     app:'ComAgentCo', version:1, exportedAt:new Date().toISOString(),
     brands:state.brands, clients:state.clients, tarifs:state.tarifs, listesPrixNets:state.listesPrixNets,
     prixNetListes:state.prixNetListes, devis:state.devis, settings:state.settings, paramLists:state.paramLists,
-    commissions:state.commissions, caVva:state.caVva, dashboardLayout:state.dashboardLayout,
+    commissions:state.commissions, caVva:state.caVva, dashboardLayout:state.dashboardLayout, rapportLayout:state.rapportLayout,
   }, null, 2);
 }
 let lastLoadedBackupFileName = '';
@@ -1502,7 +1503,7 @@ function restoreBackupFile(evt){
     try{ data = JSON.parse(e.target.result); }
     catch(err){ showToast('Fichier de sauvegarde illisible.'); return; }
     if(!confirm('Restaurer cette sauvegarde va remplacer toutes les données actuelles. Continuer ?')) return;
-    const allKeys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','settings','paramLists','commissions','caVva','dashboardLayout'];
+    const allKeys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
     allKeys.forEach(k=>{
       if(data[k]!==undefined) state[k]=data[k];
     });
@@ -7860,37 +7861,7 @@ function computeRapportData(brandId, year, month){
   return {devisForBrand, enCours, gagnes, perdus, montantEnCours, montantGagne, montantPerdu, meetings, lineAmount, commissionData};
 }
 /* ============================= DISPOSITION LIBRE DES CARTES DU RAPPORT ============================= */
-const RAPPORT_WIDGET_DEFAULTS = {
-  'kpi-ca':          {x:0,   y:0,   w:210, h:100},
-  'kpi-encours':     {x:220, y:0,   w:210, h:100},
-  'kpi-gagnes':      {x:440, y:0,   w:210, h:100},
-  'kpi-perdus':      {x:660, y:0,   w:210, h:100},
-  'kpi-commissions': {x:0,   y:110, w:440, h:100},
-  'kpi-rdv':         {x:450, y:110, w:210, h:100},
-  'sec-encours':     {x:0,   y:220, w:880, h:280},
-  'sec-gagnes':      {x:0,   y:510, w:880, h:280},
-  'sec-perdus':      {x:0,   y:800, w:880, h:280},
-  'sec-rdv':         {x:0,   y:1090,w:880, h:320},
-};
-function getRapportLayout(){
-  const stored = state.settings.rapportLayout || {};
-  const layout = {};
-  Object.keys(RAPPORT_WIDGET_DEFAULTS).forEach(k=>{
-    layout[k] = Object.assign({}, RAPPORT_WIDGET_DEFAULTS[k], stored[k]||{});
-  });
-  return layout;
-}
-function saveRapportWidget(id, patch){
-  state.settings.rapportLayout = state.settings.rapportLayout || {};
-  state.settings.rapportLayout[id] = Object.assign({}, state.settings.rapportLayout[id]||{}, patch);
-  persist('settings');
-}
-function resetRapportLayout(){
-  state.settings.rapportLayout = {};
-  persist('settings');
-  render();
-}
-/* ---- Redimensionnement générique de la hauteur d'une carte (Tableau de bord, Commissions) ---- */
+/* ---- Redimensionnement générique de la hauteur d'une carte (Tableau de bord, Rapport, Commissions) ---- */
 let cardResizeState = null;
 function startCardHeightResize(evt, kind, id){
   evt.preventDefault(); evt.stopPropagation();
@@ -7918,6 +7889,10 @@ function onCardHeightResizeEnd(){
       if(!state.dashboardLayout.heights) state.dashboardLayout.heights = {};
       state.dashboardLayout.heights[id] = newHeight;
       persist('dashboardLayout');
+    } else if(kind==='rapport'){
+      ensureRapportLayout();
+      state.rapportLayout.heights[id] = newHeight;
+      persist('rapportLayout');
     } else {
       state.settings.cardHeights = state.settings.cardHeights || {};
       state.settings.cardHeights[kind+':'+id] = newHeight;
@@ -7933,78 +7908,74 @@ function getCardHeight(kind, id){
   return (state.settings.cardHeights && state.settings.cardHeights[kind+':'+id]) || null;
 }
 
-function renderRapportWidget(id, layout, label, bodyHtml, color){
-  const l = layout[id];
-  const c = color || 'var(--accent)';
-  return `
-  <div class="rapport-widget" id="widget-${id}" style="left:${l.x}px; top:${l.y}px; width:${l.w}px; height:${l.h}px; border-top:3px solid ${c};">
-    <div class="rapport-widget-drag" onmousedown="startWidgetDrag(event,'${id}')" title="Glisser pour déplacer" style="background:color-mix(in srgb, ${c} 12%, var(--surface-2));color:${c};">${escapeHtml(label)}</div>
-    <div class="rapport-widget-body">${bodyHtml}</div>
-    <div class="rapport-widget-resize" onmousedown="startWidgetResize(event,'${id}')" title="Glisser pour redimensionner"></div>
-  </div>`;
-}
-let widgetDragState = null;
-function startWidgetDrag(evt, id){
-  evt.preventDefault(); evt.stopPropagation();
-  const el = document.getElementById('widget-'+id);
-  widgetDragState = { id, startX:evt.clientX, startY:evt.clientY, startLeft:el.offsetLeft, startTop:el.offsetTop, el };
-  document.addEventListener('mousemove', onWidgetDragMove);
-  document.addEventListener('mouseup', onWidgetDragEnd);
-}
-function onWidgetDragMove(evt){
-  if(!widgetDragState) return;
-  const dx = evt.clientX - widgetDragState.startX;
-  const dy = evt.clientY - widgetDragState.startY;
-  const newLeft = Math.max(0, widgetDragState.startLeft + dx);
-  const newTop = Math.max(0, widgetDragState.startTop + dy);
-  widgetDragState.el.style.left = newLeft+'px';
-  widgetDragState.el.style.top = newTop+'px';
-  widgetDragState.newLeft = newLeft; widgetDragState.newTop = newTop;
-  updateRapportCanvasHeight();
-}
-function onWidgetDragEnd(){
-  if(!widgetDragState) return;
-  document.removeEventListener('mousemove', onWidgetDragMove);
-  document.removeEventListener('mouseup', onWidgetDragEnd);
-  const { id, newLeft, newTop } = widgetDragState;
-  if(newLeft!=null) saveRapportWidget(id, {x:newLeft, y:newTop});
-  widgetDragState = null;
-}
-let widgetResizeState = null;
-function startWidgetResize(evt, id){
-  evt.preventDefault(); evt.stopPropagation();
-  const el = document.getElementById('widget-'+id);
-  widgetResizeState = { id, startX:evt.clientX, startY:evt.clientY, startW:el.offsetWidth, startH:el.offsetHeight, el };
-  document.addEventListener('mousemove', onWidgetResizeMove);
-  document.addEventListener('mouseup', onWidgetResizeEnd);
-}
-function onWidgetResizeMove(evt){
-  if(!widgetResizeState) return;
-  const dw = evt.clientX - widgetResizeState.startX;
-  const dh = evt.clientY - widgetResizeState.startY;
-  const newW = Math.max(180, widgetResizeState.startW + dw);
-  const newH = Math.max(90, widgetResizeState.startH + dh);
-  widgetResizeState.el.style.width = newW+'px';
-  widgetResizeState.el.style.height = newH+'px';
-  widgetResizeState.newW = newW; widgetResizeState.newH = newH;
-  updateRapportCanvasHeight();
-}
-function onWidgetResizeEnd(){
-  if(!widgetResizeState) return;
-  document.removeEventListener('mousemove', onWidgetResizeMove);
-  document.removeEventListener('mouseup', onWidgetResizeEnd);
-  const { id, newW, newH } = widgetResizeState;
-  if(newW!=null) saveRapportWidget(id, {w:newW, h:newH});
-  widgetResizeState = null;
-}
-function updateRapportCanvasHeight(){
-  const canvas = document.getElementById('rapportCanvas');
-  if(!canvas) return;
-  let maxBottom = 0;
-  canvas.querySelectorAll('.rapport-widget').forEach(el=>{
-    maxBottom = Math.max(maxBottom, el.offsetTop + el.offsetHeight);
+/* ---- Rapport : cartes en grille, comme le Tableau de bord (glisser-déposer, largeur, hauteur) ---- */
+const RAPPORT_WIDGETS = [
+  {id:'kpi-ca', kind:'kpi', defaultSize:'sm'},
+  {id:'kpi-encours', kind:'kpi', defaultSize:'sm'},
+  {id:'kpi-gagnes', kind:'kpi', defaultSize:'sm'},
+  {id:'kpi-perdus', kind:'kpi', defaultSize:'sm'},
+  {id:'kpi-commissions', kind:'card', defaultSize:'md'},
+  {id:'kpi-rdv', kind:'kpi', defaultSize:'sm'},
+  {id:'sec-encours', kind:'card', defaultSize:'lg'},
+  {id:'sec-gagnes', kind:'card', defaultSize:'lg'},
+  {id:'sec-perdus', kind:'card', defaultSize:'lg'},
+  {id:'sec-rdv', kind:'card', defaultSize:'lg'},
+];
+function ensureRapportLayout(){
+  if(!state.rapportLayout) state.rapportLayout = {order:[], sizes:{}, heights:{}};
+  if(!state.rapportLayout.order) state.rapportLayout.order = [];
+  if(!state.rapportLayout.sizes) state.rapportLayout.sizes = {};
+  if(!state.rapportLayout.heights) state.rapportLayout.heights = {};
+  const known = new Set(state.rapportLayout.order);
+  RAPPORT_WIDGETS.forEach(w=>{
+    if(!known.has(w.id)) state.rapportLayout.order.push(w.id);
+    if(!state.rapportLayout.sizes[w.id]) state.rapportLayout.sizes[w.id] = w.defaultSize;
   });
-  canvas.style.height = (maxBottom+30)+'px';
+  state.rapportLayout.order = state.rapportLayout.order.filter(id=>RAPPORT_WIDGETS.some(w=>w.id===id));
+}
+let rptDragId = null;
+function rptDragStart(ev, id){
+  rptDragId = id;
+  ev.dataTransfer.effectAllowed = 'move';
+  try{ ev.dataTransfer.setData('text/plain', id); }catch(e){}
+  ev.currentTarget.classList.add('dragging');
+}
+function rptDragOver(ev){
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  ev.currentTarget.classList.add('drag-over');
+}
+function rptDragLeave(ev){
+  ev.currentTarget.classList.remove('drag-over');
+}
+function rptDragEnd(ev){
+  ev.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.dash-card.drag-over').forEach(el=>el.classList.remove('drag-over'));
+}
+function rptDrop(ev, targetId){
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drag-over');
+  if(!rptDragId || rptDragId===targetId) return;
+  ensureRapportLayout();
+  const order = state.rapportLayout.order;
+  const from = order.indexOf(rptDragId);
+  const to = order.indexOf(targetId);
+  if(from<0 || to<0) return;
+  order.splice(from,1);
+  order.splice(to,0,rptDragId);
+  rptDragId = null;
+  persist('rapportLayout');
+  render();
+}
+function rptResize(id, delta){
+  ensureRapportLayout();
+  const order3 = ['sm','md','lg'];
+  const cur = state.rapportLayout.sizes[id] || 'md';
+  let idx = order3.indexOf(cur);
+  idx = Math.max(0, Math.min(order3.length-1, idx+delta));
+  state.rapportLayout.sizes[id] = order3[idx];
+  persist('rapportLayout');
+  render();
 }
 
 function renderRapport(){
@@ -8016,19 +7987,56 @@ function renderRapport(){
   if(!ui.rapportYear || !years.includes(ui.rapportYear)) ui.rapportYear = years[0] || new Date().getFullYear();
   const data = computeRapportData(ui.rapportBrand, ui.rapportYear, ui.rapportMonth);
   const periodLabel = ui.rapportMonth ? `${MOIS_LABELS[ui.rapportMonth-1]} ${ui.rapportYear}` : `Année ${ui.rapportYear}`;
-  const layout = getRapportLayout();
+  ensureRapportLayout();
+
+  const widgetContent = {
+    'kpi-ca': `<div class="label">CA gagné (devis)</div><div class="value num" style="color:var(--success);">${fmtMoney(data.montantGagne)}</div>`,
+    'kpi-encours': `<div class="label">Devis en cours</div><div class="value num" style="color:#2F6FBD;">${data.enCours.length}</div><div class="delta">${fmtMoney(data.montantEnCours)}</div>`,
+    'kpi-gagnes': `<div class="label">Devis gagnés</div><div class="value num" style="color:var(--success);">${data.gagnes.length}</div>`,
+    'kpi-perdus': `<div class="label">Devis perdus</div><div class="value num" style="color:var(--danger);">${data.perdus.length}</div><div class="delta">${fmtMoney(data.montantPerdu)}</div>`,
+    'kpi-commissions': `<h3 style="margin:0 0 12px 0;font-size:14px;">Commissions</h3><div class="grid grid-2"><div><div class="label">CA (onglet Commissions)</div><div class="value num" style="color:var(--brass);">${fmtMoney(data.commissionData.ca)}</div></div><div><div class="label">Commission calculée</div><div class="value num" style="color:var(--brass);">${fmtMoney(data.commissionData.commission)}</div></div></div>`,
+    'kpi-rdv': `<div class="label">Rendez-vous effectués</div><div class="value num" style="color:var(--accent);">${data.meetings.length}</div>`,
+    'sec-encours': `<h3 style="margin:0 0 12px 0;font-size:15px;">Devis en cours <span class="helper" style="font-weight:400;">(${data.enCours.length})</span></h3>${rapportDevisSectionBody(data.enCours, data.lineAmount)}`,
+    'sec-gagnes': `<h3 style="margin:0 0 12px 0;font-size:15px;">Devis gagnés <span class="helper" style="font-weight:400;">(${data.gagnes.length})</span></h3>${rapportDevisSectionBody(data.gagnes, data.lineAmount)}`,
+    'sec-perdus': `<h3 style="margin:0 0 12px 0;font-size:15px;">Devis perdus <span class="helper" style="font-weight:400;">(${data.perdus.length})</span></h3>${rapportDevisSectionBody(data.perdus, data.lineAmount)}`,
+    'sec-rdv': `<h3 style="margin:0 0 12px 0;font-size:15px;">Rendez-vous effectués <span class="helper" style="font-weight:400;">(${data.meetings.length})</span></h3>${rapportMeetingsSectionBody(data.meetings)}`,
+  };
+  const widgetCardsHtml = state.rapportLayout.order.map(id=>{
+    const w = RAPPORT_WIDGETS.find(x=>x.id===id);
+    if(!w) return '';
+    const size = state.rapportLayout.sizes[id] || w.defaultSize;
+    const cols = DASH_SIZE_COLS[size];
+    const extraClass = w.kind==='kpi' ? 'kpi' : 'card-pad';
+    const customHeight = state.rapportLayout.heights && state.rapportLayout.heights[id];
+    const heightStyle = customHeight ? `height:${customHeight}px;overflow:auto;` : '';
+    return `
+  <div class="card ${extraClass} dash-card" draggable="true" data-widget="${id}"
+       style="grid-column:span ${cols};${heightStyle}"
+       ondragstart="rptDragStart(event,'${id}')" ondragover="rptDragOver(event)" ondragleave="rptDragLeave(event)" ondrop="rptDrop(event,'${id}')" ondragend="rptDragEnd(event)">
+    <div class="dash-card-tools">
+      <span class="dash-drag-handle" onclick="event.stopPropagation();" title="Glisser pour déplacer">⠿</span>
+      <span class="dash-size-btns">
+        <button type="button" onclick="event.stopPropagation(); rptResize('${id}',-1);" title="Réduire" ${size==='sm'?'disabled':''}>−</button>
+        <button type="button" onclick="event.stopPropagation(); rptResize('${id}',1);" title="Agrandir" ${size==='lg'?'disabled':''}>+</button>
+      </span>
+    </div>
+    ${widgetContent[id]||''}
+    ${cardResizeHandleHtml('rapport', id)}
+  </div>`;
+  }).join('');
+
   return `
   <div class="topbar">
     <div><h1>Rapport</h1><div class="sub">Synthèse d'activité par marque, par mois ou par année — ${escapeHtml(periodLabel)}</div></div>
     <div style="display:flex;gap:8px;">
       <button class="btn btn-sm btn-ghost" onclick="ui.rapportFullscreen=!ui.rapportFullscreen; render();" title="${ui.rapportFullscreen?'Revenir à l\'affichage normal':'Afficher le rapport en plein écran'}">${ui.rapportFullscreen?'✕ Quitter le plein écran':'⛶ Plein écran'}</button>
-      <button class="btn btn-sm btn-ghost" onclick="resetRapportLayout()" title="Remettre les cartes à leur position et taille d'origine">↺ Réinitialiser la disposition</button>
+      <button type="button" class="btn btn-sm btn-ghost" onclick="if(confirm('Réinitialiser la disposition du rapport ?')){ state.rapportLayout={order:[],sizes:{},heights:{}}; persist('rapportLayout'); render(); }" title="Réinitialiser l'ordre, la largeur et la hauteur des cartes">Réinitialiser la disposition</button>
       <button class="btn" onclick="openRapportPdfOptionsModal('preview')">Aperçu PDF</button>
       <button class="btn" onclick="openRapportPdfOptionsModal('download')">Télécharger PDF</button>
       <button class="btn btn-primary" onclick="openRapportPdfOptionsModal('send')">Envoyer par email</button>
     </div>
   </div>
-  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
     <div class="field" style="margin-bottom:0;max-width:260px;">
       <label>Marque</label>
       <select onchange="ui.rapportBrand=this.value; render();">
@@ -8049,20 +8057,8 @@ function renderRapport(){
       </select>
     </div>
   </div>
-  <div class="helper" style="margin-bottom:10px;">Glissez l'en-tête d'une carte pour la déplacer, ou son coin inférieur droit pour la redimensionner — la disposition est mémorisée automatiquement.</div>
-
-  <div class="rapport-canvas" id="rapportCanvas">
-    ${renderRapportWidget('kpi-ca', layout, 'CA gagné', `<div class="label">CA gagné (devis)</div><div class="value num" style="color:var(--success);">${fmtMoney(data.montantGagne)}</div>`, 'var(--success)')}
-    ${renderRapportWidget('kpi-encours', layout, 'Devis en cours', `<div class="label">Devis en cours</div><div class="value num" style="color:#2F6FBD;">${data.enCours.length}</div><div class="delta">${fmtMoney(data.montantEnCours)}</div>`, '#2F6FBD')}
-    ${renderRapportWidget('kpi-gagnes', layout, 'Devis gagnés', `<div class="label">Devis gagnés</div><div class="value num" style="color:var(--success);">${data.gagnes.length}</div>`, 'var(--success)')}
-    ${renderRapportWidget('kpi-perdus', layout, 'Devis perdus', `<div class="label">Devis perdus</div><div class="value num" style="color:var(--danger);">${data.perdus.length}</div><div class="delta">${fmtMoney(data.montantPerdu)}</div>`, 'var(--danger)')}
-    ${renderRapportWidget('kpi-commissions', layout, 'Commissions', `<div class="grid grid-2"><div><div class="label">CA (onglet Commissions)</div><div class="value num" style="color:var(--brass);">${fmtMoney(data.commissionData.ca)}</div></div><div><div class="label">Commission calculée</div><div class="value num" style="color:var(--brass);">${fmtMoney(data.commissionData.commission)}</div></div></div>`, 'var(--brass)')}
-    ${renderRapportWidget('kpi-rdv', layout, 'Rendez-vous', `<div class="label">Rendez-vous effectués</div><div class="value num" style="color:var(--accent);">${data.meetings.length}</div>`, 'var(--accent)')}
-    ${renderRapportWidget('sec-encours', layout, 'Devis en cours — détail', rapportDevisSectionBody(data.enCours, data.lineAmount), '#2F6FBD')}
-    ${renderRapportWidget('sec-gagnes', layout, 'Devis gagnés — détail', rapportDevisSectionBody(data.gagnes, data.lineAmount), 'var(--success)')}
-    ${renderRapportWidget('sec-perdus', layout, 'Devis perdus — détail', rapportDevisSectionBody(data.perdus, data.lineAmount), 'var(--danger)')}
-    ${renderRapportWidget('sec-rdv', layout, 'Rendez-vous effectués — détail', rapportMeetingsSectionBody(data.meetings), 'var(--accent)')}
-  </div>
+  <div class="helper" style="margin-bottom:10px;">Glissez une carte par sa poignée ⠿ pour la déplacer, utilisez − / + pour changer sa largeur, ou tirez le coin inférieur droit pour ajuster sa hauteur.</div>
+  <div class="dash-grid">${widgetCardsHtml}</div>
   `;
 }
 function rapportDevisSectionBody(list, lineAmount){
@@ -8852,7 +8848,7 @@ window.addEventListener('storage', (e)=>{
   if(!e.key || !e.key.startsWith('comagentco_')) return;
   const rest = e.key.slice('comagentco_'.length);
   if(rest.indexOf('__c')>=0) return; // morceau de données : on ne réagit qu'au sommaire principal
-  const known = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','settings','paramLists','commissions','caVva','dashboardLayout'];
+  const known = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
   if(known.indexOf(rest)===-1) return;
   syncKeyFromLocalStorage(rest);
 });
