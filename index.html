@@ -12,6 +12,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://alcdn.msauth.net/browser/3.18.0/js/msal-browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 :root{
   --bg:#F5F4EF;
@@ -5500,6 +5501,7 @@ function renderDevis(){
     <div style="display:flex;gap:8px;">
       <button class="btn" onclick="runEtatAffaireMigration(true)" title="Vérifie et corrige les devis dont l'État de l'affaire (Gagnée/Perdue) ne se serait pas correctement enregistré">↺ Réparer les états d'affaire</button>
       <button class="btn" onclick="openImportModalDevis()">⇪ Importer (Excel / CSV)</button>
+      <button class="btn" onclick="openImportDevisPdfPicker()" title="Recrée un devis à partir d'un de vos PDF déjà exportés par ComAgentCo">⇪ Importer un devis (PDF)</button>
       <button class="btn btn-primary" onclick="openDevisForm()">+ Nouveau devis</button>
     </div>
   </div>
@@ -6178,6 +6180,156 @@ function defaultValidUntil(type, dateStr){
   }
   return result.toISOString().slice(0,10);
 }
+/* ============================= IMPORT D'UN DEVIS DEPUIS UN PDF (déjà exporté par ComAgentCo) ============================= */
+function openImportDevisPdfPicker(){
+  if(state.clients.length===0){ showToast('Ajoutez d\'abord un client.'); return; }
+  if(typeof pdfjsLib==='undefined'){ showToast("La lecture de PDF n'a pas pu se charger — vérifiez votre connexion internet et réessayez."); return; }
+  if(!pdfjsLib.GlobalWorkerOptions.workerSrc){
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/pdf,.pdf';
+  input.onchange = handleImportDevisPdfFile;
+  input.click();
+}
+async function handleImportDevisPdfFile(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  showToast('Lecture du PDF en cours…');
+  try{
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+    let lines = [];
+    for(let p=1;p<=pdf.numPages;p++){
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      lines = lines.concat(groupPdfTextIntoLines(content.items));
+    }
+    if(lines.length===0){ showToast("Ce PDF ne contient pas de texte exploitable (peut-être une image scannée)."); return; }
+    const parsed = parseComagentcoDevisPdf(lines);
+    openImportedDevisReview(parsed, file.name);
+  }catch(e){
+    console.error(e);
+    showToast("Impossible de lire ce PDF : "+(e.message||String(e)));
+  }
+}
+function groupPdfTextIntoLines(items){
+  // Regroupe les fragments de texte d'une page PDF par ligne (coordonnée Y proche), triés de gauche à
+  // droite sur chaque ligne, pour reconstituer un texte lisible à partir des positions brutes de PDF.js.
+  const rows = [];
+  items.forEach(it=>{
+    if(!it.str || !it.str.trim()) return;
+    const y = Math.round(it.transform[5]);
+    let row = rows.find(r=>Math.abs(r.y-y)<=2);
+    if(!row){ row = {y, items:[]}; rows.push(row); }
+    row.items.push({x:it.transform[4], str:it.str});
+  });
+  rows.sort((a,b)=>b.y-a.y); // une page PDF a l'origine en bas à gauche : Y décroissant = de haut en bas
+  return rows.map(r=>{
+    r.items.sort((a,b)=>a.x-b.x);
+    return { y:r.y, text: r.items.map(i=>i.str).join(' ').replace(/\s+/g,' ').trim() };
+  }).filter(r=>r.text);
+}
+function parseLongFrenchDateToIso(text){
+  const moisNoms = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  const m = (text||'').toLowerCase().match(/(\d{1,2})\s*(?:er)?\s+(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\s+(\d{4})/);
+  if(!m) return null;
+  const day = parseInt(m[1],10);
+  const month = moisNoms.indexOf(m[2])+1;
+  const year = parseInt(m[3],10);
+  if(!month) return null;
+  return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+}
+function parseComagentcoDevisPdf(lines){
+  const fullText = lines.map(l=>l.text).join('\n');
+  const result = { number:'', date:'', validUntil:'', objet:'', type:'Devis', clientId:'', linesGuess:[], warnings:[] };
+
+  let m = fullText.match(/N°\s*[:.]?\s*([A-Za-z0-9\-_\/]+)/);
+  if(m) result.number = m[1];
+
+  if(/MARCHÉ/i.test(fullText.slice(0,400)) && !/DEVIS/i.test(fullText.slice(0,120))) result.type = 'Marché';
+
+  const dateMatches = [...fullText.matchAll(/\d{1,2}\s*(?:er)?\s+(?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\s+\d{4}/gi)];
+  if(dateMatches[0]) result.date = parseLongFrenchDateToIso(dateMatches[0][0]);
+  if(dateMatches[1]) result.validUntil = parseLongFrenchDateToIso(dateMatches[1][0]);
+  if(!result.date) result.warnings.push("Date du devis non détectée automatiquement — à vérifier.");
+
+  m = fullText.match(/Objet\s*[:.]?\s*\n?([^\n]+)/i);
+  if(m) result.objet = m[1].trim();
+
+  // Société cliente : on recherche, parmi vos clients déjà enregistrés, celui dont le nom apparaît
+  // textuellement dans le PDF (le plus long trouvé, pour éviter qu'un nom court ne fasse une fausse
+  // correspondance dans un autre mot).
+  let bestClient = null, bestLen = 0;
+  const upperText = fullText.toUpperCase();
+  state.clients.forEach(c=>{
+    const label = (c.company||c.name||'').trim();
+    if(label.length>3 && upperText.includes(label.toUpperCase()) && label.length>bestLen){
+      bestLen = label.length; bestClient = c;
+    }
+  });
+  if(bestClient) result.clientId = bestClient.id;
+  else result.warnings.push("Société cliente non identifiée automatiquement — sélectionnez-la manuellement.");
+
+  // Marque(s) mentionnée(s), pour restreindre la recherche de références au bon catalogue tarifaire.
+  const brandsFound = state.brands.filter(b=>b.name && upperText.includes(b.name.toUpperCase()));
+  const brandPool = brandsFound.length ? brandsFound : state.brands;
+  const allRefs = [];
+  brandPool.forEach(b=>{
+    state.tarifs.filter(t=>t.brandId===b.id && t.reference).forEach(t=>allRefs.push({ref:t.reference, brandId:b.id, designation:t.designation, prixCatalogue:t.prixCatalogue}));
+  });
+  allRefs.sort((a,b)=>b.ref.length-a.ref.length); // références longues d'abord (évite qu'une référence courte n'en masque une plus précise)
+
+  const usedRefs = new Set();
+  lines.forEach(line=>{
+    const found = allRefs.find(r=> !usedRefs.has(r.ref) && line.text.toUpperCase().includes(r.ref.toUpperCase()));
+    if(!found) return;
+    usedRefs.add(found.ref);
+    result.linesGuess.push({
+      id: uid(), brandId: found.brandId, reference: found.ref, designation: found.designation||'',
+      qty: 1, prixUnitaire: found.prixCatalogue||0, remisePct1:0, remisePct2:0, remisePct3:0, prixClient:0,
+    });
+  });
+  if(result.linesGuess.length===0){
+    result.warnings.push("Aucune référence reconnue dans ce PDF — ajoutez les lignes manuellement.");
+  } else {
+    result.warnings.push(`${result.linesGuess.length} référence(s) reconnue(s) — quantités, remises et prix repartent du tarif catalogue actuel : vérifiez-les avant d'enregistrer.`);
+  }
+  return result;
+}
+function openImportedDevisReview(parsed, filename){
+  draft = {
+    id: uid(),
+    number: parsed.number || previewNextDevisNumber(parsed.type||'Devis'),
+    type: parsed.type||'Devis',
+    objet: parsed.objet||'',
+    reference: '',
+    clientId: parsed.clientId||'',
+    date: parsed.date || todayStr(),
+    validUntil: parsed.validUntil || defaultValidUntil(parsed.type||'Devis', parsed.date||todayStr()),
+    validUntilAuto: !parsed.validUntil,
+    status: 'Brouillon',
+    etatAffaire: defaultEtatAffaireEnCours(),
+    destinataire: '',
+    apporteurAffaire: '',
+    attentionA: '',
+    tvaPct: 0,
+    notes: `Importé depuis le fichier PDF "${filename}". Vérifiez les quantités, remises et prix de chaque ligne avant d'enregistrer.`,
+    lines: parsed.linesGuess,
+    pdfColumns: {...DEFAULT_PDF_COLUMNS},
+    isNew: true
+  };
+  const brandIds = [...new Set((draft.lines||[]).map(l=>l.brandId))].filter(Boolean);
+  draft.filterBrandId = brandIds.length===1 ? brandIds[0] : '';
+  openModal(devisFormHtml(), {full:true});
+  document.addEventListener('keydown', devisFormKeydownHandler);
+  if(parsed.warnings.length){
+    setTimeout(()=>showToast('⚠ '+parsed.warnings.join(' '), 7000), 400);
+  }
+}
+
+
 function openDevisForm(id, presetClientId){
   if(state.clients.length===0){ showToast('Ajoutez d\'abord un client.'); return; }
   const existing = id ? state.devis.find(x=>x.id===id) : null;
