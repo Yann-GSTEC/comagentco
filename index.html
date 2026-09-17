@@ -6581,21 +6581,24 @@ function devisFormHtml(){
           </div>
         </div>
       </div>
-      <div class="helper" style="margin-top:-8px;margin-bottom:12px;">Cliquer sur la désignation de la référence concernée puis : <strong>F3</strong> historique prix (ce client) · <strong>F4</strong> (département) · <strong>F5</strong> (tous les clients) · <strong>F6</strong> (famille / sous-famille)</div>
+      <div class="helper" style="margin-top:-8px;margin-bottom:12px;">Cliquer sur la désignation de la référence concernée puis : <strong>F3</strong> historique prix (ce client) · <strong>F4</strong> (département) · <strong>F5</strong> (tous les clients) · <strong>F6</strong> (famille / sous-famille). Glissez le bord droit d'un en-tête pour ajuster sa largeur — c'est mémorisé automatiquement.</div>
       <div class="table-wrap lines-table">
-        <table>
+        <table class="col-custom-table">
+          ${devisLinesColgroupHtml()}
           <thead><tr>
             <th style="width:26px;"></th>
-            <th style="width:80px;">Marque</th><th style="width:70px;">Code article</th><th style="text-align:center;">Désignation</th>
-            <th style="width:110px;">Qté</th><th style="width:110px;">PU Tarif</th>
-            <th style="width:100px;">Remise 1</th><th style="width:100px;">Remise 2</th><th style="width:100px;">Remise 3</th>
-            <th style="width:140px;">Prix d'achat HT</th><th style="width:120px;">Marge %</th><th style="width:150px;">Prix de vente conseillé HT</th>
-            <th style="width:115px;">Total HT</th>
+            ${DEVIS_LINES_COLUMNS.map(c=>`
+              <th class="col-th" data-table="devisLines" data-key="${c.key}" style="${c.center?'text-align:center;':''}">
+                <span class="col-th-label">${escapeHtml(c.label)}</span>
+                <span class="col-resize-handle" onmousedown="startColResize(event,'devisLines')" title="Glisser pour redimensionner"></span>
+              </th>
+            `).join('')}
             <th style="width:40px;"></th>
           </tr></thead>
           <tbody id="d_linesBody">${devisLinesRowsHtml()}</tbody>
         </table>
       </div>
+      <button type="button" class="btn btn-sm btn-ghost" style="margin-top:6px;" onclick="resetColumnPrefs('devisLines')">↺ Réinitialiser la largeur des colonnes</button>
       ${draft.lines.length===0?'<div class="helper" style="padding:10px 0;">Utilisez la recherche ci-dessus pour ajouter des références depuis vos tarifs.</div>':''}
 
       <div class="section-title">Remises et marge uniformes <span class="helper" style="display:inline;">(la remise ignore les lignes avec un prix net client ; la marge s'applique à toutes les lignes — puis ajustables ligne par ligne si besoin)</span></div>
@@ -6731,6 +6734,30 @@ function setDevisAttention(contactId){
   const ct = c && (c.contacts||[]).find(x=>x.id===contactId);
   draft.attentionA = ct ? contactFullName(ct) : '';
   refreshDevisModal();
+}
+const DEVIS_LINES_COLUMNS = [
+  {key:'marque', label:'Marque', defaultWidth:80},
+  {key:'ref', label:'Code article', defaultWidth:70},
+  {key:'desig', label:'Désignation', defaultWidth:260, center:true},
+  {key:'qty', label:'Qté', defaultWidth:110},
+  {key:'puTarif', label:'PU Tarif', defaultWidth:110},
+  {key:'remise1', label:'Remise 1', defaultWidth:100},
+  {key:'remise2', label:'Remise 2', defaultWidth:100},
+  {key:'remise3', label:'Remise 3', defaultWidth:100},
+  {key:'pudistri', label:"Prix d'achat HT", defaultWidth:140},
+  {key:'marge', label:'Marge %', defaultWidth:120},
+  {key:'puclient', label:'Prix de vente conseillé HT', defaultWidth:150},
+  {key:'totalht', label:'Total HT', defaultWidth:115},
+];
+function devisLinesColWidths(){
+  const cols = getColumnOrder('devisLines', DEVIS_LINES_COLUMNS);
+  const map = {};
+  cols.forEach(c=>{ map[c.key] = c.width; });
+  return map;
+}
+function devisLinesColgroupHtml(){
+  const w = devisLinesColWidths();
+  return `<colgroup><col style="width:26px;">${DEVIS_LINES_COLUMNS.map(c=>`<col style="width:${w[c.key]}px;">`).join('')}<col style="width:40px;"></colgroup>`;
 }
 function devisLinesRowsHtml(){
   return draft.lines.map((l,i)=>{
