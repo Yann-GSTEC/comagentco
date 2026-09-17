@@ -6344,7 +6344,7 @@ function openImportedDevisReview(parsed, filename){
     validUntil: parsed.validUntil || defaultValidUntil(parsed.type||'Devis', parsed.date||todayStr()),
     validUntilAuto: !parsed.validUntil,
     status: 'Brouillon',
-    etatAffaire: defaultEtatAffaireEnCours(),
+    etatAffaire: '',
     destinataire: '',
     apporteurAffaire: '',
     attentionA: '',
@@ -6378,7 +6378,7 @@ function openDevisForm(id, presetClientId){
     validUntil: defaultValidUntil('Devis', todayStr()),
     validUntilAuto: true,
     status: 'Brouillon',
-    etatAffaire: defaultEtatAffaireEnCours(),
+    etatAffaire: '',
     destinataire: '',
     apporteurAffaire: '',
     attentionA: '',
@@ -7378,7 +7378,7 @@ function confirmSaveDevisNewVersion(){
   draft.id = uid();
   draft.number = newNumber;
   draft.status = 'Brouillon';
-  draft.etatAffaire = defaultEtatAffaireEnCours();
+  draft.etatAffaire = '';
   draft.duplicatedFromId = originalId;
   draft.history = [{ ts, type:'duplicated_from', detail:originalNumber, clientLabel }];
   finalizeSaveDraftDevis(true);
