@@ -6282,21 +6282,55 @@ function parseComagentcoDevisPdf(lines){
   allRefs.sort((a,b)=>b.ref.length-a.ref.length); // références longues d'abord (évite qu'une référence courte n'en masque une plus précise)
 
   const usedRefs = new Set();
+  let numbersRecovered = 0;
   lines.forEach(line=>{
     const found = allRefs.find(r=> !usedRefs.has(r.ref) && line.text.toUpperCase().includes(r.ref.toUpperCase()));
     if(!found) return;
     usedRefs.add(found.ref);
+    const vals = extractPdfLineValues(line.text, found.ref);
+    let qty = vals.qty || 1;
+    let remisePct1 = vals.pctVals[0]||0, remisePct2 = vals.pctVals[1]||0, remisePct3 = vals.pctVals[2]||0;
+    let prixUnitaire = found.prixCatalogue||0;
+    const totalHT = vals.moneyVals.length ? vals.moneyVals[vals.moneyVals.length-1] : null;
+    if(totalHT!=null && qty>0){
+      const achatUnit = totalHT/qty;
+      const factor = (1-remisePct1/100)*(1-remisePct2/100)*(1-remisePct3/100);
+      if(factor>0){ prixUnitaire = +(achatUnit/factor).toFixed(4); numbersRecovered++; }
+    }
     result.linesGuess.push({
       id: uid(), brandId: found.brandId, reference: found.ref, designation: found.designation||'',
-      qty: 1, prixUnitaire: found.prixCatalogue||0, remisePct1:0, remisePct2:0, remisePct3:0, prixClient:0,
+      qty, prixUnitaire, remisePct1, remisePct2, remisePct3, prixClient:0,
     });
   });
   if(result.linesGuess.length===0){
     result.warnings.push("Aucune référence reconnue dans ce PDF — ajoutez les lignes manuellement.");
+  } else if(numbersRecovered<result.linesGuess.length){
+    result.warnings.push(`${result.linesGuess.length} référence(s) reconnue(s), dont ${numbersRecovered} avec quantité/prix relus depuis le PDF — vérifiez tout de même chaque ligne, notamment celles où le montant total n'a pas pu être identifié (reparties du tarif catalogue actuel).`);
   } else {
-    result.warnings.push(`${result.linesGuess.length} référence(s) reconnue(s) — quantités, remises et prix repartent du tarif catalogue actuel : vérifiez-les avant d'enregistrer.`);
+    result.warnings.push(`${result.linesGuess.length} référence(s) reconnue(s), quantités et prix relus depuis le PDF — vérifiez-les avant d'enregistrer (une lecture de texte reste approximative).`);
   }
   return result;
+}
+function parseFrenchNumber(raw){
+  return parseFloat(String(raw).replace(/[\s\u00A0]/g,'').replace(',', '.'));
+}
+function extractPdfLineValues(text, reference){
+  // Repère, dans le texte reconstitué d'une ligne, les montants (suivis de €), les pourcentages (suivis
+  // de %) et une quantité probable (le dernier nombre entier isolé situé juste avant le premier montant).
+  const withoutRef = reference ? text.replace(reference, ' ') : text;
+  const moneyRe = /(-?\d[\d\s\u00A0]*(?:,\d{1,2})?)\s*€/g;
+  const pctRe = /(-?\d[\d\s\u00A0]*(?:,\d{1,2})?)\s*%/g;
+  const moneyVals = [...withoutRef.matchAll(moneyRe)].map(m=>parseFrenchNumber(m[1])).filter(n=>!isNaN(n));
+  const pctVals = [...withoutRef.matchAll(pctRe)].map(m=>parseFrenchNumber(m[1])).filter(n=>!isNaN(n));
+  let qty = 1;
+  const moneyIdx = withoutRef.search(/€/);
+  const before = moneyIdx>0 ? withoutRef.slice(0, moneyIdx) : withoutRef;
+  const intMatches = before.match(/\d{1,5}(?!\s*[.,%])/g);
+  if(intMatches && intMatches.length){
+    const last = parseInt(intMatches[intMatches.length-1], 10);
+    if(!isNaN(last) && last>0 && last<100000) qty = last;
+  }
+  return { qty, moneyVals, pctVals };
 }
 function openImportedDevisReview(parsed, filename){
   draft = {
