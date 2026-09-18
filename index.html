@@ -6423,12 +6423,15 @@ function extractPdfLineValues(text, reference){
   // Repère, dans le texte reconstitué d'une ligne, les montants et les pourcentages, puis une quantité
   // probable (le dernier nombre entier isolé situé juste avant le premier montant).
   // Les montants sont acceptés sous deux formats, selon la version de ComAgentCo qui a généré le PDF :
-  // "474.99" (point, sans symbole) ou "474,99 €" (virgule, avec le symbole €) — le symbole est optionnel.
+  // "474.99" (point, jamais séparé par des espaces, sans symbole) ou "1 474,99 €" (virgule, avec
+  // regroupement des milliers par espace, symbole €). Les deux formats sont traités séparément : le
+  // format à point n'autorise PAS d'espace interne, sinon un nombre isolé juste avant (ex. la quantité
+  // "1" devant "474.99") serait avalé par erreur comme premier groupe de milliers du montant.
   const withoutRef = reference ? text.replace(reference, ' ') : text;
-  const moneyRe = /(-?\d[\d\s\u00A0]*[.,]\d{2})\s*(?:€|EUR)?/g;
+  const moneyRe = /\d+\.\d{2}(?!\d)|\d[\d\s\u00A0]*,\d{2}\s*(?:€|EUR)?/g;
   const pctRe = /(-?\d[\d\s\u00A0]*(?:[.,]\d{1,2})?)\s*%/g;
   const moneyMatches = [...withoutRef.matchAll(moneyRe)];
-  const moneyVals = moneyMatches.map(mm=>parseFrenchNumber(mm[1])).filter(n=>!isNaN(n));
+  const moneyVals = moneyMatches.map(mm=>parseFrenchNumber(mm[0])).filter(n=>!isNaN(n));
   const pctVals = [...withoutRef.matchAll(pctRe)].map(mm=>parseFrenchNumber(mm[1])).filter(n=>!isNaN(n));
   let qty = 1;
   // On s'arrête AVANT le début du premier montant (et non juste avant un éventuel symbole €), sinon les
