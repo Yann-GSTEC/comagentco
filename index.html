@@ -5454,8 +5454,12 @@ function lineDistribUnit(line){
 }
 function lineTotalHT(line, destinataire){
   // Le Total HT (devis comme marché) se calcule toujours sur le Prix d'achat HT de la ligne,
-  // quel que soit le destinataire choisi.
-  return (line.qty||0) * lineDistribUnit(line);
+  // quel que soit le destinataire choisi. On arrondit ce prix unitaire à la centime avant de le
+  // multiplier par la quantité — c'est-à-dire sur la valeur réellement affichée à l'écran — pour que
+  // le Total HT corresponde toujours exactement à "Quantité × Prix d'achat HT affiché", même quand ce
+  // dernier découle d'un calcul de remise avec plusieurs décimales cachées.
+  const unit = +lineDistribUnit(line).toFixed(2);
+  return (line.qty||0) * unit;
 }
 function lineMargin(line){
   const distribUnit = lineDistribUnit(line);
@@ -7016,10 +7020,10 @@ function devisLineSetDistrib(i, val){
       let r1 = (1 - (parsed/denom)) * 100;
       if(r1<0) r1 = 0;
       if(r1>100) r1 = 100;
-      // Arrondi à 4 décimales (et non 2) : avec un PU Tarif élevé et une forte remise, arrondir la remise
-      // à seulement 2 décimales pouvait décaler le prix d'achat obtenu de plusieurs centimes par rapport
-      // à la valeur exacte saisie.
-      line.remisePct1 = +r1.toFixed(4);
+      // Arrondi à 8 décimales (et non 2) : avec un PU Tarif élevé, une forte remise et une grande
+      // quantité, arrondir la remise à seulement quelques décimales décale le prix d'achat obtenu de
+      // quelques centimes — et cet écart, multiplié par la quantité, devient visible sur le Total HT.
+      line.remisePct1 = +r1.toFixed(8);
     }
     line.distribOverride = null;
     line.distribManuallySet = true;
