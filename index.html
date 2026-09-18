@@ -6237,18 +6237,28 @@ async function handleImportDevisPdfFile(evt){
 function groupPdfTextIntoLines(items){
   // Regroupe les fragments de texte d'une page PDF par ligne (coordonnée Y proche), triés de gauche à
   // droite sur chaque ligne, pour reconstituer un texte lisible à partir des positions brutes de PDF.js.
+  // Un espace n'est inséré entre deux fragments que si un véritable espacement horizontal les sépare —
+  // sinon PDF.js peut renvoyer un même mot ou une même référence en plusieurs fragments adjacents,
+  // et forcer un espace entre chacun d'eux casserait des mots comme "REXEL" en "RE XEL".
   const rows = [];
   items.forEach(it=>{
     if(!it.str || !it.str.trim()) return;
     const y = Math.round(it.transform[5]);
     let row = rows.find(r=>Math.abs(r.y-y)<=2);
     if(!row){ row = {y, items:[]}; rows.push(row); }
-    row.items.push({x:it.transform[4], str:it.str});
+    row.items.push({x:it.transform[4], str:it.str, width:it.width||0});
   });
   rows.sort((a,b)=>b.y-a.y); // une page PDF a l'origine en bas à gauche : Y décroissant = de haut en bas
   return rows.map(r=>{
     r.items.sort((a,b)=>a.x-b.x);
-    return { y:r.y, text: r.items.map(i=>i.str).join(' ').replace(/\s+/g,' ').trim() };
+    let text = '';
+    let prevEnd = null;
+    r.items.forEach(it=>{
+      if(prevEnd!=null && (it.x-prevEnd)>1.4) text += ' ';
+      text += it.str;
+      prevEnd = it.x + it.width;
+    });
+    return { y:r.y, text: text.replace(/\s+/g,' ').trim() };
   }).filter(r=>r.text);
 }
 function parseLongFrenchDateToIso(text){
@@ -6263,10 +6273,22 @@ function parseLongFrenchDateToIso(text){
 }
 function parseComagentcoDevisPdf(lines){
   const fullText = lines.map(l=>l.text).join('\n');
+  const stripSpaces = s=>String(s||'').replace(/\s+/g,'').toUpperCase();
   const result = { number:'', date:'', validUntil:'', objet:'', type:'Devis', clientId:'', linesGuess:[], warnings:[] };
 
-  let m = fullText.match(/N°\s*[:.]?\s*([A-Za-z0-9\-_\/]+)/);
-  if(m) result.number = m[1];
+  // N° du devis : on essaie d'abord le format habituel "INITIALES-numéro" (ex. YG-123) si vos initiales
+  // de numérotation sont connues, plus fiable que la simple recherche du symbole "N°" (qui apparaît
+  // aussi ailleurs sur le document : N° client, N° de TVA…).
+  const initiales = (state.settings.initiales||'').trim();
+  let m = null;
+  if(initiales){
+    m = fullText.match(new RegExp(initiales.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*-\\s*\\d+'));
+    if(m) result.number = m[0].replace(/\s+/g,'');
+  }
+  if(!result.number){
+    m = fullText.match(/N°\s*[:.]?\s*([A-Za-z0-9][A-Za-z0-9\-_\/]*)(?!\s*(?:client|tva|siret|siren))/i);
+    if(m) result.number = m[1];
+  }
 
   if(/MARCHÉ/i.test(fullText.slice(0,400)) && !/DEVIS/i.test(fullText.slice(0,120))) result.type = 'Marché';
 
@@ -6280,20 +6302,22 @@ function parseComagentcoDevisPdf(lines){
 
   // Société cliente : on recherche, parmi vos clients déjà enregistrés, celui dont le nom apparaît
   // textuellement dans le PDF (le plus long trouvé, pour éviter qu'un nom court ne fasse une fausse
-  // correspondance dans un autre mot).
+  // correspondance dans un autre mot). Une seconde passe, insensible aux espaces, rattrape les cas où
+  // l'extraction du PDF aurait inséré ou supprimé un espace au milieu du nom.
   let bestClient = null, bestLen = 0;
   const upperText = fullText.toUpperCase();
+  const flatText = stripSpaces(fullText);
   state.clients.forEach(c=>{
     const label = (c.company||c.name||'').trim();
-    if(label.length>3 && upperText.includes(label.toUpperCase()) && label.length>bestLen){
-      bestLen = label.length; bestClient = c;
-    }
+    if(label.length<=3) return;
+    const matches = upperText.includes(label.toUpperCase()) || flatText.includes(stripSpaces(label));
+    if(matches && label.length>bestLen){ bestLen = label.length; bestClient = c; }
   });
   if(bestClient) result.clientId = bestClient.id;
   else result.warnings.push("Société cliente non identifiée automatiquement — sélectionnez-la manuellement.");
 
   // Marque(s) mentionnée(s), pour restreindre la recherche de références au bon catalogue tarifaire.
-  const brandsFound = state.brands.filter(b=>b.name && upperText.includes(b.name.toUpperCase()));
+  const brandsFound = state.brands.filter(b=>b.name && (upperText.includes(b.name.toUpperCase()) || flatText.includes(stripSpaces(b.name))));
   const brandPool = brandsFound.length ? brandsFound : state.brands;
   const allRefs = [];
   brandPool.forEach(b=>{
@@ -6304,7 +6328,13 @@ function parseComagentcoDevisPdf(lines){
   const usedRefs = new Set();
   let numbersRecovered = 0;
   lines.forEach(line=>{
-    const found = allRefs.find(r=> !usedRefs.has(r.ref) && line.text.toUpperCase().includes(r.ref.toUpperCase()));
+    const lineUpper = line.text.toUpperCase();
+    const lineFlat = stripSpaces(line.text);
+    const found = allRefs.find(r=>{
+      if(usedRefs.has(r.ref)) return false;
+      const refUpper = r.ref.toUpperCase();
+      return lineUpper.includes(refUpper) || lineFlat.includes(stripSpaces(refUpper));
+    });
     if(!found) return;
     usedRefs.add(found.ref);
     const vals = extractPdfLineValues(line.text, found.ref);
@@ -6329,6 +6359,7 @@ function parseComagentcoDevisPdf(lines){
   } else {
     result.warnings.push(`${result.linesGuess.length} référence(s) reconnue(s), quantités et prix relus depuis le PDF — vérifiez-les avant d'enregistrer (une lecture de texte reste approximative).`);
   }
+  result.rawText = fullText;
   return result;
 }
 function parseFrenchNumber(raw){
@@ -6372,15 +6403,26 @@ function openImportedDevisReview(parsed, filename){
     notes: `Importé depuis le fichier PDF "${filename}". Vérifiez les quantités, remises et prix de chaque ligne avant d'enregistrer.`,
     lines: parsed.linesGuess,
     pdfColumns: {...DEFAULT_PDF_COLUMNS},
-    isNew: true
+    isNew: true,
+    pdfImportRawText: parsed.rawText||''
   };
   const brandIds = [...new Set((draft.lines||[]).map(l=>l.brandId))].filter(Boolean);
   draft.filterBrandId = brandIds.length===1 ? brandIds[0] : '';
   openModal(devisFormHtml(), {full:true});
   document.addEventListener('keydown', devisFormKeydownHandler);
   if(parsed.warnings.length){
-    setTimeout(()=>showToast('⚠ '+parsed.warnings.join(' '), 7000), 400);
+    setTimeout(()=>showToast('⚠ '+parsed.warnings.join(' ')+' — bouton "Voir le texte extrait du PDF" disponible en haut du formulaire si besoin de vérifier.', 8000), 400);
   }
+}
+function showRawPdfImportText(){
+  openModal(`
+    <div class="modal-head"><h3>Texte brut extrait du PDF</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="helper" style="margin-bottom:10px;">Voici tel quel le texte que ComAgentCo a réussi à lire dans le PDF — utile pour comprendre pourquoi une information n'aurait pas été (ou mal) reconnue automatiquement.</div>
+      <textarea readonly rows="24" style="width:100%;font-family:monospace;font-size:11.5px;">${escapeHtml(draft.pdfImportRawText||'')}</textarea>
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="closeModal()">Fermer</button></div>
+  `, {lg:true});
 }
 
 
@@ -6526,6 +6568,7 @@ function devisFormHtml(){
         ${draft.isNew && !draft.numberEditedManually?'<span class="helper" style="font-weight:400;">(numéro proposé — modifiable, définitif à l\'enregistrement)</span>':''}
       </h3>
       <div style="display:flex;align-items:center;gap:10px;">
+        ${draft.pdfImportRawText?`<button type="button" class="btn btn-sm btn-ghost" onclick="showRawPdfImportText()">📄 Voir le texte extrait du PDF</button>`:''}
         ${!draft.isNew?`<button type="button" class="btn btn-sm btn-ghost" onclick="openDevisHistoryModal()">🕒 Historique complet</button>`:''}
         <button class="close-x" onclick="closeModal()">✕</button>
       </div>
