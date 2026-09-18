@@ -283,6 +283,11 @@ label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-
 .tabs-sub button.active{color:var(--accent);border-bottom-color:var(--accent);}
 
 .pill-select{display:flex;flex-wrap:wrap;gap:6px;}
+.filter-details{position:relative;}
+.filter-details>summary{list-style:none;cursor:pointer;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--ink-soft);user-select:none;}
+.filter-details>summary::-webkit-details-marker{display:none;}
+.filter-details[open]>summary{border-color:var(--accent);color:var(--accent);}
+.filter-details-panel{position:absolute;top:calc(100% + 4px);left:0;z-index:60;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:10px 14px;min-width:220px;max-height:280px;overflow-y:auto;}
 .pill-select button{
   border:1px solid var(--line);background:#fff;padding:5px 12px;border-radius:20px;font-size:12.5px;
   cursor:pointer;font-weight:600;color:var(--ink-soft);
@@ -571,6 +576,7 @@ let ui = {
   emailingSelected:{},
   rechercheQuery:'',
   devisFilterStatus:'all',
+  devisFilterEtats: null,
   commissionsYear: new Date().getFullYear(),
   commissionsMonth: 0,
   commissionsBrand: 'all',
@@ -1577,6 +1583,7 @@ const UI_FILTER_DEFAULTS = {
   emailingSousFamilleFilter:'all',
   rechercheQuery:'',
   devisFilterStatus:'all',
+  devisFilterEtats: null,
   devisFilterBrand:'all',
   devisFilterApporteur:'all',
   devisSortBy:'date',
@@ -1601,7 +1608,7 @@ const TAB_FILTER_KEYS = {
   clients:['clientsSearch','clientsStatusFilter','clientsFamilleFilter','clientsSousFamilleFilter','clientsDepartementFilter'],
   emailing:['emailingSearch','emailingStatusFilter','emailingFamilleFilter','emailingSousFamilleFilter'],
   recherche:['rechercheQuery'],
-  devis:['devisFilterStatus','devisFilterBrand','devisFilterApporteur','devisSearch','devisDateFrom','devisDateTo'],
+  devis:['devisFilterStatus','devisFilterEtats','devisFilterBrand','devisFilterApporteur','devisSearch','devisDateFrom','devisDateTo'],
   dashboard:['dashboardYear','dashboardCommercial','dashboardBrand','dashboardClient'],
   commissions:['commissionsYear','commissionsMonth','commissionsBrand'],
   rapport:['rapportBrand','rapportYear','rapportMonth'],
@@ -5544,12 +5551,22 @@ function renderDevis(){
         ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.devisFilterBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select>
     </div>
-    <div class="field" style="margin-bottom:0;max-width:200px;">
-      <select onchange="ui.devisFilterStatus=this.value; updateDevisListOnly();">
-        <option value="all" ${(!ui.devisFilterStatus||ui.devisFilterStatus==='all')?'selected':''}>Tous les statuts</option>
-        ${STATUTS.map(s=>`<option value="${s}" ${ui.devisFilterStatus===s?'selected':''}>${s}</option>`).join('')}
-      </select>
-    </div>
+    <details class="filter-details">
+      <summary>État de l'affaire${(ui.devisFilterEtats && ui.devisFilterEtats.length<allDevisEtatFilterValues().length)?` (${ui.devisFilterEtats.length})`:''} ▾</summary>
+      <div class="filter-details-panel">
+        <div style="display:flex;gap:10px;margin-bottom:6px;">
+          <a href="#" onclick="event.preventDefault(); ui.devisFilterEtats=null; updateDevisListOnly();" style="font-size:11.5px;">Tout cocher</a>
+          <a href="#" onclick="event.preventDefault(); ui.devisFilterEtats=[]; updateDevisListOnly();" style="font-size:11.5px;">Tout décocher</a>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12.5px;">
+          <input type="checkbox" style="width:auto;" ${(!ui.devisFilterEtats||ui.devisFilterEtats.includes('__empty__'))?'checked':''} onchange="toggleDevisEtatFilter('__empty__')"> <span class="helper" style="display:inline;">Non renseigné</span>
+        </label>
+        ${(state.paramLists.etatAffaires||[]).map(e=>`
+        <label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12.5px;">
+          <input type="checkbox" style="width:auto;" ${(!ui.devisFilterEtats||ui.devisFilterEtats.includes(e.libelle))?'checked':''} onchange="toggleDevisEtatFilter('${escapeHtml(e.libelle)}')"> ${escapeHtml(e.libelle)}
+        </label>`).join('')}
+      </div>
+    </details>
     <div class="field" style="margin-bottom:0;max-width:200px;">
       <select onchange="ui.devisFilterApporteur=this.value; updateDevisListOnly();">
         <option value="all" ${(!ui.devisFilterApporteur||ui.devisFilterApporteur==='all')?'selected':''}>Apporteur de l'affaire</option>
@@ -5804,9 +5821,24 @@ function clientSocieteLabel(clientId){
   if(!c) return '—';
   return (c.company && c.company.trim()) ? c.company : c.name;
 }
+function allDevisEtatFilterValues(){
+  return ['__empty__', ...(state.paramLists.etatAffaires||[]).map(e=>e.libelle)];
+}
+function toggleDevisEtatFilter(val){
+  if(!ui.devisFilterEtats) ui.devisFilterEtats = allDevisEtatFilterValues();
+  const idx = ui.devisFilterEtats.indexOf(val);
+  if(idx>=0) ui.devisFilterEtats.splice(idx,1);
+  else ui.devisFilterEtats.push(val);
+  updateDevisListOnly();
+}
 function renderDevisListInner(){
   let list = state.devis.slice();
-  if(ui.devisFilterStatus!=='all') list = list.filter(d=>d.status===ui.devisFilterStatus);
+  if(ui.devisFilterEtats){
+    list = list.filter(d=>{
+      const val = (d.etatAffaire||'').trim() || '__empty__';
+      return ui.devisFilterEtats.includes(val);
+    });
+  }
   const q = (ui.devisSearch||'').trim().toLowerCase();
   if(q) list = list.filter(d=>(clientName(d.clientId)+' '+clientSocieteLabel(d.clientId)+' '+(d.objet||'')+' '+(d.reference||'')+' '+d.number+' '+(d.status||'')).toLowerCase().includes(q));
   if(ui.devisDateFrom) list = list.filter(d=>d.date>=ui.devisDateFrom);
