@@ -309,7 +309,7 @@ label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-
 
 .lines-table input{padding:4px 6px;font-size:12.5px;height:28px;}
 .lines-table table{table-layout:fixed;min-width:1300px;}
-.lines-table th{white-space:normal;text-align:center;line-height:1.2;vertical-align:bottom;padding:6px 8px;font-size:10px;}
+.lines-table th{white-space:normal;text-align:center;line-height:1.2;vertical-align:bottom;padding:6px 8px;font-size:10px;position:sticky;top:0;z-index:5;background:var(--surface);box-shadow:0 1px 0 var(--line);}
 .lines-table td{padding:3px 6px;font-size:12.5px;}
 .lines-table select{padding:3px 5px;font-size:12.5px;height:28px;}
 .rich-editable{cursor:text;min-height:18px;outline:none;padding:2px 3px;border-radius:4px;}
@@ -760,7 +760,7 @@ function ensureRichToolbar(){
     <span class="rich-toolbar-group">
       <span class="rich-toolbar-group-label">Surligner</span>
       <span class="rich-toolbar-swatches">
-        <button type="button" onmousedown="event.preventDefault();" onclick="richApplyHighlight('transparent')" class="rich-toolbar-none" title="Aucun (retirer le surlignage)">✕</button>
+        <button type="button" onmousedown="event.preventDefault();" onclick="richRemoveHighlight()" class="rich-toolbar-none" title="Aucun (retirer le surlignage)">✕</button>
         ${['#FFF3A0','#C8F0D8','#FDD9C8','#D8E4FF'].map(c=>`<button type="button" onmousedown="event.preventDefault();" onclick="richApplyHighlight('${c}')" style="background:${c};" title="Surligner"></button>`).join('')}
       </span>
     </span>
@@ -831,6 +831,32 @@ function richApplyBold(){
 function richApplyColor(color){
   if(!restoreRichSelection()) return;
   wrapRichSelectionWithStyle('color:'+color+';');
+  syncRichEditableSource();
+}
+function richRemoveHighlight(){
+  const sel = restoreRichSelection();
+  if(!sel) return;
+  const range = sel.getRangeAt(0);
+  if(range.collapsed) return;
+  const frag = range.extractContents();
+  function stripBg(node){
+    if(node.nodeType===1){
+      if(node.style) node.style.backgroundColor = '';
+      if(node.getAttribute && node.getAttribute('style')==='') node.removeAttribute('style');
+    }
+    Array.from(node.childNodes||[]).forEach(stripBg);
+  }
+  Array.from(frag.childNodes).forEach(stripBg);
+  const firstNode = frag.firstChild, lastNode = frag.lastChild;
+  range.insertNode(frag);
+  if(firstNode && lastNode){
+    const newRange = document.createRange();
+    newRange.setStartBefore(firstNode);
+    newRange.setEndAfter(lastNode);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+    richToolbarRange = newRange.cloneRange();
+  }
   syncRichEditableSource();
 }
 function richApplyHighlight(color){
@@ -6677,7 +6703,12 @@ function refreshDevisLinePrices(){
 }
 function refreshDevisModal(){
   const box = document.getElementById('modalBox');
-  if(box) box.innerHTML = devisFormHtml();
+  if(!box) return;
+  const scrollEl = box.querySelector('.modal-body');
+  const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
+  box.innerHTML = devisFormHtml();
+  const newScrollEl = box.querySelector('.modal-body');
+  if(newScrollEl) newScrollEl.scrollTop = scrollTop;
 }
 function clientDisplayName(c){
   // La "société" du client : le champ Société s'il est renseigné, sinon le Nom (souvent utilisé comme raison sociale).
