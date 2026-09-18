@@ -6341,27 +6341,37 @@ function parseComagentcoDevisPdf(lines, page1RightText, page1LeftText){
   // Marque du devis : le bloc "FABRICANT :" se trouve en haut à GAUCHE de la 1ère page — on y cherche la
   // marque en priorité (nom de la marque, ou son site internet qui contient souvent le même mot), avant
   // de chercher plus largement dans tout le document si rien n'y est trouvé.
-  const brandMatches = (text)=> state.brands.filter(b=>{
-    if(!b.name) return false;
+  // Un devis ne concerne qu'un seul fournisseur (le bloc "FABRICANT :") : on ne retient donc qu'UNE seule
+  // marque — la meilleure correspondance trouvée — plutôt qu'une liste, pour ne jamais mélanger les
+  // catalogues de plusieurs marques différentes sur les lignes d'un même devis.
+  const bestBrandMatch = (text)=>{
     const upper = text.toUpperCase();
     const flat = stripSpaces(text);
-    const nameUpper = b.name.toUpperCase();
-    if(upper.includes(nameUpper) || flat.includes(stripSpaces(b.name))) return true;
-    // Le site internet de la marque contient souvent son nom (ex. www.sonoprof.fr pour "Sonoprof").
-    if(b.siteInternet && upper.includes(b.siteInternet.toUpperCase().replace(/^HTTPS?:\/\/(WWW\.)?/,''))) return true;
-    const firstWord = nameUpper.split(/\s+/)[0];
-    return firstWord.length>=4 && upper.includes(firstWord);
-  });
-  let brandsFound = page1LeftText ? brandMatches(page1LeftText) : [];
-  if(brandsFound.length===0) brandsFound = brandMatches(fullText);
-  if(brandsFound.length===0) result.warnings.push("Marque du devis non identifiée automatiquement — vérifiez la marque de chaque ligne.");
-  const brandPool = brandsFound.length ? brandsFound : state.brands;
+    let best = null, bestScore = 0;
+    state.brands.forEach(b=>{
+      if(!b.name) return;
+      const nameUpper = b.name.toUpperCase();
+      let score = 0;
+      if(upper.includes(nameUpper) || flat.includes(stripSpaces(b.name))) score = 100 + b.name.length;
+      else if(b.siteInternet && upper.includes(b.siteInternet.toUpperCase().replace(/^HTTPS?:\/\/(WWW\.)?/,''))) score = 60 + b.name.length;
+      else {
+        const firstWord = nameUpper.split(/\s+/)[0];
+        if(firstWord.length>=4 && upper.includes(firstWord)) score = 20 + b.name.length;
+      }
+      if(score>bestScore){ bestScore = score; best = b; }
+    });
+    return best;
+  };
+  let matchedBrand = page1LeftText ? bestBrandMatch(page1LeftText) : null;
+  if(!matchedBrand) matchedBrand = bestBrandMatch(fullText);
+  if(!matchedBrand) result.warnings.push("Marque du devis non identifiée automatiquement — vérifiez la marque de chaque ligne.");
+  const brandPool = matchedBrand ? [matchedBrand] : state.brands;
   const allRefs = [];
   brandPool.forEach(b=>{
     state.tarifs.filter(t=>t.brandId===b.id && t.reference).forEach(t=>allRefs.push({ref:t.reference, brandId:b.id, designation:t.designation, prixCatalogue:t.prixCatalogue}));
   });
   allRefs.sort((a,b)=>b.ref.length-a.ref.length); // références longues d'abord (évite qu'une référence courte n'en masque une plus précise)
-  const defaultBrandId = brandsFound.length===1 ? brandsFound[0].id : (state.brands[0] ? state.brands[0].id : '');
+  const defaultBrandId = matchedBrand ? matchedBrand.id : (state.brands[0] ? state.brands[0].id : '');
 
   // Zone du tableau des lignes : entre l'en-tête ("Désignation") et le récapitulatif ("Total HT"/"TVA").
   const tableStart = lines.findIndex(l=>/désignation/i.test(l.text));
