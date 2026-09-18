@@ -6221,21 +6221,22 @@ async function handleImportDevisPdfFile(evt){
     const buf = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({data:buf}).promise;
     let lines = [];
-    let page1RightText = '';
+    let page1RightText = '', page1LeftText = '';
     for(let p=1;p<=pdf.numPages;p++){
       const page = await pdf.getPage(p);
       const content = await page.getTextContent();
       groupPdfTextIntoLines(content.items).forEach(l=>{ l.page = p; lines.push(l); });
       if(p===1){
-        // L'en-tête (fournisseur à gauche, client à droite) forme deux blocs côte à côte à des hauteurs
-        // souvent très proches : les lire comme une seule colonne mélange les deux. On extrait donc, en
-        // plus, le texte de la seule moitié droite de la 1ère page pour y chercher le client.
+        // L'en-tête (fournisseur/marque à gauche, client à droite) forme deux blocs côte à côte à des
+        // hauteurs souvent très proches : les lire comme une seule colonne mélange les deux. On extrait
+        // donc séparément le texte de chaque moitié de la 1ère page.
         const viewport = page.getViewport({scale:1});
         page1RightText = groupPdfTextIntoLines(content.items.filter(it=>it.transform[4] > viewport.width*0.48)).map(l=>l.text).join('\n');
+        page1LeftText = groupPdfTextIntoLines(content.items.filter(it=>it.transform[4] <= viewport.width*0.52)).map(l=>l.text).join('\n');
       }
     }
     if(lines.length===0){ showToast("Ce PDF ne contient pas de texte exploitable (peut-être une image scannée)."); return; }
-    const parsed = parseComagentcoDevisPdf(lines, page1RightText);
+    const parsed = parseComagentcoDevisPdf(lines, page1RightText, page1LeftText);
     openImportedDevisReview(parsed, file.name);
   }catch(e){
     console.error(e);
@@ -6280,7 +6281,7 @@ function parseLongFrenchDateToIso(text){
   if(!month) return null;
   return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
 }
-function parseComagentcoDevisPdf(lines, page1RightText){
+function parseComagentcoDevisPdf(lines, page1RightText, page1LeftText){
   const fullText = lines.map(l=>l.text).join('\n');
   const stripSpaces = s=>String(s||'').replace(/\s+/g,'').toUpperCase();
   const result = { number:'', date:'', validUntil:'', objet:'', type:'Devis', clientId:'', linesGuess:[], warnings:[] };
@@ -6337,10 +6338,23 @@ function parseComagentcoDevisPdf(lines, page1RightText){
   if(bestClient) result.clientId = bestClient.id;
   else result.warnings.push("Société cliente non identifiée automatiquement — sélectionnez-la manuellement.");
 
-  // Marque(s) mentionnée(s), pour restreindre la recherche de références au bon catalogue tarifaire.
-  const upperText = fullText.toUpperCase();
-  const flatText = stripSpaces(fullText);
-  const brandsFound = state.brands.filter(b=>b.name && (upperText.includes(b.name.toUpperCase()) || flatText.includes(stripSpaces(b.name))));
+  // Marque du devis : le bloc "FABRICANT :" se trouve en haut à GAUCHE de la 1ère page — on y cherche la
+  // marque en priorité (nom de la marque, ou son site internet qui contient souvent le même mot), avant
+  // de chercher plus largement dans tout le document si rien n'y est trouvé.
+  const brandMatches = (text)=> state.brands.filter(b=>{
+    if(!b.name) return false;
+    const upper = text.toUpperCase();
+    const flat = stripSpaces(text);
+    const nameUpper = b.name.toUpperCase();
+    if(upper.includes(nameUpper) || flat.includes(stripSpaces(b.name))) return true;
+    // Le site internet de la marque contient souvent son nom (ex. www.sonoprof.fr pour "Sonoprof").
+    if(b.siteInternet && upper.includes(b.siteInternet.toUpperCase().replace(/^HTTPS?:\/\/(WWW\.)?/,''))) return true;
+    const firstWord = nameUpper.split(/\s+/)[0];
+    return firstWord.length>=4 && upper.includes(firstWord);
+  });
+  let brandsFound = page1LeftText ? brandMatches(page1LeftText) : [];
+  if(brandsFound.length===0) brandsFound = brandMatches(fullText);
+  if(brandsFound.length===0) result.warnings.push("Marque du devis non identifiée automatiquement — vérifiez la marque de chaque ligne.");
   const brandPool = brandsFound.length ? brandsFound : state.brands;
   const allRefs = [];
   brandPool.forEach(b=>{
@@ -6427,15 +6441,11 @@ function extractPdfLineValues(text, reference){
     const last = parseInt(intMatches[intMatches.length-1], 10);
     if(!isNaN(last) && last>0 && last<100000) qty = last;
   }
-  // Prix d'achat unitaire (colonne "Prix d'achat HT" / "PU NET HT" selon vos PDF) : si un seul montant
-  // figure sur la ligne, c'est déjà un prix unitaire — inutile de le diviser par la quantité. S'il y en a
-  // au moins deux, le dernier est le Total HT de la ligne : Prix d'achat unitaire = Total HT ÷ Quantité.
-  let prixAchatUnitaire = null;
-  if(moneyVals.length===1){
-    prixAchatUnitaire = moneyVals[0];
-  } else if(moneyVals.length>=2 && qty>0){
-    prixAchatUnitaire = moneyVals[moneyVals.length-1]/qty;
-  }
+  // Prix d'achat unitaire = colonne "PU Net HT" / "Prix d'achat HT" : c'est toujours la PREMIÈRE valeur
+  // monétaire de la ligne (les colonnes suivantes, s'il y en a — remise, total — viennent après). On lit
+  // cette valeur telle quelle plutôt que de la recalculer à partir du Total HT ÷ Quantité, pour éviter
+  // tout écart dû aux arrondis d'affichage du PDF.
+  const prixAchatUnitaire = moneyVals.length ? moneyVals[0] : null;
   return { qty, moneyVals, pctVals, prixAchatUnitaire };
 }
 function openImportedDevisReview(parsed, filename){
