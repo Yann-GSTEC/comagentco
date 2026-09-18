@@ -6520,7 +6520,11 @@ function devisFormHtml(){
   const t = devisTotal(draft);
   return `
     <div class="modal-head">
-      <h3>${escapeHtml(draft.type||'Devis')} ${escapeHtml(draft.number)}${draft.isNew?' <span class="helper" style="font-weight:400;">(numéro définitif à l\'enregistrement)</span>':''}</h3>
+      <h3 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        ${escapeHtml(draft.type||'Devis')}
+        <input type="text" value="${escapeHtml(draft.number)}" onchange="draft.number=this.value.trim()||draft.number; draft.numberEditedManually=true; refreshDevisModal();" style="font-size:15px;font-weight:700;font-family:'Space Grotesk';width:150px;padding:4px 8px;height:auto;" title="Modifier le numéro de ce devis">
+        ${draft.isNew && !draft.numberEditedManually?'<span class="helper" style="font-weight:400;">(numéro proposé — modifiable, définitif à l\'enregistrement)</span>':''}
+      </h3>
       <div style="display:flex;align-items:center;gap:10px;">
         ${!draft.isNew?`<button type="button" class="btn btn-sm btn-ghost" onclick="openDevisHistoryModal()">🕒 Historique complet</button>`:''}
         <button class="close-x" onclick="closeModal()">✕</button>
@@ -6529,7 +6533,7 @@ function devisFormHtml(){
     <div class="modal-body">
       <div class="field-row">
         <div class="field" style="max-width:140px;"><label>Type de pièce</label>
-          <select id="d_type" onchange="draft.type=this.value; if(draft.isNew){draft.number=previewNextDevisNumber(draft.type);} if(draft.validUntilAuto!==false){draft.validUntil=defaultValidUntil(draft.type, draft.date);} refreshDevisModal();">
+          <select id="d_type" onchange="draft.type=this.value; if(draft.isNew && !draft.numberEditedManually){draft.number=previewNextDevisNumber(draft.type);} if(draft.validUntilAuto!==false){draft.validUntil=defaultValidUntil(draft.type, draft.date);} refreshDevisModal();">
             <option value="Devis" ${draft.type==='Devis'?'selected':''}>Devis</option>
             <option value="Marché" ${draft.type==='Marché'?'selected':''}>Marché</option>
           </select>
@@ -7182,6 +7186,13 @@ function addDevisLine(tarifId){
   document.getElementById('d_searchResults').innerHTML='';
   refreshDevisModal();
 }
+function devisBrandsOverlap(d1, d2){
+  const b1 = new Set((d1.lines||[]).map(l=>l.brandId).filter(Boolean));
+  const b2 = new Set((d2.lines||[]).map(l=>l.brandId).filter(Boolean));
+  if(b1.size===0 || b2.size===0) return true; // pas assez d'info pour distinguer -> on préfère prévenir
+  for(const id of b1){ if(b2.has(id)) return true; }
+  return false;
+}
 let devisSaveThenAction = null; // callback exécuté juste après la sauvegarde effective (Aperçu, PDF, Envoi…), une fois le choix de version tranché
 function saveDraftDevis(thenAction){
   if(!draft.clientId){ showToast('Sélectionnez un client.'); return; }
@@ -7189,9 +7200,16 @@ function saveDraftDevis(thenAction){
   devisSaveThenAction = thenAction || null;
   const isNewDoc = !!draft.isNew;
   if(isNewDoc){
-    draft.number = consumeNextDevisNumber(draft.type);
+    if(!draft.numberEditedManually){
+      draft.number = consumeNextDevisNumber(draft.type);
+    } else if(state.devis.some(d=>d.number===draft.number && devisBrandsOverlap(d, draft))){
+      showToast(`⚠ Le numéro "${draft.number}" est déjà utilisé par un autre devis de la même marque — vérifiez-le si besoin (l'enregistrement continue quand même).`, 5500);
+    }
     finalizeSaveDraftDevis();
     return;
+  }
+  if(draft.numberEditedManually && state.devis.some(d=>d.number===draft.number && d.id!==draft.id && devisBrandsOverlap(d, draft))){
+    showToast(`⚠ Le numéro "${draft.number}" est déjà utilisé par un autre devis de la même marque — vérifiez-le si besoin (l'enregistrement continue quand même).`, 5500);
   }
   // Devis déjà enregistré : on demande d'abord si on écrase la version existante ou si on crée une nouvelle version numérotée.
   openDevisVersionChoiceModal();
