@@ -6224,7 +6224,7 @@ async function handleImportDevisPdfFile(evt){
     for(let p=1;p<=pdf.numPages;p++){
       const page = await pdf.getPage(p);
       const content = await page.getTextContent();
-      lines = lines.concat(groupPdfTextIntoLines(content.items));
+      groupPdfTextIntoLines(content.items).forEach(l=>{ l.page = p; lines.push(l); });
     }
     if(lines.length===0){ showToast("Ce PDF ne contient pas de texte exploitable (peut-être une image scannée)."); return; }
     const parsed = parseComagentcoDevisPdf(lines);
@@ -6258,7 +6258,8 @@ function groupPdfTextIntoLines(items){
       text += it.str;
       prevEnd = it.x + it.width;
     });
-    return { y:r.y, text: text.replace(/\s+/g,' ').trim() };
+    const minX = r.items.length ? r.items[0].x : 0;
+    return { y:r.y, minX, text: text.replace(/\s+/g,' ').trim() };
   }).filter(r=>r.text);
 }
 function parseLongFrenchDateToIso(text){
@@ -6297,26 +6298,32 @@ function parseComagentcoDevisPdf(lines){
   if(dateMatches[1]) result.validUntil = parseLongFrenchDateToIso(dateMatches[1][0]);
   if(!result.date) result.warnings.push("Date du devis non détectée automatiquement — à vérifier.");
 
-  m = fullText.match(/Objet\s*[:.]?\s*\n?([^\n]+)/i);
+  // Objet : on s'arrête avant "Validité" si les deux se trouvent regroupés sur la même ligne reconstituée,
+  // pour ne pas embarquer la date de validité de l'offre dans le texte de l'objet.
+  m = fullText.match(/Objet\s*[:.]?\s*\n?(.+?)(?=\s*(?:Validité\b|\n|$))/i);
   if(m) result.objet = m[1].trim();
 
-  // Société cliente : on recherche, parmi vos clients déjà enregistrés, celui dont le nom apparaît
-  // textuellement dans le PDF (le plus long trouvé, pour éviter qu'un nom court ne fasse une fausse
-  // correspondance dans un autre mot). Une seconde passe, insensible aux espaces, rattrape les cas où
-  // l'extraction du PDF aurait inséré ou supprimé un espace au milieu du nom.
+  // Société cliente : le bloc client se trouve toujours en haut de la 1ère page, avant la bande N°/Date.
+  // On restreint donc la recherche à cette zone (avant la ligne contenant le N° du devis) pour éviter
+  // qu'une autre société mentionnée plus bas (historique, mentions légales…) ne soit prise à sa place.
+  const numeroLineIdx = lines.findIndex(l=>l.page===1 && /N°/.test(l.text));
+  const headerLines = lines.filter((l,i)=> l.page===1 && (numeroLineIdx<0 || i<numeroLineIdx));
+  const headerText = (headerLines.length?headerLines:lines.filter(l=>l.page===1)).map(l=>l.text).join('\n');
+  const headerUpper = headerText.toUpperCase();
+  const headerFlat = stripSpaces(headerText);
   let bestClient = null, bestLen = 0;
-  const upperText = fullText.toUpperCase();
-  const flatText = stripSpaces(fullText);
   state.clients.forEach(c=>{
     const label = (c.company||c.name||'').trim();
     if(label.length<=3) return;
-    const matches = upperText.includes(label.toUpperCase()) || flatText.includes(stripSpaces(label));
+    const matches = headerUpper.includes(label.toUpperCase()) || headerFlat.includes(stripSpaces(label));
     if(matches && label.length>bestLen){ bestLen = label.length; bestClient = c; }
   });
   if(bestClient) result.clientId = bestClient.id;
   else result.warnings.push("Société cliente non identifiée automatiquement — sélectionnez-la manuellement.");
 
   // Marque(s) mentionnée(s), pour restreindre la recherche de références au bon catalogue tarifaire.
+  const upperText = fullText.toUpperCase();
+  const flatText = stripSpaces(fullText);
   const brandsFound = state.brands.filter(b=>b.name && (upperText.includes(b.name.toUpperCase()) || flatText.includes(stripSpaces(b.name))));
   const brandPool = brandsFound.length ? brandsFound : state.brands;
   const allRefs = [];
@@ -6324,10 +6331,17 @@ function parseComagentcoDevisPdf(lines){
     state.tarifs.filter(t=>t.brandId===b.id && t.reference).forEach(t=>allRefs.push({ref:t.reference, brandId:b.id, designation:t.designation, prixCatalogue:t.prixCatalogue}));
   });
   allRefs.sort((a,b)=>b.ref.length-a.ref.length); // références longues d'abord (évite qu'une référence courte n'en masque une plus précise)
+  const defaultBrandId = brandsFound.length===1 ? brandsFound[0].id : (state.brands[0] ? state.brands[0].id : '');
+
+  // Zone du tableau des lignes : entre l'en-tête ("Désignation") et le récapitulatif ("Total HT"/"TVA").
+  const tableStart = lines.findIndex(l=>/désignation/i.test(l.text));
+  let tableEnd = lines.findIndex((l,i)=> tableStart>=0 && i>tableStart && /(total\s*ht|tva\b)/i.test(l.text));
+  if(tableEnd<0) tableEnd = lines.length;
+  const tableLines = tableStart>=0 ? lines.slice(tableStart+1, tableEnd) : lines;
 
   const usedRefs = new Set();
-  let numbersRecovered = 0;
-  lines.forEach(line=>{
+  let numbersRecovered = 0, horsCatalogue = 0;
+  tableLines.forEach(line=>{
     const lineUpper = line.text.toUpperCase();
     const lineFlat = stripSpaces(line.text);
     const found = allRefs.find(r=>{
@@ -6335,29 +6349,38 @@ function parseComagentcoDevisPdf(lines){
       const refUpper = r.ref.toUpperCase();
       return lineUpper.includes(refUpper) || lineFlat.includes(stripSpaces(refUpper));
     });
-    if(!found) return;
-    usedRefs.add(found.ref);
-    const vals = extractPdfLineValues(line.text, found.ref);
-    let qty = vals.qty || 1;
-    let remisePct1 = vals.pctVals[0]||0, remisePct2 = vals.pctVals[1]||0, remisePct3 = vals.pctVals[2]||0;
-    let prixUnitaire = found.prixCatalogue||0;
-    const totalHT = vals.moneyVals.length ? vals.moneyVals[vals.moneyVals.length-1] : null;
-    if(totalHT!=null && qty>0){
-      const achatUnit = totalHT/qty;
-      const factor = (1-remisePct1/100)*(1-remisePct2/100)*(1-remisePct3/100);
-      if(factor>0){ prixUnitaire = +(achatUnit/factor).toFixed(4); numbersRecovered++; }
+    if(found){
+      usedRefs.add(found.ref);
+      const vals = extractPdfLineValues(line.text, found.ref);
+      let prixUnitaire = found.prixCatalogue||0;
+      if(vals.prixAchatUnitaire!=null){ prixUnitaire = +(vals.prixAchatUnitaire/((1-(vals.pctVals[0]||0)/100)*(1-(vals.pctVals[1]||0)/100)*(1-(vals.pctVals[2]||0)/100)||1)).toFixed(4); numbersRecovered++; }
+      result.linesGuess.push({
+        id: uid(), brandId: found.brandId, reference: found.ref, designation: found.designation||'',
+        qty: vals.qty||1, prixUnitaire, remisePct1: vals.pctVals[0]||0, remisePct2: vals.pctVals[1]||0, remisePct3: vals.pctVals[2]||0, prixClient:0,
+      });
+      return;
     }
+    // Référence non reconnue dans le catalogue : on crée quand même une ligne "hors catalogue" avec ce
+    // qui a pu être lu, plutôt que de perdre silencieusement cette ligne du devis.
+    if(!/€/.test(line.text)) return; // ne ressemble pas à une ligne de produit chiffrée : on l'ignore
+    const firstTokenMatch = line.text.match(/^\s*(\S+)\s+(.*)$/);
+    if(!firstTokenMatch) return;
+    const refCandidate = firstTokenMatch[1];
+    const rest = firstTokenMatch[2];
+    const vals = extractPdfLineValues(rest, '');
+    if(vals.moneyVals.length===0) return;
     result.linesGuess.push({
-      id: uid(), brandId: found.brandId, reference: found.ref, designation: found.designation||'',
-      qty, prixUnitaire, remisePct1, remisePct2, remisePct3, prixClient:0,
+      id: uid(), brandId: defaultBrandId, reference: refCandidate, designation: rest.replace(/[\d\s,.%€]+$/,'').trim()||rest,
+      qty: vals.qty||1, prixUnitaire: vals.prixAchatUnitaire!=null?vals.prixAchatUnitaire:(vals.moneyVals[0]||0),
+      remisePct1: vals.pctVals[0]||0, remisePct2: vals.pctVals[1]||0, remisePct3: vals.pctVals[2]||0, prixClient:0,
+      isFreeLine: true,
     });
+    horsCatalogue++;
   });
   if(result.linesGuess.length===0){
-    result.warnings.push("Aucune référence reconnue dans ce PDF — ajoutez les lignes manuellement.");
-  } else if(numbersRecovered<result.linesGuess.length){
-    result.warnings.push(`${result.linesGuess.length} référence(s) reconnue(s), dont ${numbersRecovered} avec quantité/prix relus depuis le PDF — vérifiez tout de même chaque ligne, notamment celles où le montant total n'a pas pu être identifié (reparties du tarif catalogue actuel).`);
+    result.warnings.push("Aucune ligne de produit reconnue dans ce PDF — ajoutez les lignes manuellement.");
   } else {
-    result.warnings.push(`${result.linesGuess.length} référence(s) reconnue(s), quantités et prix relus depuis le PDF — vérifiez-les avant d'enregistrer (une lecture de texte reste approximative).`);
+    result.warnings.push(`${result.linesGuess.length} ligne(s) reconnue(s)${horsCatalogue?`, dont ${horsCatalogue} hors catalogue (référence non trouvée dans vos tarifs)`:''} — vérifiez quantités, prix et remises avant d'enregistrer (une lecture de texte reste approximative).`);
   }
   result.rawText = fullText;
   return result;
@@ -6369,19 +6392,31 @@ function extractPdfLineValues(text, reference){
   // Repère, dans le texte reconstitué d'une ligne, les montants (suivis de €), les pourcentages (suivis
   // de %) et une quantité probable (le dernier nombre entier isolé situé juste avant le premier montant).
   const withoutRef = reference ? text.replace(reference, ' ') : text;
-  const moneyRe = /(-?\d[\d\s\u00A0]*(?:,\d{1,2})?)\s*€/g;
-  const pctRe = /(-?\d[\d\s\u00A0]*(?:,\d{1,2})?)\s*%/g;
-  const moneyVals = [...withoutRef.matchAll(moneyRe)].map(m=>parseFrenchNumber(m[1])).filter(n=>!isNaN(n));
-  const pctVals = [...withoutRef.matchAll(pctRe)].map(m=>parseFrenchNumber(m[1])).filter(n=>!isNaN(n));
+  const moneyRe = /(-?\d[\d\s\u00A0]*(?:[.,]\d{1,2})?)\s*€/g;
+  const pctRe = /(-?\d[\d\s\u00A0]*(?:[.,]\d{1,2})?)\s*%/g;
+  const moneyMatches = [...withoutRef.matchAll(moneyRe)];
+  const moneyVals = moneyMatches.map(mm=>parseFrenchNumber(mm[1])).filter(n=>!isNaN(n));
+  const pctVals = [...withoutRef.matchAll(pctRe)].map(mm=>parseFrenchNumber(mm[1])).filter(n=>!isNaN(n));
   let qty = 1;
-  const moneyIdx = withoutRef.search(/€/);
-  const before = moneyIdx>0 ? withoutRef.slice(0, moneyIdx) : withoutRef;
+  // On s'arrête AVANT le début du premier montant (et non juste avant le symbole €), sinon les chiffres
+  // du montant lui-même (ex. le "2" de "2 500,00 €", séparateur de milliers) seraient pris pour la quantité.
+  const firstMoneyStart = moneyMatches.length ? moneyMatches[0].index : withoutRef.length;
+  const before = withoutRef.slice(0, firstMoneyStart);
   const intMatches = before.match(/\d{1,5}(?!\s*[.,%])/g);
   if(intMatches && intMatches.length){
     const last = parseInt(intMatches[intMatches.length-1], 10);
     if(!isNaN(last) && last>0 && last<100000) qty = last;
   }
-  return { qty, moneyVals, pctVals };
+  // Prix d'achat unitaire (colonne "Prix d'achat HT" / "PU NET HT" selon vos PDF) : si un seul montant
+  // figure sur la ligne, c'est déjà un prix unitaire — inutile de le diviser par la quantité. S'il y en a
+  // au moins deux, le dernier est le Total HT de la ligne : Prix d'achat unitaire = Total HT ÷ Quantité.
+  let prixAchatUnitaire = null;
+  if(moneyVals.length===1){
+    prixAchatUnitaire = moneyVals[0];
+  } else if(moneyVals.length>=2 && qty>0){
+    prixAchatUnitaire = moneyVals[moneyVals.length-1]/qty;
+  }
+  return { qty, moneyVals, pctVals, prixAchatUnitaire };
 }
 function openImportedDevisReview(parsed, filename){
   draft = {
