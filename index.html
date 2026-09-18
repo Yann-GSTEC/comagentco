@@ -7642,9 +7642,13 @@ async function exportDevisPdf(id, mode){
       const line = (d.lines||[])[data.row.index];
       if(!line || !line.designation) return;
       if(line.isTitleLine){
-        // Cellule fusionnée (colSpan) : sa mise en forme (gras, fond) est déjà posée ; on ajoute les
-        // couleurs/tailles/surlignages éventuels de la sélection par-dessus.
-        drawRichDesignationCell(doc, data, line.designation, [30,30,30]);
+        // Cellule fusionnée (colSpan) : on repeint son fond avant de redessiner le texte formaté par-dessus,
+        // sinon le texte brut déjà tracé par autoTable reste visible en dessous et se superpose au texte riche.
+        if(/[<]/.test(line.designation)){
+          doc.setFillColor(240,239,232);
+          doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
+          drawRichDesignationCell(doc, data, line.designation, [30,30,30]);
+        }
         return;
       }
       if(data.column.index !== desigColIdx) return;
