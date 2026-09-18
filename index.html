@@ -6994,10 +6994,10 @@ function devisLinesRowsHtml(){
       <td style="font-weight:700;font-family:'Space Grotesk';font-size:12px;">${escapeHtml(l.reference)}${l.prixNetApplied?' <span class="chip" style="background:var(--success, #3F8A7B);font-size:8px;padding:1px 5px;display:inline-block;margin-top:2px;" title="Prix net client appliqué automatiquement">Prix net</span>':''}</td>
       <td><div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Désignation…" title="F3 historique prix (ce client) · F4 (département) · F5 (tous les clients) · F6 (famille / sous-famille)" oninput="draft.lines[${i}].designation=this.innerHTML;">${l.designation||''}</div></td>
       <td><input type="number" min="0" step="1" value="${l.qty}" style="font-weight:700;text-align:center;" onchange="draft.lines[${i}].qty=parseFloat(this.value)||0; refreshDevisModal();"></td>
-      <td><input type="number" min="0" step="0.01" value="${l.prixUnitaire}" onchange="draft.lines[${i}].prixUnitaire=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } refreshDevisModal();"></td>
-      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct1||0}" onchange="draft.lines[${i}].remisePct1=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } refreshDevisModal();"></td>
-      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct2||0}" onchange="draft.lines[${i}].remisePct2=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } refreshDevisModal();"></td>
-      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct3||0}" onchange="draft.lines[${i}].remisePct3=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } refreshDevisModal();"></td>
+      <td><input type="number" min="0" step="0.01" value="${l.prixUnitaire}" onchange="draft.lines[${i}].prixUnitaire=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
+      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct1||0}" onchange="draft.lines[${i}].remisePct1=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
+      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct2||0}" onchange="draft.lines[${i}].remisePct2=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
+      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct3||0}" onchange="draft.lines[${i}].remisePct3=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
       <td><input type="number" min="0" step="0.01" value="${(+lineDistribUnit(l)).toFixed(2)}" style="font-weight:600;${netOnDistri?'color:var(--info, #2F6FBD);font-weight:700;':(l.distribManuallySet?'color:var(--ink);font-weight:700;':'color:var(--ink-soft);')}" title="${netOnDistri?'Prix repris de la liste de prix nets du client (modifiable ici si besoin)':(l.distribManuallySet?'Prix d\'achat modifié manuellement — Remise 1 recalculée en conséquence':'Calculé à partir du PU Tarif et des remises — modifiable directement si besoin')}" onchange="devisLineSetDistrib(${i}, this.value)"></td>
       <td><input type="number" step="0.01" value="${Math.abs(displayMarge)<0.005?'':(+displayMarge).toFixed(2)}" placeholder="0" title="${l.margeTarget!=null?'Marge cible demandée — peut différer de quelques centièmes du calcul réel après arrondi du Prix de vente conseillé HT à la centime.':''}" style="color:${displayMarge>=0?'var(--success)':'var(--danger)'};font-weight:800;font-size:12.5px;text-align:center;background:${displayMarge>=0?'rgba(63,138,123,.12)':'rgba(179,57,44,.1)'};border:1.5px solid ${displayMarge>=0?'var(--success)':'var(--danger)'};border-radius:6px;" onchange="devisLineSetMarge(${i}, this.value)"></td>
       <td><input type="number" min="0" step="0.01" value="${l.prixClient?l.prixClient:''}" placeholder="0" style="font-weight:600;${netOnClient?'color:var(--info, #2F6FBD);font-weight:700;':''}" title="${netOnClient?'Prix repris de la liste de prix nets du client':''}" onchange="devisLineSetClient(${i}, this.value)"></td>
@@ -7005,6 +7005,17 @@ function devisLinesRowsHtml(){
       <td><button class="btn btn-sm btn-ghost btn-danger" onclick="draft.lines.splice(${i},1); refreshDevisModal();">✕</button></td>
     </tr>
   `;}).join('');
+}
+function checkFreeProductMention(line){
+  // Signale automatiquement dans la désignation qu'un produit est à 0 € (geste commercial), quelle que
+  // soit la façon dont on y arrive : prix d'achat saisi à 0, ou remise(s) ramenant le prix à 0.
+  const mention = 'Produit gratuit - Geste commercial';
+  if(Math.abs(lineDistribUnit(line))<0.005){
+    const plainDesig = stripHtml(line.designation||'');
+    if(!plainDesig.toLowerCase().includes(mention.toLowerCase())){
+      line.designation = (line.designation||'') + (plainDesig.trim()?' — ':'') + `<b>${escapeHtml(mention)}</b>`;
+    }
+  }
 }
 function devisLineSetDistrib(i, val){
   const parsed = parseFloat(val);
@@ -7034,6 +7045,7 @@ function devisLineSetDistrib(i, val){
   }
   line.margeTarget = null;
   if(line.prixNetTarget==='distri'){ line.prixNetTarget = null; line.netPriceOverride = null; }
+  checkFreeProductMention(line);
   refreshDevisModal();
 }
 function devisLineSetClient(i, val){
