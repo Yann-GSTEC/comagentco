@@ -7016,7 +7016,10 @@ function devisLineSetDistrib(i, val){
       let r1 = (1 - (parsed/denom)) * 100;
       if(r1<0) r1 = 0;
       if(r1>100) r1 = 100;
-      line.remisePct1 = +r1.toFixed(2);
+      // Arrondi à 4 décimales (et non 2) : avec un PU Tarif élevé et une forte remise, arrondir la remise
+      // à seulement 2 décimales pouvait décaler le prix d'achat obtenu de plusieurs centimes par rapport
+      // à la valeur exacte saisie.
+      line.remisePct1 = +r1.toFixed(4);
     }
     line.distribOverride = null;
     line.distribManuallySet = true;
