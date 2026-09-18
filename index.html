@@ -6221,13 +6221,21 @@ async function handleImportDevisPdfFile(evt){
     const buf = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({data:buf}).promise;
     let lines = [];
+    let page1RightText = '';
     for(let p=1;p<=pdf.numPages;p++){
       const page = await pdf.getPage(p);
       const content = await page.getTextContent();
       groupPdfTextIntoLines(content.items).forEach(l=>{ l.page = p; lines.push(l); });
+      if(p===1){
+        // L'en-tête (fournisseur à gauche, client à droite) forme deux blocs côte à côte à des hauteurs
+        // souvent très proches : les lire comme une seule colonne mélange les deux. On extrait donc, en
+        // plus, le texte de la seule moitié droite de la 1ère page pour y chercher le client.
+        const viewport = page.getViewport({scale:1});
+        page1RightText = groupPdfTextIntoLines(content.items.filter(it=>it.transform[4] > viewport.width*0.48)).map(l=>l.text).join('\n');
+      }
     }
     if(lines.length===0){ showToast("Ce PDF ne contient pas de texte exploitable (peut-être une image scannée)."); return; }
-    const parsed = parseComagentcoDevisPdf(lines);
+    const parsed = parseComagentcoDevisPdf(lines, page1RightText);
     openImportedDevisReview(parsed, file.name);
   }catch(e){
     console.error(e);
@@ -6272,7 +6280,7 @@ function parseLongFrenchDateToIso(text){
   if(!month) return null;
   return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
 }
-function parseComagentcoDevisPdf(lines){
+function parseComagentcoDevisPdf(lines, page1RightText){
   const fullText = lines.map(l=>l.text).join('\n');
   const stripSpaces = s=>String(s||'').replace(/\s+/g,'').toUpperCase();
   const result = { number:'', date:'', validUntil:'', objet:'', type:'Devis', clientId:'', linesGuess:[], warnings:[] };
@@ -6293,31 +6301,39 @@ function parseComagentcoDevisPdf(lines){
 
   if(/MARCHÉ/i.test(fullText.slice(0,400)) && !/DEVIS/i.test(fullText.slice(0,120))) result.type = 'Marché';
 
+  // Date d'émission : le premier "DD Mois AAAA" rencontré. La validité, elle, est parfois exprimée comme
+  // une durée ("2 mois") plutôt qu'une date précise sur vos PDF — on ne tente donc pas de la déduire d'une
+  // seconde date, ce qui donnait de faux résultats ; elle repart du calcul par défaut de l'application.
   const dateMatches = [...fullText.matchAll(/\d{1,2}\s*(?:er)?\s+(?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\s+\d{4}/gi)];
   if(dateMatches[0]) result.date = parseLongFrenchDateToIso(dateMatches[0][0]);
-  if(dateMatches[1]) result.validUntil = parseLongFrenchDateToIso(dateMatches[1][0]);
   if(!result.date) result.warnings.push("Date du devis non détectée automatiquement — à vérifier.");
 
   // Objet : on s'arrête avant "Validité" si les deux se trouvent regroupés sur la même ligne reconstituée,
-  // pour ne pas embarquer la date de validité de l'offre dans le texte de l'objet.
+  // pour ne pas embarquer la validité de l'offre dans le texte de l'objet.
   m = fullText.match(/Objet\s*[:.]?\s*\n?(.+?)(?=\s*(?:Validité\b|\n|$))/i);
   if(m) result.objet = m[1].trim();
 
-  // Société cliente : le bloc client se trouve toujours en haut de la 1ère page, avant la bande N°/Date.
-  // On restreint donc la recherche à cette zone (avant la ligne contenant le N° du devis) pour éviter
-  // qu'une autre société mentionnée plus bas (historique, mentions légales…) ne soit prise à sa place.
-  const numeroLineIdx = lines.findIndex(l=>l.page===1 && /N°/.test(l.text));
-  const headerLines = lines.filter((l,i)=> l.page===1 && (numeroLineIdx<0 || i<numeroLineIdx));
-  const headerText = (headerLines.length?headerLines:lines.filter(l=>l.page===1)).map(l=>l.text).join('\n');
-  const headerUpper = headerText.toUpperCase();
-  const headerFlat = stripSpaces(headerText);
+  // Société cliente : le bloc client se trouve en haut à DROITE de la 1ère page, à côté du bloc fournisseur
+  // (à gauche) — les deux se mélangent si on lit toute la largeur de la page comme une seule colonne de
+  // texte (ex. "REXEL ST JEAN DE LA" et "SONOPROF RUELLE" intercalés ligne à ligne). On cherche donc en
+  // priorité dans le texte de la seule moitié droite de la page, avant d'essayer plus largement si besoin.
   let bestClient = null, bestLen = 0;
-  state.clients.forEach(c=>{
-    const label = (c.company||c.name||'').trim();
-    if(label.length<=3) return;
-    const matches = headerUpper.includes(label.toUpperCase()) || headerFlat.includes(stripSpaces(label));
-    if(matches && label.length>bestLen){ bestLen = label.length; bestClient = c; }
-  });
+  const searchClientIn = (text)=>{
+    const upper = text.toUpperCase();
+    const flat = stripSpaces(text);
+    state.clients.forEach(c=>{
+      const label = (c.company||c.name||'').trim();
+      if(label.length<=3) return;
+      const matches = upper.includes(label.toUpperCase()) || flat.includes(stripSpaces(label));
+      if(matches && label.length>bestLen){ bestLen = label.length; bestClient = c; }
+    });
+  };
+  if(page1RightText) searchClientIn(page1RightText);
+  if(!bestClient){
+    const numeroLineIdx = lines.findIndex(l=>l.page===1 && /N°/.test(l.text));
+    const headerLines = lines.filter((l,i)=> l.page===1 && (numeroLineIdx<0 || i<numeroLineIdx));
+    searchClientIn((headerLines.length?headerLines:lines.filter(l=>l.page===1)).map(l=>l.text).join('\n'));
+  }
   if(bestClient) result.clientId = bestClient.id;
   else result.warnings.push("Société cliente non identifiée automatiquement — sélectionnez-la manuellement.");
 
@@ -6335,7 +6351,7 @@ function parseComagentcoDevisPdf(lines){
 
   // Zone du tableau des lignes : entre l'en-tête ("Désignation") et le récapitulatif ("Total HT"/"TVA").
   const tableStart = lines.findIndex(l=>/désignation/i.test(l.text));
-  let tableEnd = lines.findIndex((l,i)=> tableStart>=0 && i>tableStart && /(total\s*ht|tva\b)/i.test(l.text));
+  let tableEnd = lines.findIndex((l,i)=> tableStart>=0 && i>tableStart && /total.{0,12}ht\b/i.test(l.text));
   if(tableEnd<0) tableEnd = lines.length;
   const tableLines = tableStart>=0 ? lines.slice(tableStart+1, tableEnd) : lines;
 
@@ -6362,7 +6378,8 @@ function parseComagentcoDevisPdf(lines){
     }
     // Référence non reconnue dans le catalogue : on crée quand même une ligne "hors catalogue" avec ce
     // qui a pu être lu, plutôt que de perdre silencieusement cette ligne du devis.
-    if(!/€/.test(line.text)) return; // ne ressemble pas à une ligne de produit chiffrée : on l'ignore
+    if(/total.{0,12}ht\b/i.test(line.text)) return; // ligne de récapitulatif, pas une ligne produit
+    if(!/\d[.,]\d{2}/.test(line.text)) return; // ne ressemble pas à une ligne de produit chiffrée : on l'ignore
     const firstTokenMatch = line.text.match(/^\s*(\S+)\s+(.*)$/);
     if(!firstTokenMatch) return;
     const refCandidate = firstTokenMatch[1];
@@ -6389,17 +6406,20 @@ function parseFrenchNumber(raw){
   return parseFloat(String(raw).replace(/[\s\u00A0]/g,'').replace(',', '.'));
 }
 function extractPdfLineValues(text, reference){
-  // Repère, dans le texte reconstitué d'une ligne, les montants (suivis de €), les pourcentages (suivis
-  // de %) et une quantité probable (le dernier nombre entier isolé situé juste avant le premier montant).
+  // Repère, dans le texte reconstitué d'une ligne, les montants et les pourcentages, puis une quantité
+  // probable (le dernier nombre entier isolé situé juste avant le premier montant).
+  // Les montants sont acceptés sous deux formats, selon la version de ComAgentCo qui a généré le PDF :
+  // "474.99" (point, sans symbole) ou "474,99 €" (virgule, avec le symbole €) — le symbole est optionnel.
   const withoutRef = reference ? text.replace(reference, ' ') : text;
-  const moneyRe = /(-?\d[\d\s\u00A0]*(?:[.,]\d{1,2})?)\s*€/g;
+  const moneyRe = /(-?\d[\d\s\u00A0]*[.,]\d{2})\s*(?:€|EUR)?/g;
   const pctRe = /(-?\d[\d\s\u00A0]*(?:[.,]\d{1,2})?)\s*%/g;
   const moneyMatches = [...withoutRef.matchAll(moneyRe)];
   const moneyVals = moneyMatches.map(mm=>parseFrenchNumber(mm[1])).filter(n=>!isNaN(n));
   const pctVals = [...withoutRef.matchAll(pctRe)].map(mm=>parseFrenchNumber(mm[1])).filter(n=>!isNaN(n));
   let qty = 1;
-  // On s'arrête AVANT le début du premier montant (et non juste avant le symbole €), sinon les chiffres
-  // du montant lui-même (ex. le "2" de "2 500,00 €", séparateur de milliers) seraient pris pour la quantité.
+  // On s'arrête AVANT le début du premier montant (et non juste avant un éventuel symbole €), sinon les
+  // chiffres du montant lui-même (ex. le "2" de "2 500,00 €", séparateur de milliers) seraient pris pour
+  // la quantité.
   const firstMoneyStart = moneyMatches.length ? moneyMatches[0].index : withoutRef.length;
   const before = withoutRef.slice(0, firstMoneyStart);
   const intMatches = before.match(/\d{1,5}(?!\s*[.,%])/g);
