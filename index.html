@@ -579,6 +579,8 @@ let ui = {
   commissionsSortDir: 'desc',
   devisFilterBrand:'all',
   devisFilterApporteur:'all',
+  devisSortBy:'date',
+  devisSortDir:'desc',
   devisSearch:'',
   devisDateFrom:'',
   devisDateTo:'',
@@ -1577,6 +1579,8 @@ const UI_FILTER_DEFAULTS = {
   devisFilterStatus:'all',
   devisFilterBrand:'all',
   devisFilterApporteur:'all',
+  devisSortBy:'date',
+  devisSortDir:'desc',
   devisSearch:'',
   devisDateFrom:'',
   devisDateTo:'',
@@ -5553,6 +5557,15 @@ function renderDevis(){
         <option value="Distributeur" ${ui.devisFilterApporteur==='Distributeur'?'selected':''}>Distributeur</option>
       </select>
     </div>
+    <div class="field" style="margin-bottom:0;max-width:200px;">
+      <select onchange="ui.devisSortBy=this.value; updateDevisListOnly();">
+        <option value="date" ${(!ui.devisSortBy||ui.devisSortBy==='date')?'selected':''}>Trier par date de création</option>
+        <option value="totalht" ${ui.devisSortBy==='totalht'?'selected':''}>Trier par Total HT</option>
+      </select>
+    </div>
+    <button class="btn btn-sm btn-ghost" onclick="ui.devisSortDir=(ui.devisSortDir==='asc'?'desc':'asc'); updateDevisListOnly();" title="Inverser l'ordre">
+      ${ui.devisSortDir==='asc'?'▲ Croissant':'▼ Décroissant'}
+    </button>
   </div>
   <div id="devisListWrap">${renderDevisListInner()}</div>
   `;
@@ -5800,7 +5813,13 @@ function renderDevisListInner(){
   if(ui.devisDateTo) list = list.filter(d=>d.date<=ui.devisDateTo);
   if(ui.devisFilterBrand && ui.devisFilterBrand!=='all') list = list.filter(d=>(d.lines||[]).some(l=>l.brandId===ui.devisFilterBrand));
   if(ui.devisFilterApporteur && ui.devisFilterApporteur!=='all') list = list.filter(d=>d.apporteurAffaire===ui.devisFilterApporteur);
-  list.sort((a,b)=>b.date.localeCompare(a.date) || b.number.localeCompare(a.number));
+  const sortBy = ui.devisSortBy||'date', sortDir = ui.devisSortDir||'desc';
+  list.sort((a,b)=>{
+    let cmp;
+    if(sortBy==='totalht') cmp = devisTotal(a).ht - devisTotal(b).ht;
+    else cmp = (a.date||'').localeCompare(b.date||'') || a.number.localeCompare(b.number);
+    return sortDir==='asc' ? cmp : -cmp;
+  });
   if(list.length===0) return emptyState('▧','Aucun devis','Créez votre premier devis à partir de vos listes de prix.');
   return `
   <div class="card table-wrap"><table>
