@@ -604,6 +604,9 @@ let ui = {
   tempsGainsMonth:0,
   tempsGainsSortBy:'importance',
   tempsGainsSortDir:'desc',
+  tempsGainsFamilleFilter:'all',
+  tempsGainsSousFamilleFilter:'all',
+  tempsGainsDepartementFilter:'all',
   rapportSections:{
     synthese:{caGagne:true, devisEnCours:true, devisGagnes:true, devisPerdus:true, caCommissions:true, commission:true, rdvCount:true},
     devisEnCours:true, devisGagnes:true, devisPerdus:true, rdv:true
@@ -8805,7 +8808,20 @@ function renderTempsGains(){
   const year = ui.tempsGainsYear, month = ui.tempsGainsMonth||0;
   const periodLabel = month ? `${MOIS_LABELS[month-1]} ${year}` : `Année ${year}`;
 
-  const rows = state.clients.map(c=>{
+  let clientsScope = state.clients;
+  if(ui.tempsGainsFamilleFilter && ui.tempsGainsFamilleFilter!=='all'){
+    const target = ui.tempsGainsFamilleFilter.trim().toLowerCase();
+    clientsScope = clientsScope.filter(c=>(c.famille||'').trim().toLowerCase()===target);
+  }
+  if(ui.tempsGainsSousFamilleFilter && ui.tempsGainsSousFamilleFilter!=='all'){
+    const target = ui.tempsGainsSousFamilleFilter.trim().toLowerCase();
+    clientsScope = clientsScope.filter(c=>(c.sousFamille||'').trim().toLowerCase()===target);
+  }
+  if(ui.tempsGainsDepartementFilter && ui.tempsGainsDepartementFilter!=='all'){
+    clientsScope = clientsScope.filter(c=>clientDepartement(c)===ui.tempsGainsDepartementFilter);
+  }
+
+  const rows = clientsScope.map(c=>{
     let minutes = 0, visites = 0;
     (c.history||[]).forEach(h=>{
       if(periodMatchesReport(h.date, year, month)){
@@ -8871,6 +8887,24 @@ function renderTempsGains(){
     <div class="field" style="margin-bottom:0;">
       <label>&nbsp;</label>
       <button class="btn" onclick="ui.tempsGainsSortDir=(ui.tempsGainsSortDir==='asc'?'desc':'asc'); render();">${sortDir==='asc'?'▲ Croissant':'▼ Décroissant'}</button>
+    </div>
+    <div class="field" style="margin-bottom:0;max-width:200px;">
+      <select onchange="ui.tempsGainsFamilleFilter=this.value; ui.tempsGainsSousFamilleFilter='all'; render();">
+        <option value="all">Toutes les familles</option>
+        ${(state.paramLists.famillesClients||[]).slice().sort((a,b)=>(a.libelle||'').localeCompare(b.libelle||'')).map(f=>`<option value="${escapeHtml(f.libelle)}" ${ui.tempsGainsFamilleFilter===f.libelle?'selected':''}>${escapeHtml(f.libelle)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field" style="margin-bottom:0;max-width:200px;">
+      <select onchange="ui.tempsGainsSousFamilleFilter=this.value; render();">
+        <option value="all">Toutes les sous-familles</option>
+        ${sousFamillesForFamilleFilter(ui.tempsGainsFamilleFilter).map(f=>`<option value="${escapeHtml(f.libelle)}" ${ui.tempsGainsSousFamilleFilter===f.libelle?'selected':''}>${escapeHtml(f.libelle)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field" style="margin-bottom:0;max-width:220px;">
+      <select onchange="ui.tempsGainsDepartementFilter=this.value; render();">
+        <option value="all">Tous les départements</option>
+        ${departementsInUse().map(d=>`<option value="${d}" ${ui.tempsGainsDepartementFilter===d?'selected':''}>${escapeHtml(departementLabel(d))}</option>`).join('')}
+      </select>
     </div>
   </div>
 
