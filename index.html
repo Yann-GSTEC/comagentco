@@ -156,6 +156,8 @@ button{font-family:inherit;}
 .grid-4{grid-template-columns:repeat(4,1fr);}
 .grid-3{grid-template-columns:repeat(3,1fr);}
 .grid-2{grid-template-columns:2fr 1fr;}
+.settings-top-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+@media (max-width:1000px){.settings-top-grid{grid-template-columns:1fr;}}
 @media (max-width:1000px){
   .grid-4{grid-template-columns:repeat(2,1fr);}
   .grid-2{grid-template-columns:1fr;}
@@ -600,7 +602,7 @@ let ui = {
   rapportFullscreen:false,
   tempsGainsYear:new Date().getFullYear(),
   tempsGainsMonth:0,
-  tempsGainsSortBy:'ca',
+  tempsGainsSortBy:'importance',
   tempsGainsSortDir:'desc',
   rapportSections:{
     synthese:{caGagne:true, devisEnCours:true, devisGagnes:true, devisPerdus:true, caCommissions:true, commission:true, rdvCount:true},
@@ -5221,7 +5223,8 @@ function renderParametres(){
   return `
   <div class="topbar"><div><h1>Paramètres</h1><div class="sub">Vos informations, utilisées sur les devis PDF</div></div></div>
 
-  <div class="card card-pad" style="max-width:560px;margin-bottom:18px;">
+  <div class="settings-top-grid" style="margin-bottom:18px;align-items:start;">
+  <div class="card card-pad">
     <div class="section-title">Sauvegarde automatique</div>
     ${folderStatus}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
@@ -5239,44 +5242,7 @@ function renderParametres(){
     </div>
   </div>
 
-  <div class="card card-pad" style="max-width:560px;">
-    <div class="section-title">Vos coordonnées</div>
-    <div class="field"><label>Nom / raison sociale</label><input type="text" id="s_name" value="${escapeHtml(s.companyName)}"></div>
-    <div class="field"><label>Adresse</label><input type="text" id="s_address" value="${escapeHtml(s.companyAddress)}"></div>
-    <div class="field-row">
-      <div class="field"><label>Email</label><input type="email" id="s_email" value="${escapeHtml(s.companyEmail)}"></div>
-      <div class="field"><label>Téléphone</label><input type="tel" id="s_phone" value="${escapeHtml(s.companyPhone)}"></div>
-    </div>
-    <div class="field-row">
-      <div class="field"><label>SIRET</label><input type="text" id="s_siret" value="${escapeHtml(s.siret)}"></div>
-    </div>
-    <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Vente exclusivement aux professionnels : vos devis sont établis en HT, sans TVA.</div>
-
-    <div class="section-title">Votre représentant <span class="helper" style="display:inline;">(affiché sur les devis PDF)</span></div>
-    <div class="field-row">
-      <div class="field"><label>Nom du représentant</label><input type="text" id="s_representantNom" value="${escapeHtml(s.representantNom||'')}" placeholder="Ex. Yann GUYADER"></div>
-      <div class="field"><label>Téléphone / portable</label><input type="tel" id="s_portable" value="${escapeHtml(s.portable||'')}"></div>
-    </div>
-
-    <div class="section-title">Numérotation des devis / marchés</div>
-    <div class="field"><label>Vos initiales</label><input type="text" id="s_initiales" value="${escapeHtml(s.initiales||'')}" placeholder="Ex. YG" style="max-width:140px;"></div>
-    <div class="field-row">
-      <div class="field"><label>Prochain numéro de devis</label><input type="number" id="s_nextNumberDevis" value="${s.nextNumberDevis||s.nextNumber||1}" min="1" step="1"></div>
-      <div class="field"><label>Prochain numéro de marché</label><input type="number" id="s_nextNumberMarche" value="${s.nextNumberMarche||1}" min="1" step="1"></div>
-    </div>
-    <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Le prochain devis sera numéroté <strong>${escapeHtml(s.initiales||'')}${s.initiales?'-':''}${s.nextNumberDevis||s.nextNumber||1}</strong>, le prochain marché <strong>${escapeHtml(s.initiales||'')}${s.initiales?'-':''}${s.nextNumberMarche||1}</strong>. Modifiez le numéro de départ pour continuer votre numérotation existante.</div>
-
-    <div class="section-title">Validité par défaut</div>
-    <div class="field-row">
-      <div class="field"><label>Devis — validité (mois)</label><input type="number" id="s_validiteDevisMois" value="${s.validiteDevisMois!=null?s.validiteDevisMois:2}" min="0" step="1"></div>
-      <div class="field"><label>Marché — années supplémentaires jusqu'à fin décembre</label><input type="number" id="s_validiteMarcheAnnees" value="${s.validiteMarcheAnneesSupp||0}" min="0" step="1"></div>
-    </div>
-    <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Calculée automatiquement à partir de la date de la pièce : <strong>Devis</strong> → ajoute le nombre de mois choisi, arrondi à la fin de ce mois-là (2 mois par défaut). <strong>Marché</strong> → 31 décembre de l'année en cours + le nombre d'années supplémentaires choisi (0 = fin de l'année en cours par défaut). Vous pouvez toujours modifier la date de validité au cas par cas dans chaque devis ou marché.</div>
-
-    <button class="btn btn-primary" onclick="saveSettings()">Enregistrer</button>
-  </div>
-
-  <div class="card card-pad" style="max-width:560px;margin-top:18px;">
+  <div class="card card-pad">
     <div class="section-title">Envoi des devis par email <span class="helper" style="display:inline;">— déjà actif, aucune configuration requise</span></div>
     <div class="helper" style="margin-bottom:12px;">
       Le bouton "Enregistrer et envoyer" d'un devis fonctionne déjà gratuitement, sans rien configurer ici : il télécharge le PDF et ouvre un brouillon dans votre messagerie, prêt à envoyer (il suffit d'y glisser le PDF téléchargé).
@@ -5307,8 +5273,46 @@ function renderParametres(){
     </div>
     <div id="outlookStatusMsg" class="helper" style="margin-top:8px;"></div>
   </div>
+  </div>
 
-  <div class="card card-pad" style="margin-top:18px;">
+  <div class="card card-pad" style="margin-bottom:18px;">
+    <div class="section-title">Vos coordonnées</div>
+    <div class="field-row">
+      <div class="field"><label>Nom / raison sociale</label><input type="text" id="s_name" value="${escapeHtml(s.companyName)}"></div>
+      <div class="field"><label>SIRET</label><input type="text" id="s_siret" value="${escapeHtml(s.siret)}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Adresse</label><input type="text" id="s_address" value="${escapeHtml(s.companyAddress)}"></div>
+      <div class="field"><label>Email</label><input type="email" id="s_email" value="${escapeHtml(s.companyEmail)}"></div>
+      <div class="field"><label>Téléphone</label><input type="tel" id="s_phone" value="${escapeHtml(s.companyPhone)}"></div>
+    </div>
+    <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Vente exclusivement aux professionnels : vos devis sont établis en HT, sans TVA.</div>
+
+    <div class="section-title">Votre représentant <span class="helper" style="display:inline;">(affiché sur les devis PDF)</span></div>
+    <div class="field-row">
+      <div class="field"><label>Nom du représentant</label><input type="text" id="s_representantNom" value="${escapeHtml(s.representantNom||'')}" placeholder="Ex. Yann GUYADER"></div>
+      <div class="field"><label>Téléphone / portable</label><input type="tel" id="s_portable" value="${escapeHtml(s.portable||'')}"></div>
+    </div>
+
+    <div class="section-title">Numérotation des devis / marchés</div>
+    <div class="field-row">
+      <div class="field" style="max-width:140px;"><label>Vos initiales</label><input type="text" id="s_initiales" value="${escapeHtml(s.initiales||'')}" placeholder="Ex. YG"></div>
+      <div class="field"><label>Prochain numéro de devis</label><input type="number" id="s_nextNumberDevis" value="${s.nextNumberDevis||s.nextNumber||1}" min="1" step="1"></div>
+      <div class="field"><label>Prochain numéro de marché</label><input type="number" id="s_nextNumberMarche" value="${s.nextNumberMarche||1}" min="1" step="1"></div>
+    </div>
+    <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Le prochain devis sera numéroté <strong>${escapeHtml(s.initiales||'')}${s.initiales?'-':''}${s.nextNumberDevis||s.nextNumber||1}</strong>, le prochain marché <strong>${escapeHtml(s.initiales||'')}${s.initiales?'-':''}${s.nextNumberMarche||1}</strong>. Modifiez le numéro de départ pour continuer votre numérotation existante.</div>
+
+    <div class="section-title">Validité par défaut</div>
+    <div class="field-row">
+      <div class="field"><label>Devis — validité (mois)</label><input type="number" id="s_validiteDevisMois" value="${s.validiteDevisMois!=null?s.validiteDevisMois:2}" min="0" step="1"></div>
+      <div class="field"><label>Marché — années supplémentaires jusqu'à fin décembre</label><input type="number" id="s_validiteMarcheAnnees" value="${s.validiteMarcheAnneesSupp||0}" min="0" step="1"></div>
+    </div>
+    <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Calculée automatiquement à partir de la date de la pièce : <strong>Devis</strong> → ajoute le nombre de mois choisi, arrondi à la fin de ce mois-là (2 mois par défaut). <strong>Marché</strong> → 31 décembre de l'année en cours + le nombre d'années supplémentaires choisi (0 = fin de l'année en cours par défaut). Vous pouvez toujours modifier la date de validité au cas par cas dans chaque devis ou marché.</div>
+
+    <button class="btn btn-primary" onclick="saveSettings()">Enregistrer</button>
+  </div>
+
+  <div class="card card-pad">
     <div class="section-title">Listes de référence</div>
     <div class="helper" style="margin-bottom:10px;">Gérez ici les familles, unités, colisages, civilités… utilisés dans les fiches clients, articles et tarifs.</div>
     <div class="pill-select" style="margin-bottom:14px;">
@@ -8822,7 +8826,7 @@ function renderTempsGains(){
   const maxRatio = rows.reduce((m,r)=>r.ratio!=null?Math.max(m,r.ratio):m, 0);
   rows.forEach(r=>{ r.importance = (r.ratio!=null && maxRatio>0) ? Math.round(100*r.ratio/maxRatio) : null; });
 
-  const sortBy = ui.tempsGainsSortBy||'ca', sortDir = ui.tempsGainsSortDir||'desc';
+  const sortBy = ui.tempsGainsSortBy||'importance', sortDir = ui.tempsGainsSortDir||'desc';
   rows.sort((a,b)=>{
     let av, bv;
     if(sortBy==='temps'){ av=a.minutes; bv=b.minutes; }
