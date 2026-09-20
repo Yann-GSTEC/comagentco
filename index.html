@@ -8887,7 +8887,7 @@ function renderTempsGains(){
           <td class="num">${r.visites}</td>
           <td class="num">${fmtDuree(r.minutes)}</td>
           <td class="num" style="font-weight:600;">${fmtMoney(r.ca)}</td>
-          <td class="num" style="font-weight:700;color:${r.importance==null?'var(--muted)':(r.importance>=66?'var(--success)':(r.importance<33?'var(--danger)':'var(--brass)'))};">${r.importance!=null?r.importance+' / 100':'—'}</td>
+          <td class="num" style="font-weight:700;color:${r.importance==null?'var(--muted)':(r.importance>=75?'var(--success)':(r.importance>=50?'var(--info)':(r.importance>=25?'#D9782D':'var(--danger)')))};">${r.importance!=null?r.importance+' / 100':'—'}</td>
         </tr>
       `).join('')}
     </tbody>
