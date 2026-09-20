@@ -8811,23 +8811,28 @@ function renderTempsGains(){
     });
     const ca = month ? caForClientMonth(c.id, year, month) : caForClient(c.id, year, null);
     const heures = minutes/60;
-    const rentabilite = heures>0.0166 ? ca/heures : null; // évite une rentabilité écrasante pour quelques minutes arrondies
-    return { client:c, minutes, visites, ca, heures, rentabilite };
+    return { client:c, minutes, visites, ca, heures };
   }).filter(r=>r.minutes>0 || r.ca>0);
+
+  // Importance du client : note sur 100 basée sur sa rentabilité horaire (CA généré ÷ temps passé),
+  // comparée à celle du client le plus rentable de la période (100 = le meilleur rapport temps/CA).
+  // Un client sans durée renseignée ne peut pas être noté sur ce critère (rien à diviser) : il apparaît
+  // avec "—" plutôt qu'une note fabriquée à partir de rien.
+  rows.forEach(r=>{ r.ratio = r.heures>0.0166 ? r.ca/r.heures : null; });
+  const maxRatio = rows.reduce((m,r)=>r.ratio!=null?Math.max(m,r.ratio):m, 0);
+  rows.forEach(r=>{ r.importance = (r.ratio!=null && maxRatio>0) ? Math.round(100*r.ratio/maxRatio) : null; });
 
   const sortBy = ui.tempsGainsSortBy||'ca', sortDir = ui.tempsGainsSortDir||'desc';
   rows.sort((a,b)=>{
     let av, bv;
     if(sortBy==='temps'){ av=a.minutes; bv=b.minutes; }
-    else if(sortBy==='rentabilite'){ av=a.rentabilite||0; bv=b.rentabilite||0; }
+    else if(sortBy==='importance'){ av=a.importance==null?-1:a.importance; bv=b.importance==null?-1:b.importance; }
     else { av=a.ca; bv=b.ca; }
     return sortDir==='asc' ? av-bv : bv-av;
   });
 
   const totalMinutes = rows.reduce((s,r)=>s+r.minutes,0);
   const totalCa = rows.reduce((s,r)=>s+r.ca,0);
-  const totalHeures = totalMinutes/60;
-  const rentabiliteMoyenne = totalHeures>0.0166 ? totalCa/totalHeures : null;
   const connected = !!state.settings.outlookAccountName;
 
   return `
@@ -8856,7 +8861,7 @@ function renderTempsGains(){
       <select onchange="ui.tempsGainsSortBy=this.value; render();">
         <option value="ca" ${sortBy==='ca'?'selected':''}>CA généré</option>
         <option value="temps" ${sortBy==='temps'?'selected':''}>Temps passé</option>
-        <option value="rentabilite" ${sortBy==='rentabilite'?'selected':''}>Rentabilité horaire</option>
+        <option value="importance" ${sortBy==='importance'?'selected':''}>Importance du client</option>
       </select>
     </div>
     <div class="field" style="margin-bottom:0;">
@@ -8868,13 +8873,13 @@ function renderTempsGains(){
   <div class="grid grid-4" style="margin-bottom:20px;">
     <div class="card kpi"><div class="label">Temps total passé</div><div class="value num">${fmtDuree(totalMinutes)}</div></div>
     <div class="card kpi"><div class="label">CA total généré</div><div class="value num" style="color:var(--success);">${fmtMoney(totalCa)}</div></div>
-    <div class="card kpi"><div class="label">Rentabilité horaire moyenne</div><div class="value num">${rentabiliteMoyenne!=null?fmtMoney(rentabiliteMoyenne)+'/h':'—'}</div></div>
     <div class="card kpi"><div class="label">Clients avec activité</div><div class="value num">${rows.length}</div></div>
   </div>
 
   ${rows.length===0?emptyState('⏱',"Aucune donnée pour cette période","Ajoutez une durée sur vos notes de suivi commercial (fiche client → Personnes vues / Note) pour voir apparaître ce rapport, ou importez votre agenda Outlook."):`
+  <div class="helper" style="margin-bottom:10px;">L'Importance du client est une note sur 100 basée sur sa rentabilité horaire (CA généré ÷ temps passé), comparée à celle du client le plus rentable de la période (100 = le meilleur rapport temps/CA). "—" = pas de durée renseignée pour ce client sur la période.</div>
   <div class="card table-wrap"><table>
-    <thead><tr><th>Client</th><th>Visites / RDV</th><th>Temps passé</th><th>CA généré</th><th>Rentabilité horaire</th></tr></thead>
+    <thead><tr><th>Client</th><th>Visites / RDV</th><th>Temps passé</th><th>CA généré</th><th>Importance du client</th></tr></thead>
     <tbody>
       ${rows.map(r=>`
         <tr style="cursor:pointer;" onclick="openClientDetail('${r.client.id}')">
@@ -8882,7 +8887,7 @@ function renderTempsGains(){
           <td class="num">${r.visites}</td>
           <td class="num">${fmtDuree(r.minutes)}</td>
           <td class="num" style="font-weight:600;">${fmtMoney(r.ca)}</td>
-          <td class="num" style="font-weight:600;color:${r.rentabilite==null?'var(--muted)':(r.rentabilite>=50?'var(--success)':(r.rentabilite<10?'var(--danger)':'var(--ink)'))};">${r.rentabilite!=null?fmtMoney(r.rentabilite)+'/h':'—'}</td>
+          <td class="num" style="font-weight:700;color:${r.importance==null?'var(--muted)':(r.importance>=66?'var(--success)':(r.importance<33?'var(--danger)':'var(--brass)'))};">${r.importance!=null?r.importance+' / 100':'—'}</td>
         </tr>
       `).join('')}
     </tbody>
