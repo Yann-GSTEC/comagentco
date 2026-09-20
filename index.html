@@ -10,7 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<script src="https://alcdn.msauth.net/browser/3.18.0/js/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.18.0/lib/msal-browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
@@ -598,6 +598,10 @@ let ui = {
   rapportYear:new Date().getFullYear(),
   rapportMonth:0,
   rapportFullscreen:false,
+  tempsGainsYear:new Date().getFullYear(),
+  tempsGainsMonth:0,
+  tempsGainsSortBy:'ca',
+  tempsGainsSortDir:'desc',
   rapportSections:{
     synthese:{caGagne:true, devisEnCours:true, devisGagnes:true, devisPerdus:true, caCommissions:true, commission:true, rdvCount:true},
     devisEnCours:true, devisGagnes:true, devisPerdus:true, rdv:true
@@ -1665,6 +1669,7 @@ const NAV_ITEMS_DEFAULT = [
   {id:'listesprixnets', label:'Liste de prix nets', ic:'▥'},
   {id:'devis', label:'Devis', ic:'▧'},
   {id:'rapport', label:'Rapport', ic:'▩'},
+  {id:'tempsgains', label:'Temps/Gains clients', ic:'⏱'},
   {id:'commissions', label:'Commissions', ic:'%'},
   {id:'recherche', label:'Recherche', ic:'⌕'},
   {id:'parametres', label:'Paramètres', ic:'⚙'},
@@ -1756,6 +1761,7 @@ function renderMain(){
     case 'listesprixnets': return renderListesPrixNets();
     case 'devis': return renderDevis();
     case 'rapport': return renderRapport();
+    case 'tempsgains': return renderTempsGains();
     case 'commissions': return renderCommissions();
     case 'recherche': return renderRecherche();
     case 'parametres': return renderParametres();
@@ -3035,7 +3041,7 @@ function openClientDetail(id){
           <div class="timeline-item" style="align-items:flex-start;">
             <input type="checkbox" style="width:auto;margin-top:2px;" ${ui.historySelected[h.id]?'checked':''} onchange="toggleHistorySelect('${h.id}', this.checked)">
             <div class="tdot"></div>
-            <div style="flex:1;cursor:pointer;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')"><div class="tdate">${fmtDate(h.date)}${h.typeVisite?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:6px;">${escapeHtml(h.typeVisite)}</span>`:''}${historyBrandIds(h).map(bid=>` <span class="chip" style="background:${brandColor(bid)};font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(brandName(bid))}</span>`).join('')}${historyTasks(h).map(t=>` <span class="chip" title="${t.comment?escapeHtml(t.comment):''}" style="background:${taskColor(t.name)};color:#fff;font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(t.name)}${t.comment?' 💬':''}</span>`).join('')}</div>${historyPersonneNames(h,c).length>0?`<div class="helper" style="margin:2px 0 2px;">👤 ${historyPersonneNames(h,c).map(escapeHtml).join(', ')}</div>`:''}<div style="white-space:pre-wrap;">${escapeHtml(h.text).replace(/\n/g,'<br>')}</div></div>
+            <div style="flex:1;cursor:pointer;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')"><div class="tdate">${fmtDate(h.date)}${h.typeVisite?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:6px;">${escapeHtml(h.typeVisite)}</span>`:''}${h.duree?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:4px;">⏱ ${h.duree} min</span>`:''}${historyBrandIds(h).map(bid=>` <span class="chip" style="background:${brandColor(bid)};font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(brandName(bid))}</span>`).join('')}${historyTasks(h).map(t=>` <span class="chip" title="${t.comment?escapeHtml(t.comment):''}" style="background:${taskColor(t.name)};color:#fff;font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(t.name)}${t.comment?' 💬':''}</span>`).join('')}</div>${historyPersonneNames(h,c).length>0?`<div class="helper" style="margin:2px 0 2px;">👤 ${historyPersonneNames(h,c).map(escapeHtml).join(', ')}</div>`:''}<div style="white-space:pre-wrap;">${escapeHtml(h.text).replace(/\n/g,'<br>')}</div></div>
             <button class="btn btn-sm btn-ghost" style="padding:2px 8px;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')">✎</button>
             <button class="btn btn-sm btn-ghost btn-danger" style="padding:2px 8px;" onclick="deleteHistoryNote('${c.id}','${h.id}')">✕</button>
           </div>
@@ -3147,6 +3153,7 @@ function openAddHistoryNoteModal(clientId){
         <div class="field"><label>Type de visite</label>
           <select id="ah_typeVisite">${typesVisiteOptions().map(tv=>`<option value="${escapeHtml(tv)}">${tv||'—'}</option>`).join('')}</select>
         </div>
+        <div class="field" style="max-width:150px;"><label>Durée (minutes)</label><input type="number" min="0" step="5" id="ah_duree" placeholder="Ex. 45"></div>
       </div>
       <div class="field" style="margin-bottom:16px;">
         <label>Marque(s) présentée(s) <span class="helper" style="display:inline;">— laissez vide si non applicable</span></label>
@@ -3175,11 +3182,13 @@ function addHistoryNote(clientId){
   const date = (dateEl && dateEl.value) ? dateEl.value : todayStr();
   const typeVisiteEl = document.getElementById('ah_typeVisite');
   const typeVisite = typeVisiteEl ? typeVisiteEl.value : '';
+  const dureeEl = document.getElementById('ah_duree');
+  const duree = dureeEl ? (parseInt(dureeEl.value,10)||0) : 0;
   const brandIds = historyNoteSelectedBrands.slice();
   const taches = Object.keys(historyNoteSelectedTasks).map(name=>({name, comment: historyNoteSelectedTasks[name]||''}));
   const c = state.clients.find(x=>x.id===clientId);
   c.history = c.history || [];
-  c.history.push({id:uid(), date, text, brandIds, typeVisite: typeVisite||'', taches, personnesVues: historyNoteSelectedPersonnes.slice()});
+  c.history.push({id:uid(), date, text, brandIds, typeVisite: typeVisite||'', duree, taches, personnesVues: historyNoteSelectedPersonnes.slice()});
   persist('clients');
   historyNoteSelectedBrands = [];
   historyNoteSelectedTasks = {};
@@ -3239,6 +3248,7 @@ function openEditHistoryNoteModal(clientId, noteId){
         <div class="field"><label>Type de visite</label>
           <select id="eh_typeVisite">${typesVisiteOptions().map(tv=>`<option value="${escapeHtml(tv)}" ${h.typeVisite===tv?'selected':''}>${tv||'—'}</option>`).join('')}</select>
         </div>
+        <div class="field" style="max-width:150px;"><label>Durée (minutes)</label><input type="number" min="0" step="5" id="eh_duree" value="${h.duree||''}" placeholder="Ex. 45"></div>
       </div>
       <div class="field" style="margin-bottom:16px;">
         <label>Marque(s) présentée(s)</label>
@@ -3269,6 +3279,8 @@ function saveEditedHistoryNote(clientId, noteId){
   h.text = text;
   h.date = document.getElementById('eh_date').value || h.date;
   h.typeVisite = document.getElementById('eh_typeVisite').value || '';
+  const dureeEl = document.getElementById('eh_duree');
+  h.duree = dureeEl ? (parseInt(dureeEl.value,10)||0) : (h.duree||0);
   h.brandIds = historyEditSelectedBrands.slice();
   h.taches = Object.keys(historyEditSelectedTasks).map(name=>({name, comment: historyEditSelectedTasks[name]||''}));
   h.personnesVues = historyEditSelectedPersonnes.slice();
@@ -5277,7 +5289,7 @@ function renderParametres(){
         <li>Nom libre (ex. "Comagentco"). Type de compte : "Comptes dans un annuaire d'organisation et comptes Microsoft personnels".</li>
         <li>Type de plateforme : <strong>Application monopage (SPA)</strong>. URI de redirection : l'adresse exacte à laquelle vous ouvrez ce fichier dans votre navigateur (actuellement : <code>${escapeHtml(window.location.href.split('#')[0].split('?')[0])}</code>).</li>
         <li>Une fois créée, copiez l'<strong>ID d'application (client)</strong> ci-dessous.</li>
-        <li>Dans "Autorisations API" → Ajouter une autorisation → Microsoft Graph → Autorisations déléguées → cochez <strong>Mail.Send</strong> et <strong>User.Read</strong> → Ajouter, puis "Accorder le consentement administrateur" si vous y êtes invité.</li>
+        <li>Dans "Autorisations API" → Ajouter une autorisation → Microsoft Graph → Autorisations déléguées → cochez <strong>Mail.Send</strong>, <strong>Calendars.Read</strong> et <strong>User.Read</strong> → Ajouter, puis "Accorder le consentement administrateur" si vous y êtes invité.</li>
       </ol>
       <div style="margin-top:8px;">Ouvrir ce fichier localement (double-clic, adresse en <code>file://</code>) ne permet pas cette connexion : il doit être hébergé sur une adresse web (même un simple hébergement statique en https, ou http://localhost en test). Si votre compte Microsoft est un compte professionnel géré par une entreprise, l'inscription d'application peut être bloquée par votre administrateur informatique — dans ce cas, le mode gratuit ci-dessus reste disponible sans restriction.</div>
     </div>
@@ -7973,7 +7985,7 @@ let msalInstance = null;
 function getMsalInstance(){
   const clientId = (state.settings.outlookClientId||'').trim();
   if(!clientId) return null;
-  if(typeof msal === 'undefined'){ showToast("La bibliothèque Microsoft (MSAL) ne s'est pas chargée — vérifiez votre connexion internet."); return null; }
+  if(typeof msal === 'undefined'){ showToast("La bibliothèque Microsoft (MSAL) ne s'est pas chargée — vérifiez votre connexion internet, ou rechargez complètement la page (elle peut parfois mettre un instant à se charger)."); return null; }
   const tenantId = (state.settings.outlookTenantId||'common').trim() || 'common';
   if(!msalInstance || msalInstance.__clientId!==clientId || msalInstance.__tenantId!==tenantId){
     msalInstance = new msal.PublicClientApplication({
@@ -8015,7 +8027,7 @@ async function connectOutlook(){
     if(statusEl) statusEl.textContent = 'Connexion en cours… une fenêtre Microsoft va s\'ouvrir (autorisez les pop-up si besoin).';
     const app = await ensureMsalInitialized();
     if(!app) return;
-    const result = await app.loginPopup({ scopes:['Mail.Send','User.Read'] });
+    const result = await app.loginPopup({ scopes:['Mail.Send','Calendars.Read','User.Read'] });
     app.setActiveAccount(result.account);
     state.settings.outlookAccountName = result.account.username;
     persist('settings');
@@ -8048,6 +8060,35 @@ async function getOutlookAccessToken(){
     app.setActiveAccount(result.account);
     return result.accessToken;
   }
+}
+async function getOutlookCalendarAccessToken(){
+  const app = await ensureMsalInitialized();
+  if(!app) throw new Error("Outlook non configuré — renseignez l'ID d'application dans Paramètres.");
+  let account = app.getActiveAccount() || app.getAllAccounts()[0];
+  if(!account) throw new Error('Non connecté à Outlook — connectez-vous depuis Paramètres.');
+  app.setActiveAccount(account);
+  try{
+    const result = await app.acquireTokenSilent({ scopes:['Calendars.Read'], account });
+    return result.accessToken;
+  }catch(e){
+    // Si l'autorisation "Calendars.Read" n'a pas encore été accordée (connexion faite avant l'ajout de
+    // cette fonctionnalité), on redemande le consentement avec ce droit en plus.
+    const result = await app.loginPopup({ scopes:['Calendars.Read'] });
+    app.setActiveAccount(result.account);
+    return result.accessToken;
+  }
+}
+async function fetchOutlookCalendarEvents(startIso, endIso){
+  const token = await getOutlookCalendarAccessToken();
+  const url = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${encodeURIComponent(startIso)}&endDateTime=${encodeURIComponent(endIso)}&$top=250&$orderby=start/dateTime`;
+  const resp = await fetch(url, { headers:{ 'Authorization':'Bearer '+token, 'Prefer':'outlook.timezone="Romance Standard Time"' } });
+  if(!resp.ok){
+    let detail = '';
+    try{ detail = (await resp.json()).error?.message || ''; }catch(e){}
+    throw new Error(`Erreur Microsoft Graph (${resp.status}) ${detail}`);
+  }
+  const data = await resp.json();
+  return data.value||[];
 }
 async function sendMailViaGraph(accessToken, {toEmails, subject, body, isHtml, attachmentName, attachmentBase64}){
   const message = {
@@ -8735,6 +8776,233 @@ async function confirmSendRapportMailFallback(){
     if(btn){ btn.disabled = false; btn.textContent = 'Télécharger le PDF + ouvrir le brouillon'; }
     showToast("Échec de la préparation de l'email : "+(e.message||String(e)));
   }
+}
+
+/* ============================= TEMPS / GAINS CLIENTS ============================= */
+function fmtDuree(minutes){
+  minutes = Math.round(minutes||0);
+  if(!minutes) return '0 min';
+  const h = Math.floor(minutes/60), m = minutes%60;
+  if(h===0) return `${m} min`;
+  if(m===0) return `${h} h`;
+  return `${h} h ${m}`;
+}
+function caForClientMonth(clientId, year, month){
+  let total = 0;
+  state.devis.filter(d=>isDevisWon(d) && d.clientId===clientId).forEach(d=>{
+    if(!periodMatchesReport(d.date, year, month)) return;
+    total += devisTotal(d).ht;
+  });
+  return total;
+}
+function renderTempsGains(){
+  const years = availableYears();
+  if(!ui.tempsGainsYear || !years.includes(ui.tempsGainsYear)) ui.tempsGainsYear = years[0] || new Date().getFullYear();
+  const year = ui.tempsGainsYear, month = ui.tempsGainsMonth||0;
+  const periodLabel = month ? `${MOIS_LABELS[month-1]} ${year}` : `Année ${year}`;
+
+  const rows = state.clients.map(c=>{
+    let minutes = 0, visites = 0;
+    (c.history||[]).forEach(h=>{
+      if(periodMatchesReport(h.date, year, month)){
+        minutes += h.duree||0;
+        visites++;
+      }
+    });
+    const ca = month ? caForClientMonth(c.id, year, month) : caForClient(c.id, year, null);
+    const heures = minutes/60;
+    const rentabilite = heures>0.0166 ? ca/heures : null; // évite une rentabilité écrasante pour quelques minutes arrondies
+    return { client:c, minutes, visites, ca, heures, rentabilite };
+  }).filter(r=>r.minutes>0 || r.ca>0);
+
+  const sortBy = ui.tempsGainsSortBy||'ca', sortDir = ui.tempsGainsSortDir||'desc';
+  rows.sort((a,b)=>{
+    let av, bv;
+    if(sortBy==='temps'){ av=a.minutes; bv=b.minutes; }
+    else if(sortBy==='rentabilite'){ av=a.rentabilite||0; bv=b.rentabilite||0; }
+    else { av=a.ca; bv=b.ca; }
+    return sortDir==='asc' ? av-bv : bv-av;
+  });
+
+  const totalMinutes = rows.reduce((s,r)=>s+r.minutes,0);
+  const totalCa = rows.reduce((s,r)=>s+r.ca,0);
+  const totalHeures = totalMinutes/60;
+  const rentabiliteMoyenne = totalHeures>0.0166 ? totalCa/totalHeures : null;
+  const connected = !!state.settings.outlookAccountName;
+
+  return `
+  <div class="topbar">
+    <div><h1>Temps / Gains clients</h1><div class="sub">Temps passé en clientèle (suivi commercial) comparé au CA généré, par client — ${escapeHtml(periodLabel)}</div></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" onclick="openImportAgendaModal()" title="${connected?'Importer les rendez-vous de votre agenda Outlook sur la période sélectionnée':'Connectez Outlook dans Paramètres pour importer votre agenda'}">📅 Importer depuis mon agenda Outlook</button>
+    </div>
+  </div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
+    <div class="field" style="margin-bottom:0;max-width:140px;">
+      <label>Année</label>
+      <select onchange="ui.tempsGainsYear=parseInt(this.value); render();">
+        ${years.map(y=>`<option value="${y}" ${year===y?'selected':''}>${y}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field" style="margin-bottom:0;max-width:190px;">
+      <label>Mois</label>
+      <select onchange="ui.tempsGainsMonth=parseInt(this.value); render();">
+        <option value="0" ${!month?'selected':''}>Tous les mois</option>
+        ${MOIS_LABELS.map((m,i)=>`<option value="${i+1}" ${month===i+1?'selected':''}>${m}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field" style="margin-bottom:0;max-width:210px;">
+      <label>Trier par</label>
+      <select onchange="ui.tempsGainsSortBy=this.value; render();">
+        <option value="ca" ${sortBy==='ca'?'selected':''}>CA généré</option>
+        <option value="temps" ${sortBy==='temps'?'selected':''}>Temps passé</option>
+        <option value="rentabilite" ${sortBy==='rentabilite'?'selected':''}>Rentabilité horaire</option>
+      </select>
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label>&nbsp;</label>
+      <button class="btn" onclick="ui.tempsGainsSortDir=(ui.tempsGainsSortDir==='asc'?'desc':'asc'); render();">${sortDir==='asc'?'▲ Croissant':'▼ Décroissant'}</button>
+    </div>
+  </div>
+
+  <div class="grid grid-4" style="margin-bottom:20px;">
+    <div class="card kpi"><div class="label">Temps total passé</div><div class="value num">${fmtDuree(totalMinutes)}</div></div>
+    <div class="card kpi"><div class="label">CA total généré</div><div class="value num" style="color:var(--success);">${fmtMoney(totalCa)}</div></div>
+    <div class="card kpi"><div class="label">Rentabilité horaire moyenne</div><div class="value num">${rentabiliteMoyenne!=null?fmtMoney(rentabiliteMoyenne)+'/h':'—'}</div></div>
+    <div class="card kpi"><div class="label">Clients avec activité</div><div class="value num">${rows.length}</div></div>
+  </div>
+
+  ${rows.length===0?emptyState('⏱',"Aucune donnée pour cette période","Ajoutez une durée sur vos notes de suivi commercial (fiche client → Personnes vues / Note) pour voir apparaître ce rapport, ou importez votre agenda Outlook."):`
+  <div class="card table-wrap"><table>
+    <thead><tr><th>Client</th><th>Visites / RDV</th><th>Temps passé</th><th>CA généré</th><th>Rentabilité horaire</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`
+        <tr style="cursor:pointer;" onclick="openClientDetail('${r.client.id}')">
+          <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
+          <td class="num">${r.visites}</td>
+          <td class="num">${fmtDuree(r.minutes)}</td>
+          <td class="num" style="font-weight:600;">${fmtMoney(r.ca)}</td>
+          <td class="num" style="font-weight:600;color:${r.rentabilite==null?'var(--muted)':(r.rentabilite>=50?'var(--success)':(r.rentabilite<10?'var(--danger)':'var(--ink)'))};">${r.rentabilite!=null?fmtMoney(r.rentabilite)+'/h':'—'}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table></div>`}
+  `;
+}
+
+/* ---- Import de l'agenda Outlook (temps passé par client) ---- */
+function openImportAgendaModal(){
+  if(!state.settings.outlookAccountName){
+    showToast("Connectez d'abord Outlook depuis Paramètres pour importer votre agenda.");
+    return;
+  }
+  const year = ui.tempsGainsYear||new Date().getFullYear();
+  const month = ui.tempsGainsMonth||0;
+  const defaultFrom = month ? `${year}-${String(month).padStart(2,'0')}-01` : `${year}-01-01`;
+  const lastDay = month ? new Date(year, month, 0).getDate() : 31;
+  const defaultTo = month ? `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}` : `${year}-12-31`;
+  openModal(`
+    <div class="modal-head"><h3>Importer depuis mon agenda Outlook</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="helper" style="margin-bottom:14px;">Récupère vos événements Outlook sur la période choisie, essaie de retrouver le client concerné (nom de société repéré dans le titre, le lieu ou les participants de l'événement), et vous laisse vérifier avant d'enregistrer chaque durée dans le suivi commercial du bon client.</div>
+      <div class="field-row">
+        <div class="field"><label>Du</label><input type="date" id="ag_from" value="${defaultFrom}"></div>
+        <div class="field"><label>Au</label><input type="date" id="ag_to" value="${defaultTo}"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" id="ag_fetchBtn" onclick="runImportAgenda()">Récupérer les événements</button>
+    </div>
+  `);
+}
+async function runImportAgenda(){
+  const from = document.getElementById('ag_from').value;
+  const to = document.getElementById('ag_to').value;
+  if(!from || !to){ showToast('Indiquez les deux dates.'); return; }
+  const btn = document.getElementById('ag_fetchBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Récupération en cours…'; }
+  try{
+    const startIso = new Date(from+'T00:00:00').toISOString();
+    const endIso = new Date(to+'T23:59:59').toISOString();
+    const events = await fetchOutlookCalendarEvents(startIso, endIso);
+    const matched = events.map(ev=>{
+      const subject = ev.subject||'';
+      const location = (ev.location && ev.location.displayName) || '';
+      const attendeeNames = (ev.attendees||[]).map(a=>(a.emailAddress&&a.emailAddress.name)||'').join(' ');
+      const attendeeEmails = (ev.attendees||[]).map(a=>(a.emailAddress&&a.emailAddress.address)||'').join(' ');
+      const haystack = `${subject} ${location} ${attendeeNames} ${attendeeEmails}`.toUpperCase();
+      let bestClient = null, bestLen = 0;
+      state.clients.forEach(c=>{
+        const label = (c.company||c.name||'').trim();
+        if(label.length<=3) return;
+        if(haystack.includes(label.toUpperCase()) && label.length>bestLen){ bestLen = label.length; bestClient = c; }
+      });
+      const start = ev.start && ev.start.dateTime ? new Date(ev.start.dateTime+'Z'.slice(ev.start.dateTime.endsWith('Z')?1:0)) : null;
+      const end = ev.end && ev.end.dateTime ? new Date(ev.end.dateTime+'Z'.slice(ev.end.dateTime.endsWith('Z')?1:0)) : null;
+      let dureeMin = 30;
+      if(start && end && end>start) dureeMin = Math.round((end-start)/60000);
+      const dateStr = start ? start.toISOString().slice(0,10) : todayStr();
+      return { subject, clientId: bestClient?bestClient.id:'', dureeMin, dateStr, include: !!bestClient };
+    }).filter(m=>!m.subject || !/^(déjeuner|pause|congés?|absence|rdv perso)/i.test(m.subject));
+    openAgendaImportReview(matched);
+  }catch(e){
+    console.error(e);
+    showToast("Échec de la récupération de l'agenda : "+(e.message||String(e)));
+    const btn2 = document.getElementById('ag_fetchBtn');
+    if(btn2){ btn2.disabled = false; btn2.textContent = 'Récupérer les événements'; }
+  }
+}
+let agendaImportRows = [];
+function openAgendaImportReview(matched){
+  agendaImportRows = matched;
+  const notMatched = matched.filter(m=>!m.clientId).length;
+  openModal(`
+    <div class="modal-head"><h3>Vérifier avant d'enregistrer</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="helper" style="margin-bottom:12px;">${matched.length} événement(s) trouvé(s)${notMatched?`, dont ${notMatched} sans client identifié automatiquement — choisissez-le manuellement ou décochez la ligne`:''}. Décochez ce que vous ne souhaitez pas importer.</div>
+      <div id="agendaImportRowsWrap" style="max-height:420px;overflow-y:auto;">${renderAgendaImportRows()}</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="confirmAgendaImport()">Enregistrer le temps passé</button>
+    </div>
+  `, {lg:true});
+}
+function renderAgendaImportRows(){
+  if(agendaImportRows.length===0) return '<div class="helper">Aucun événement sur cette période.</div>';
+  return `<div class="table-wrap"><table>
+    <thead><tr><th style="width:30px;"></th><th>Date</th><th>Événement</th><th>Client</th><th style="width:120px;">Durée (min)</th></tr></thead>
+    <tbody>
+      ${agendaImportRows.map((m,i)=>`
+        <tr>
+          <td><input type="checkbox" ${m.include?'checked':''} onchange="agendaImportRows[${i}].include=this.checked;"></td>
+          <td>${fmtDate(m.dateStr)}</td>
+          <td>${escapeHtml(m.subject||'—')}</td>
+          <td><select onchange="agendaImportRows[${i}].clientId=this.value; agendaImportRows[${i}].include=!!this.value;">
+            <option value="">— Choisir —</option>
+            ${state.clients.slice().sort((a,b)=>clientDisplayName(a).localeCompare(clientDisplayName(b))).map(c=>`<option value="${c.id}" ${m.clientId===c.id?'selected':''}>${escapeHtml(clientDisplayName(c))}</option>`).join('')}
+          </select></td>
+          <td><input type="number" min="0" step="5" value="${m.dureeMin}" onchange="agendaImportRows[${i}].dureeMin=parseInt(this.value,10)||0;"></td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table></div>`;
+}
+function confirmAgendaImport(){
+  let added = 0;
+  agendaImportRows.forEach(m=>{
+    if(!m.include || !m.clientId) return;
+    const c = state.clients.find(x=>x.id===m.clientId);
+    if(!c) return;
+    c.history = c.history || [];
+    c.history.push({ id:uid(), date:m.dateStr, text: `Rendez-vous (importé de l'agenda Outlook) : ${m.subject||'Sans titre'}`, brandIds:[], typeVisite:'', duree:m.dureeMin, taches:[], personnesVues:[] });
+    added++;
+  });
+  persist('clients');
+  closeModal();
+  render();
+  showToast(added>0 ? `${added} événement(s) ajouté(s) au suivi commercial.` : "Aucun événement importé (client non choisi).");
 }
 
 /* ============================= DASHBOARD ============================= */
