@@ -5291,6 +5291,10 @@ function renderParametres(){
       `}
     </div>
     <div id="outlookStatusMsg" class="helper" style="margin-top:8px;"></div>
+    <div class="divider"></div>
+    <div class="section-title">Lien .ics de mon agenda <span class="helper" style="display:inline;">(pour l'onglet Temps/Gains clients — alternative qui ne dépend pas d'Outlook)</span></div>
+    <div class="helper" style="margin-bottom:10px;">Collez ici le lien d'abonnement iCal (.ics) de votre agenda (Outlook, Google Calendar…). Une fois enregistré, il est réutilisable à tout moment depuis l'onglet Temps/Gains clients, sans avoir à réexporter un fichier.</div>
+    <div class="field"><label>Lien .ics</label><input type="text" id="s_icsUrl" value="${escapeHtml(s.icsCalendarUrl||'')}" placeholder="https://.../calendar.ics ou webcal://..."></div>
   </div>
   </div>
 
@@ -5470,6 +5474,7 @@ function saveSettings(){
     nextNumberMarche: parseInt(document.getElementById('s_nextNumberMarche').value)||1,
     validiteDevisMois: parseInt(document.getElementById('s_validiteDevisMois').value)||0,
     validiteMarcheAnneesSupp: parseInt(document.getElementById('s_validiteMarcheAnnees').value)||0,
+    icsCalendarUrl: document.getElementById('s_icsUrl').value.trim(),
   });
   persist('settings');
   render();
@@ -8943,14 +8948,12 @@ function renderTempsGains(){
 
   const totalMinutes = rows.reduce((s,r)=>s+r.minutes,0);
   const totalCa = rows.reduce((s,r)=>s+r.ca,0);
-  const connected = !!state.settings.outlookAccountName;
 
   return `
   <div class="topbar">
     <div><h1>Temps / Gains clients</h1><div class="sub">Temps passé en clientèle (suivi commercial) comparé au CA généré, par client — ${escapeHtml(periodLabel)}</div></div>
     <div style="display:flex;gap:8px;">
-      <button class="btn" onclick="openImportAgendaModal()" title="${connected?'Importer les rendez-vous de votre agenda Outlook sur la période sélectionnée':'Connectez Outlook dans Paramètres pour importer votre agenda'}">📅 Importer depuis mon agenda Outlook</button>
-      <button class="btn" onclick="openImportIcsPicker()" title="Fonctionne toujours, même sans Outlook connecté : exportez votre agenda en fichier .ics (Outlook, Google Calendar…) puis importez-le ici">📁 Importer un fichier .ics</button>
+      <button class="btn" onclick="openIcsLinkModal()" title="Configurez une fois le lien .ics de votre agenda (Outlook, Google Calendar…), puis importez à tout moment sans avoir à réexporter un fichier">🔗 Lien .ics de mon agenda</button>
     </div>
   </div>
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
@@ -9089,6 +9092,23 @@ function parseIcsDate(raw){
   if(z) return new Date(Date.UTC(+y,+mo-1,+d,+h,+mi,+s));
   return new Date(+y,+mo-1,+d,+h,+mi,+s); // heure locale approximative si le fichier n'indique pas "Z"
 }
+function buildIcsMatchedRows(events){
+  return events.map(ev=>{
+    const start = parseIcsDate(ev.dtstart);
+    const end = parseIcsDate(ev.dtend);
+    const haystack = `${ev.summary||''} ${ev.location||''} ${(ev.attendees||[]).join(' ')}`.toUpperCase();
+    let bestClient = null, bestLen = 0;
+    state.clients.forEach(c=>{
+      const label = (c.company||c.name||'').trim();
+      if(label.length<=3) return;
+      if(haystack.includes(label.toUpperCase()) && label.length>bestLen){ bestLen = label.length; bestClient = c; }
+    });
+    let dureeMin = 30;
+    if(start && end && end>start) dureeMin = Math.round((end-start)/60000);
+    const dateStr = start ? start.toISOString().slice(0,10) : todayStr();
+    return { subject: ev.summary||'', clientId: bestClient?bestClient.id:'', dureeMin, dateStr, include: !!bestClient };
+  }).filter(m=>!m.subject || !/^(déjeuner|pause|congés?|absence|rdv perso)/i.test(m.subject));
+}
 function openImportIcsPicker(){
   const input = document.createElement('input');
   input.type = 'file';
@@ -9103,25 +9123,67 @@ async function handleIcsFile(evt){
     const text = await file.text();
     const events = parseIcsFile(text);
     if(events.length===0){ showToast("Aucun événement trouvé dans ce fichier .ics."); return; }
-    const matched = events.map(ev=>{
-      const start = parseIcsDate(ev.dtstart);
-      const end = parseIcsDate(ev.dtend);
-      const haystack = `${ev.summary||''} ${ev.location||''} ${(ev.attendees||[]).join(' ')}`.toUpperCase();
-      let bestClient = null, bestLen = 0;
-      state.clients.forEach(c=>{
-        const label = (c.company||c.name||'').trim();
-        if(label.length<=3) return;
-        if(haystack.includes(label.toUpperCase()) && label.length>bestLen){ bestLen = label.length; bestClient = c; }
-      });
-      let dureeMin = 30;
-      if(start && end && end>start) dureeMin = Math.round((end-start)/60000);
-      const dateStr = start ? start.toISOString().slice(0,10) : todayStr();
-      return { subject: ev.summary||'', clientId: bestClient?bestClient.id:'', dureeMin, dateStr, include: !!bestClient };
-    }).filter(m=>!m.subject || !/^(déjeuner|pause|congés?|absence|rdv perso)/i.test(m.subject));
-    openAgendaImportReview(matched);
+    openAgendaImportReview(buildIcsMatchedRows(events));
   }catch(e){
     console.error(e);
     showToast("Impossible de lire ce fichier .ics : "+(e.message||String(e)));
+  }
+}
+function openIcsLinkModal(){
+  const current = state.settings.icsCalendarUrl || '';
+  openModal(`
+    <div class="modal-head"><h3>Lien .ics de mon agenda</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="helper" style="margin-bottom:12px;">
+        Collez ici le lien d'abonnement iCal (.ics) de votre agenda — enregistrez-le une fois, puis cliquez sur "Importer maintenant" à chaque fois que vous voulez récupérer les événements à jour, sans avoir à réexporter un fichier.
+        <br><br>
+        <strong>Où trouver ce lien ?</strong><br>
+        • <strong>Outlook / Office 365</strong> : Paramètres → Calendrier → Calendriers partagés → « Publier un calendrier » → copiez le lien au format ICS.<br>
+        • <strong>Google Calendar</strong> : Paramètres du calendrier concerné → « Intégrer le calendrier » → copiez l'« Adresse secrète au format iCal ».<br><br>
+        Un lien commençant par <code>webcal://</code> est automatiquement converti en <code>https://</code>.
+      </div>
+      <div class="field"><label>Lien .ics</label><input type="text" id="ics_url" value="${escapeHtml(current)}" placeholder="https://.../calendar.ics ou webcal://..."></div>
+      <div id="icsLinkStatus"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Fermer</button>
+      <button class="btn btn-ghost" onclick="saveIcsLink()">Enregistrer le lien</button>
+      <button class="btn btn-primary" id="ics_importBtn" onclick="runImportIcsLink()">Importer maintenant</button>
+    </div>
+  `);
+}
+function saveIcsLink(){
+  const url = document.getElementById('ics_url').value.trim();
+  state.settings.icsCalendarUrl = url;
+  persist('settings');
+  showToast('Lien .ics enregistré.');
+}
+async function runImportIcsLink(){
+  let url = document.getElementById('ics_url').value.trim();
+  if(!url){ showToast('Collez un lien .ics.'); return; }
+  saveIcsLink();
+  if(/^webcal:\/\//i.test(url)) url = 'https://'+url.slice('webcal://'.length);
+  const btn = document.getElementById('ics_importBtn');
+  const statusEl = document.getElementById('icsLinkStatus');
+  if(btn){ btn.disabled = true; btn.textContent = 'Récupération en cours…'; }
+  if(statusEl) statusEl.innerHTML = '';
+  try{
+    const resp = await fetch(url);
+    if(!resp.ok) throw new Error(`Erreur HTTP ${resp.status}`);
+    const text = await resp.text();
+    const events = parseIcsFile(text);
+    if(events.length===0){
+      showToast("Aucun événement trouvé à ce lien.");
+      if(btn){ btn.disabled = false; btn.textContent = 'Importer maintenant'; }
+      return;
+    }
+    const matched = buildIcsMatchedRows(events);
+    closeModal();
+    openAgendaImportReview(matched);
+  }catch(e){
+    console.error(e);
+    if(statusEl) statusEl.innerHTML = `<div class="helper" style="color:var(--danger);margin-top:6px;">⚠ Impossible de récupérer ce lien directement depuis le navigateur (souvent un blocage de sécurité imposé par le fournisseur, appelé CORS — hors de notre contrôle). Solution de repli : téléchargez le fichier .ics depuis votre agenda, puis <a href="#" onclick="event.preventDefault(); closeModal(); openImportIcsPicker();">importez-le comme fichier</a> à la place.</div>`;
+    if(btn){ btn.disabled = false; btn.textContent = 'Importer maintenant'; }
   }
 }
 
