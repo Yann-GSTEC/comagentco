@@ -613,6 +613,7 @@ let ui = {
   tempsGainsSousFamilleFilter:'all',
   tempsGainsDepartementFilter:'all',
   parametresSubTab: 'coordonnees',
+  tempsGainsExpanded: null,
   relanceDevisJours: 15,
   relanceClientJours: 60,
   rapportSections:{
@@ -5282,6 +5283,7 @@ function renderParametres(){
     {key:'sauvegarde', label:'Sauvegarde'},
     {key:'devis', label:'Devis'},
     {key:'envoi', label:'Envoi des devis'},
+    {key:'synchro', label:'Synchronisation'},
     {key:'listes', label:'Listes de référence'},
   ];
   const showIf = (key)=> subTab===key ? '' : 'display:none;';
@@ -5367,7 +5369,11 @@ function renderParametres(){
           <button class="btn btn-sm btn-brass" onclick="saveEmailTemplate()">Enregistrer le modèle</button>
           <button class="btn btn-sm btn-ghost" onclick="document.getElementById('s_emailTemplate').value=DEFAULT_EMAIL_TEMPLATE;">↺ Revenir au modèle par défaut</button>
         </div>
-        <div class="divider"></div>
+      </div>
+    </div>
+
+    <div style="${showIf('synchro')}">
+      <div class="card card-pad">
         <div class="section-title">Envoi des devis par email <span class="helper" style="display:inline;">— déjà actif, aucune configuration requise</span></div>
         <div class="helper" style="margin-bottom:12px;">
           Le bouton "Enregistrer et envoyer" d'un devis fonctionne déjà gratuitement, sans rien configurer ici : il télécharge le PDF et ouvre un brouillon dans votre messagerie, prêt à envoyer (il suffit d'y glisser le PDF téléchargé).
@@ -9077,6 +9083,13 @@ function renderTempsGains(){
   const totalMinutes = rows.reduce((s,r)=>s+r.minutes,0);
   const totalCa = rows.reduce((s,r)=>s+r.ca,0);
 
+  const tgExpanded = ui.tempsGainsExpanded||null; // 'client' | 'marqueCA' | 'marqueCommission' | null
+  const tgToggle = (key)=> `ui.tempsGainsExpanded=(ui.tempsGainsExpanded==='${key}'?null:'${key}'); render();`;
+  const clientRowsShown = tgExpanded==='client' ? rows : rows.slice(0,20);
+  const brandCaRowsShown = tgExpanded==='marqueCA' ? brandRows : brandRows.slice(0,10);
+  const brandCommissionSorted = brandRows.slice().sort((a,b)=>(b.importanceCommissionOnly==null?-1:b.importanceCommissionOnly)-(a.importanceCommissionOnly==null?-1:a.importanceCommissionOnly));
+  const brandCommissionRowsShown = tgExpanded==='marqueCommission' ? brandCommissionSorted : brandCommissionSorted.slice(0,10);
+
   return `
   <div class="topbar">
     <div><h1>Temps / Gains clients</h1><div class="sub">Temps passé en clientèle (suivi commercial) comparé au CA généré, par client — ${escapeHtml(periodLabel)}</div></div>
@@ -9139,13 +9152,13 @@ function renderTempsGains(){
 
   <div class="settings-top-grid">
   <div>
-    <div class="section-title">Importance par client</div>
+    <div class="section-title" style="cursor:pointer;" onclick="${tgToggle('client')}" title="Cliquer pour afficher tout / réduire">Importance par client ${tgExpanded==='client'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='client'?`(${rows.length} au total)`:(rows.length>20?`(20 sur ${rows.length})`:'')}</span></div>
     ${rows.length===0?emptyState('⏱',"Aucune donnée pour cette période","Ajoutez une durée sur vos notes de suivi commercial (fiche client → Personnes vues / Note) pour voir apparaître ce rapport, ou importez votre agenda Outlook."):`
     <div class="helper" style="margin-bottom:10px;">Note sur 100 basée sur la rentabilité horaire (CA généré ÷ temps passé), comparée au client le plus rentable de la période. "—" = pas de durée renseignée.</div>
     <div class="card table-wrap"><table>
       <thead><tr><th>Client</th><th>Visites</th><th>Temps</th><th>CA généré</th><th>Importance</th></tr></thead>
       <tbody>
-        ${rows.map(r=>`
+        ${clientRowsShown.map(r=>`
           <tr style="cursor:pointer;" onclick="openClientSuiviOnlyModal('${r.client.id}')">
             <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
             <td class="num">${r.visites}</td>
@@ -9159,13 +9172,13 @@ function renderTempsGains(){
   </div>
 
   <div>
-    <div class="section-title">Importance par marque <span class="helper" style="display:inline;">(CA et commission de l'onglet Commissions)</span></div>
+    <div class="section-title" style="cursor:pointer;" onclick="${tgToggle('marqueCA')}" title="Cliquer pour afficher tout / réduire">Importance par marque ${tgExpanded==='marqueCA'?'▲':'▼'} <span class="helper" style="display:inline;">(CA et commission de l'onglet Commissions)${tgExpanded==='marqueCA'?` — ${brandRows.length} au total`:(brandRows.length>10?` — 10 sur ${brandRows.length}`:'')}</span></div>
     ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période","Cochez une ou plusieurs marques sur vos rendez-vous (fiche client → note de suivi) et renseignez le CA/la commission dans l'onglet Commissions."):`
     <div class="helper" style="margin-bottom:10px;">Note combinant les <strong>trois critères</strong> : temps passé, CA et commission par heure investie — la moyenne des notes CA/heure et Commission/heure, chacune comparée à la meilleure marque de la période. Une marque à fort CA mais à faible taux de commission n'est ainsi plus mise en avant artificiellement. Cliquez sur une ligne pour corriger le CA, la commission ou le temps passé.</div>
     <div class="card table-wrap"><table>
       <thead><tr><th>Marque</th><th>Visites</th><th>Temps</th><th>CA (Commissions)</th><th>Commission</th><th>Importance</th></tr></thead>
       <tbody>
-        ${brandRows.map(r=>`
+        ${brandCaRowsShown.map(r=>`
           <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
             <td style="font-weight:600;"><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
             <td class="num">${r.visites}</td>
@@ -9178,13 +9191,13 @@ function renderTempsGains(){
       </tbody>
     </table></div>`}
 
-    <div class="section-title" style="margin-top:20px;">Importance par marque — uniquement par rapport aux commissions</div>
+    <div class="section-title" style="margin-top:20px;cursor:pointer;" onclick="${tgToggle('marqueCommission')}" title="Cliquer pour afficher tout / réduire">Importance par marque — uniquement par rapport aux commissions ${tgExpanded==='marqueCommission'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='marqueCommission'?`(${brandCommissionSorted.length} au total)`:(brandCommissionSorted.length>10?`(10 sur ${brandCommissionSorted.length})`:'')}</span></div>
     ${brandRows.length===0?'':`
     <div class="helper" style="margin-bottom:10px;">Note basée uniquement sur la <strong>commission par heure passée</strong>, sans tenir compte du CA — utile pour voir quelles marques rapportent le plus, indépendamment de leur volume d'affaires.</div>
     <div class="card table-wrap"><table>
       <thead><tr><th>Marque</th><th>Temps</th><th>Commission</th><th>Importance (commission)</th></tr></thead>
       <tbody>
-        ${brandRows.slice().sort((a,b)=>(b.importanceCommissionOnly==null?-1:b.importanceCommissionOnly)-(a.importanceCommissionOnly==null?-1:a.importanceCommissionOnly)).map(r=>`
+        ${brandCommissionRowsShown.map(r=>`
           <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
             <td style="font-weight:600;"><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
             <td class="num">${fmtDuree(r.minutes)}</td>
