@@ -8954,6 +8954,7 @@ function renderTempsGains(){
     <div><h1>Temps / Gains clients</h1><div class="sub">Temps passé en clientèle (suivi commercial) comparé au CA généré, par client — ${escapeHtml(periodLabel)}</div></div>
     <div style="display:flex;gap:8px;">
       <button class="btn" onclick="openIcsLinkModal()" title="Configurez une fois le lien .ics de votre agenda (Outlook, Google Calendar…), puis importez à tout moment sans avoir à réexporter un fichier">🔗 Lien .ics de mon agenda</button>
+      <button class="btn" onclick="openImportIcsPicker()" title="Exportez votre agenda en fichier .ics (Outlook, Google Calendar…) puis importez-le ici">📁 Fichier .ics de mon agenda</button>
     </div>
   </div>
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
@@ -9092,6 +9093,22 @@ function parseIcsDate(raw){
   if(z) return new Date(Date.UTC(+y,+mo-1,+d,+h,+mi,+s));
   return new Date(+y,+mo-1,+d,+h,+mi,+s); // heure locale approximative si le fichier n'indique pas "Z"
 }
+function findClientByObjetMatch(haystack){
+  // Deuxième passe si le nom de société n'a rien donné : compare les mots significatifs de l'objet de
+  // chacun de vos devis à ceux du rendez-vous (ex. un RDV "Suivi Pantomeca" retrouvé via l'objet de devis
+  // "Affaire PANTOMECA NIORT"), plutôt que d'exiger une correspondance exacte du nom de société.
+  const stopwords = new Set(['DEMANDE','PRIX','OFFRE','DEVIS','MARCHE','MARCHÉ','AFFAIRE','POUR','AVEC','DANS','CETTE','CONCERNANT','POLE','PÔLE']);
+  let bestDevis = null, bestScore = 0;
+  state.devis.forEach(d=>{
+    const objet = (d.objet||'').trim().toUpperCase();
+    if(!objet) return;
+    const words = objet.split(/[^A-ZÀ-Ÿ0-9]+/).filter(w=>w.length>=4 && !stopwords.has(w));
+    let score = 0;
+    words.forEach(w=>{ if(haystack.includes(w)) score += w.length; });
+    if(score>bestScore){ bestScore = score; bestDevis = d; }
+  });
+  return (bestDevis && bestScore>=4) ? (state.clients.find(c=>c.id===bestDevis.clientId)||null) : null;
+}
 function buildIcsMatchedRows(events){
   return events.map(ev=>{
     const start = parseIcsDate(ev.dtstart);
@@ -9103,6 +9120,7 @@ function buildIcsMatchedRows(events){
       if(label.length<=3) return;
       if(haystack.includes(label.toUpperCase()) && label.length>bestLen){ bestLen = label.length; bestClient = c; }
     });
+    if(!bestClient) bestClient = findClientByObjetMatch(haystack);
     let dureeMin = 30;
     if(start && end && end>start) dureeMin = Math.round((end-start)/60000);
     const dateStr = start ? start.toISOString().slice(0,10) : todayStr();
