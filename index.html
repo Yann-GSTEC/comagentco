@@ -8843,6 +8843,35 @@ function renderTempsGains(){
   rows.forEach(r=>{ r.importance = (r.ratio!=null && maxRatio>0) ? Math.round(100*r.ratio/maxRatio) : null; });
 
   const sortBy = ui.tempsGainsSortBy||'importance', sortDir = ui.tempsGainsSortDir||'desc';
+
+  // Importance par marque : même principe (rentabilité horaire), mais avec le CA de l'onglet Commissions
+  // (saisie manuelle par marque/année/mois) plutôt que le CA calculé à partir des devis, et un temps passé
+  // basé sur les marques cochées sur chaque rendez-vous des clients actuellement filtrés.
+  const brandRows = state.brands.map(b=>{
+    let minutes = 0, visites = 0;
+    clientsScope.forEach(c=>{
+      (c.history||[]).forEach(h=>{
+        if(periodMatchesReport(h.date, year, month) && historyBrandIds(h).includes(b.id)){
+          minutes += h.duree||0;
+          visites++;
+        }
+      });
+    });
+    const ca = month ? (getCommissionEntry(b.id, year, month).ca||0) : Array.from({length:12},(_,i)=>getCommissionEntry(b.id, year, i+1).ca||0).reduce((s,v)=>s+v,0);
+    const heures = minutes/60;
+    return { brand:b, minutes, visites, ca, heures };
+  }).filter(r=>r.minutes>0 || r.ca>0);
+  brandRows.forEach(r=>{ r.ratio = r.heures>0.0166 ? r.ca/r.heures : null; });
+  const maxBrandRatio = brandRows.reduce((m,r)=>r.ratio!=null?Math.max(m,r.ratio):m, 0);
+  brandRows.forEach(r=>{ r.importance = (r.ratio!=null && maxBrandRatio>0) ? Math.round(100*r.ratio/maxBrandRatio) : null; });
+  brandRows.sort((a,b)=>{
+    let av, bv;
+    if(sortBy==='temps'){ av=a.minutes; bv=b.minutes; }
+    else if(sortBy==='importance'){ av=a.importance==null?-1:a.importance; bv=b.importance==null?-1:b.importance; }
+    else { av=a.ca; bv=b.ca; }
+    return sortDir==='asc' ? av-bv : bv-av;
+  });
+
   rows.sort((a,b)=>{
     let av, bv;
     if(sortBy==='temps'){ av=a.minutes; bv=b.minutes; }
@@ -8914,22 +8943,47 @@ function renderTempsGains(){
     <div class="card kpi"><div class="label">Clients avec activité</div><div class="value num">${rows.length}</div></div>
   </div>
 
-  ${rows.length===0?emptyState('⏱',"Aucune donnée pour cette période","Ajoutez une durée sur vos notes de suivi commercial (fiche client → Personnes vues / Note) pour voir apparaître ce rapport, ou importez votre agenda Outlook."):`
-  <div class="helper" style="margin-bottom:10px;">L'Importance du client est une note sur 100 basée sur sa rentabilité horaire (CA généré ÷ temps passé), comparée à celle du client le plus rentable de la période (100 = le meilleur rapport temps/CA). "—" = pas de durée renseignée pour ce client sur la période.</div>
-  <div class="card table-wrap"><table>
-    <thead><tr><th>Client</th><th>Visites / RDV</th><th>Temps passé</th><th>CA généré</th><th>Importance du client</th></tr></thead>
-    <tbody>
-      ${rows.map(r=>`
-        <tr style="cursor:pointer;" onclick="openClientDetail('${r.client.id}')">
-          <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
-          <td class="num">${r.visites}</td>
-          <td class="num">${fmtDuree(r.minutes)}</td>
-          <td class="num" style="font-weight:600;">${fmtMoney(r.ca)}</td>
-          <td class="num" style="font-weight:700;color:${r.importance==null?'var(--muted)':(r.importance>=75?'var(--success)':(r.importance>=50?'var(--info)':(r.importance>=25?'#D9782D':'var(--danger)')))};">${r.importance!=null?r.importance+' / 100':'—'}</td>
-        </tr>
-      `).join('')}
-    </tbody>
-  </table></div>`}
+  <div class="settings-top-grid">
+  <div>
+    <div class="section-title">Importance par client</div>
+    ${rows.length===0?emptyState('⏱',"Aucune donnée pour cette période","Ajoutez une durée sur vos notes de suivi commercial (fiche client → Personnes vues / Note) pour voir apparaître ce rapport, ou importez votre agenda Outlook."):`
+    <div class="helper" style="margin-bottom:10px;">Note sur 100 basée sur la rentabilité horaire (CA généré ÷ temps passé), comparée au client le plus rentable de la période. "—" = pas de durée renseignée.</div>
+    <div class="card table-wrap"><table>
+      <thead><tr><th>Client</th><th>Visites</th><th>Temps</th><th>CA généré</th><th>Importance</th></tr></thead>
+      <tbody>
+        ${rows.map(r=>`
+          <tr style="cursor:pointer;" onclick="openClientDetail('${r.client.id}')">
+            <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
+            <td class="num">${r.visites}</td>
+            <td class="num">${fmtDuree(r.minutes)}</td>
+            <td class="num" style="font-weight:600;">${fmtMoney(r.ca)}</td>
+            <td class="num" style="font-weight:700;color:${r.importance==null?'var(--muted)':(r.importance>=75?'var(--success)':(r.importance>=50?'var(--info)':(r.importance>=25?'#D9782D':'var(--danger)')))};">${r.importance!=null?r.importance+' / 100':'—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table></div>`}
+  </div>
+
+  <div>
+    <div class="section-title">Importance par marque <span class="helper" style="display:inline;">(CA de l'onglet Commissions)</span></div>
+    ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période","Cochez une ou plusieurs marques sur vos rendez-vous (fiche client → note de suivi) et renseignez le CA dans l'onglet Commissions."):`
+    <div class="helper" style="margin-bottom:10px;">CA repris de l'onglet Commissions, temps passé issu des marques cochées sur vos rendez-vous.</div>
+    <div class="card table-wrap"><table>
+      <thead><tr><th>Marque</th><th>Visites</th><th>Temps</th><th>CA (Commissions)</th><th>Importance</th></tr></thead>
+      <tbody>
+        ${brandRows.map(r=>`
+          <tr>
+            <td style="font-weight:600;"><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
+            <td class="num">${r.visites}</td>
+            <td class="num">${fmtDuree(r.minutes)}</td>
+            <td class="num" style="font-weight:600;">${fmtMoney(r.ca)}</td>
+            <td class="num" style="font-weight:700;color:${r.importance==null?'var(--muted)':(r.importance>=75?'var(--success)':(r.importance>=50?'var(--info)':(r.importance>=25?'#D9782D':'var(--danger)')))};">${r.importance!=null?r.importance+' / 100':'—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table></div>`}
+  </div>
+  </div>
   `;
 }
 
