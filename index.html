@@ -158,6 +158,11 @@ button{font-family:inherit;}
 .grid-2{grid-template-columns:2fr 1fr;}
 .settings-top-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
 @media (max-width:1000px){.settings-top-grid{grid-template-columns:1fr;}}
+.param-subnav{display:flex;flex-direction:column;gap:4px;min-width:190px;flex-shrink:0;}
+.param-subnav button{text-align:left;padding:10px 14px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--ink-soft);font-size:13.5px;cursor:pointer;}
+.param-subnav button:hover{background:var(--surface-2);}
+.param-subnav button.active{background:var(--surface);border-color:var(--line);color:var(--ink);font-weight:700;box-shadow:var(--shadow);}
+@media (max-width:800px){.param-subnav{flex-direction:row;flex-wrap:wrap;min-width:0;}}
 @media (max-width:1000px){
   .grid-4{grid-template-columns:repeat(2,1fr);}
   .grid-2{grid-template-columns:1fr;}
@@ -607,6 +612,7 @@ let ui = {
   tempsGainsFamilleFilter:'all',
   tempsGainsSousFamilleFilter:'all',
   tempsGainsDepartementFilter:'all',
+  parametresSubTab: 'coordonnees',
   relanceDevisJours: 15,
   relanceClientJours: 60,
   rapportSections:{
@@ -5258,6 +5264,7 @@ function renderRechercheResults(){
 /* ============================= PARAMETRES ============================= */
 function renderParametres(){
   const s = state.settings;
+  const subTab = ui.parametresSubTab || 'coordonnees';
   const folderStatus = !fsAccessSupported()
     ? `<div class="helper" style="color:var(--danger);">Votre navigateur ne permet pas la sauvegarde automatique dans un dossier (fonction disponible sur Chrome ou Edge). Utilisez le téléchargement manuel ci-dessous, et enregistrez le fichier téléchargé dans votre dossier OneDrive.</div>`
     : backupDirHandle
@@ -5270,119 +5277,146 @@ function renderParametres(){
              <div class="helper" style="margin-top:6px;">Les Tarifs et la Liste de prix nets (catalogues volumineux) sont désormais enregistrés directement dans ce dossier, sans limite de taille — le stockage du navigateur n'est plus utilisé pour ces deux tables tant que ce dossier reste connecté.</div>`)
       : `<div class="helper">Aucun dossier choisi pour l'instant. Cliquez ci-dessous et sélectionnez votre dossier :<br><code>OneDrive - GSTEC\\GS-TEC\\Logiciel ComAgentCo</code></div>
          <div class="helper" style="margin-top:6px;color:var(--danger);">Recommandé si votre catalogue Tarifs dépasse quelques milliers de références : sans dossier connecté, la sauvegarde du navigateur peut échouer sur un très gros catalogue.</div>`;
+  const subTabs = [
+    {key:'coordonnees', label:'Vos coordonnées'},
+    {key:'sauvegarde', label:'Sauvegarde'},
+    {key:'devis', label:'Devis'},
+    {key:'envoi', label:'Envoi des devis'},
+    {key:'listes', label:'Listes de référence'},
+  ];
+  const showIf = (key)=> subTab===key ? '' : 'display:none;';
   return `
   <div class="topbar"><div><h1>Paramètres</h1><div class="sub">Vos informations, utilisées sur les devis PDF</div></div></div>
 
-  <div class="settings-top-grid" style="margin-bottom:18px;align-items:start;">
-  <div class="card card-pad">
-    <div class="section-title">Sauvegarde automatique</div>
-    ${folderStatus}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
-      <button class="btn" onclick="chooseBackupFolder()">${backupDirHandle?'Changer de dossier':'Choisir un dossier de sauvegarde'}</button>
-      ${backupDirHandle?`<button class="btn btn-ghost" onclick="writeBackupNow()">Sauvegarder maintenant</button>
-      <button class="btn btn-ghost btn-danger" onclick="forgetBackupFolder()">Oublier ce dossier</button>`:''}
+  <div style="display:flex;gap:20px;align-items:flex-start;">
+    <div class="param-subnav">
+      ${subTabs.map(t=>`<button class="${subTab===t.key?'active':''}" onclick="ui.parametresSubTab='${t.key}'; render();">${escapeHtml(t.label)}</button>`).join('')}
     </div>
-    <div class="divider"></div>
-    <div class="section-title">Modèle de message d'envoi des devis</div>
-    <div class="helper" style="margin-bottom:10px;">
-      Texte utilisé par défaut dans le message d'envoi d'un devis par email (modifiable au cas par cas à chaque envoi). Variables disponibles : <code>{greeting}</code> (la formule d'appel, avec le contact "À l'attention de" du devis si renseigné), <code>{type}</code> (devis/marché), <code>{numero}</code>, <code>{objet}</code> (ajoute automatiquement " concernant : ..." si l'objet est renseigné, sinon rien).
-    </div>
-    <textarea id="s_emailTemplate" rows="5" style="margin-bottom:8px;">${escapeHtml(s.emailMessageTemplate||DEFAULT_EMAIL_TEMPLATE)}</textarea>
-    <div style="display:flex;gap:8px;">
-      <button class="btn btn-sm btn-brass" onclick="saveEmailTemplate()">Enregistrer le modèle</button>
-      <button class="btn btn-sm btn-ghost" onclick="document.getElementById('s_emailTemplate').value=DEFAULT_EMAIL_TEMPLATE;">↺ Revenir au modèle par défaut</button>
-    </div>
-    <div class="divider"></div>
-    <div class="section-title">Sauvegarde manuelle</div>
-    <div class="helper" style="margin-bottom:10px;">À utiliser dans tous les cas en complément (ou sur Firefox/Safari) : télécharge un fichier que vous pouvez déposer vous-même dans votre dossier OneDrive.</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button class="btn" onclick="downloadBackupNow()">⇩ Télécharger une sauvegarde</button>
-      <button class="btn btn-ghost" onclick="document.getElementById('restoreFile').click()">⇪ Restaurer une sauvegarde</button>
-      <input type="file" id="restoreFile" accept=".json" style="display:none;" onchange="restoreBackupFile(event)">
-    </div>
-  </div>
+    <div style="flex:1;min-width:0;">
 
-  <div class="card card-pad">
-    <div class="section-title">Envoi des devis par email <span class="helper" style="display:inline;">— déjà actif, aucune configuration requise</span></div>
-    <div class="helper" style="margin-bottom:12px;">
-      Le bouton "Enregistrer et envoyer" d'un devis fonctionne déjà gratuitement, sans rien configurer ici : il télécharge le PDF et ouvre un brouillon dans votre messagerie, prêt à envoyer (il suffit d'y glisser le PDF téléchargé).
-    </div>
-    <div class="section-title" style="margin-top:4px;">Option avancée : envoi 100 % automatique via Outlook <span class="helper" style="display:inline;">(pièce jointe incluse sans rien glisser — facultatif)</span></div>
-    <div class="helper" style="margin-bottom:12px;">
-      Cette option utilise Microsoft Graph pour envoyer les devis directement depuis votre boîte Outlook, pièce jointe PDF incluse automatiquement. <strong>Elle est entièrement gratuite</strong> (l'inscription d'application Azure AD ne coûte rien, aucune carte bancaire n'est nécessaire pour cet usage — seul un compte Microsoft, personnel ou professionnel, est requis). Configuration en une seule fois :
-      <ol style="margin:8px 0 0 18px;padding:0;">
-        <li>Rendez-vous sur <strong>portal.azure.com</strong> → Azure Active Directory → Inscriptions d'applications → Nouvelle inscription.</li>
-        <li>Nom libre (ex. "Comagentco"). Type de compte : "Comptes dans un annuaire d'organisation et comptes Microsoft personnels".</li>
-        <li>Type de plateforme : <strong>Application monopage (SPA)</strong>. URI de redirection : l'adresse exacte à laquelle vous ouvrez ce fichier dans votre navigateur (actuellement : <code>${escapeHtml(window.location.href.split('#')[0].split('?')[0])}</code>).</li>
-        <li>Une fois créée, copiez l'<strong>ID d'application (client)</strong> ci-dessous.</li>
-        <li>Dans "Autorisations API" → Ajouter une autorisation → Microsoft Graph → Autorisations déléguées → cochez <strong>Mail.Send</strong>, <strong>Calendars.Read</strong> et <strong>User.Read</strong> → Ajouter, puis "Accorder le consentement administrateur" si vous y êtes invité.</li>
-      </ol>
-      <div style="margin-top:8px;">Ouvrir ce fichier localement (double-clic, adresse en <code>file://</code>) ne permet pas cette connexion : il doit être hébergé sur une adresse web (même un simple hébergement statique en https, ou http://localhost en test). Si votre compte Microsoft est un compte professionnel géré par une entreprise, l'inscription d'application peut être bloquée par votre administrateur informatique — dans ce cas, le mode gratuit ci-dessus reste disponible sans restriction.</div>
-    </div>
-    <div class="field-row">
-      <div class="field"><label>ID d'application (client) Azure AD</label><input type="text" id="s_outlookClientId" value="${escapeHtml(s.outlookClientId||'')}" placeholder="ex. 3f8a1c2e-...."></div>
-      <div class="field"><label>Locataire (tenant) <span class="helper" style="display:inline;">— laissez "common" par défaut</span></label><input type="text" id="s_outlookTenantId" value="${escapeHtml(s.outlookTenantId||'common')}"></div>
-    </div>
-    <div style="display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap;">
-      ${s.outlookAccountName?`
-        <span class="chip" style="background:var(--success, #3F8A7B);">✓ Connecté : ${escapeHtml(s.outlookAccountName)}</span>
-        <button class="btn btn-sm btn-ghost" onclick="saveOutlookConfig(); disconnectOutlook();">Se déconnecter</button>
-      `:`
-        <button class="btn btn-sm btn-brass" onclick="saveOutlookConfig(); connectOutlook();">Connecter Outlook</button>
-      `}
-    </div>
-    <div id="outlookStatusMsg" class="helper" style="margin-top:8px;"></div>
-    <div class="divider"></div>
-    <div class="section-title">Lien .ics de mon agenda <span class="helper" style="display:inline;">(pour l'onglet Temps/Gains clients — alternative qui ne dépend pas d'Outlook)</span></div>
-    <div class="helper" style="margin-bottom:10px;">Collez ici le lien d'abonnement iCal (.ics) de votre agenda (Outlook, Google Calendar…). Une fois enregistré, il est réutilisable à tout moment depuis l'onglet Temps/Gains clients, sans avoir à réexporter un fichier.</div>
-    <div class="field"><label>Lien .ics</label><input type="text" id="s_icsUrl" value="${escapeHtml(s.icsCalendarUrl||'')}" placeholder="https://.../calendar.ics ou webcal://..."></div>
-  </div>
-  </div>
-
-  <div class="card card-pad" style="margin-bottom:18px;">
-    <div class="section-title">Vos coordonnées</div>
-    <div class="field-row">
-      <div class="field"><label>Nom / raison sociale</label><input type="text" id="s_name" value="${escapeHtml(s.companyName)}"></div>
-      <div class="field"><label>SIRET</label><input type="text" id="s_siret" value="${escapeHtml(s.siret)}"></div>
-    </div>
-    <div class="field-row">
-      <div class="field"><label>Adresse</label><input type="text" id="s_address" value="${escapeHtml(s.companyAddress)}"></div>
-      <div class="field"><label>Email</label><input type="email" id="s_email" value="${escapeHtml(s.companyEmail)}"></div>
-      <div class="field"><label>Téléphone</label><input type="tel" id="s_phone" value="${escapeHtml(s.companyPhone)}"></div>
-    </div>
-    <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Vente exclusivement aux professionnels : vos devis sont établis en HT, sans TVA.</div>
-
-    <div class="section-title">Votre représentant <span class="helper" style="display:inline;">(affiché sur les devis PDF)</span></div>
-    <div class="field-row">
-      <div class="field"><label>Nom du représentant</label><input type="text" id="s_representantNom" value="${escapeHtml(s.representantNom||'')}" placeholder="Ex. Yann GUYADER"></div>
-      <div class="field"><label>Téléphone / portable</label><input type="tel" id="s_portable" value="${escapeHtml(s.portable||'')}"></div>
+    <div style="${showIf('coordonnees')}">
+      <div class="card card-pad">
+        <div class="section-title">Vos coordonnées</div>
+        <div class="field-row">
+          <div class="field"><label>Nom / raison sociale</label><input type="text" id="s_name" value="${escapeHtml(s.companyName)}"></div>
+          <div class="field"><label>SIRET</label><input type="text" id="s_siret" value="${escapeHtml(s.siret)}"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Adresse</label><input type="text" id="s_address" value="${escapeHtml(s.companyAddress)}"></div>
+          <div class="field"><label>Email</label><input type="email" id="s_email" value="${escapeHtml(s.companyEmail)}"></div>
+          <div class="field"><label>Téléphone</label><input type="tel" id="s_phone" value="${escapeHtml(s.companyPhone)}"></div>
+        </div>
+        <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Vente exclusivement aux professionnels : vos devis sont établis en HT, sans TVA.</div>
+        <div class="section-title">Votre représentant <span class="helper" style="display:inline;">(affiché sur les devis PDF)</span></div>
+        <div class="field-row">
+          <div class="field"><label>Nom du représentant</label><input type="text" id="s_representantNom" value="${escapeHtml(s.representantNom||'')}" placeholder="Ex. Yann GUYADER"></div>
+          <div class="field"><label>Téléphone / portable</label><input type="tel" id="s_portable" value="${escapeHtml(s.portable||'')}"></div>
+        </div>
+        <button class="btn btn-primary" onclick="saveSettings()">Enregistrer</button>
+      </div>
     </div>
 
-    <div class="section-title">Numérotation des devis / marchés</div>
-    <div class="field-row">
-      <div class="field" style="max-width:140px;"><label>Vos initiales</label><input type="text" id="s_initiales" value="${escapeHtml(s.initiales||'')}" placeholder="Ex. YG"></div>
-      <div class="field"><label>Prochain numéro de devis</label><input type="number" id="s_nextNumberDevis" value="${s.nextNumberDevis||s.nextNumber||1}" min="1" step="1"></div>
-      <div class="field"><label>Prochain numéro de marché</label><input type="number" id="s_nextNumberMarche" value="${s.nextNumberMarche||1}" min="1" step="1"></div>
+    <div style="${showIf('sauvegarde')}">
+      <div class="card card-pad">
+        <div class="section-title">Sauvegarde automatique</div>
+        ${folderStatus}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+          <button class="btn" onclick="chooseBackupFolder()">${backupDirHandle?'Changer de dossier':'Choisir un dossier de sauvegarde'}</button>
+          ${backupDirHandle?`<button class="btn btn-ghost" onclick="writeBackupNow()">Sauvegarder maintenant</button>
+          <button class="btn btn-ghost btn-danger" onclick="forgetBackupFolder()">Oublier ce dossier</button>`:''}
+        </div>
+        <div class="divider"></div>
+        <div class="section-title">Sauvegarde manuelle</div>
+        <div class="helper" style="margin-bottom:10px;">À utiliser dans tous les cas en complément (ou sur Firefox/Safari) : télécharge un fichier que vous pouvez déposer vous-même dans votre dossier OneDrive.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn" onclick="downloadBackupNow()">⇩ Télécharger une sauvegarde</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('restoreFile').click()">⇪ Restaurer une sauvegarde</button>
+          <input type="file" id="restoreFile" accept=".json" style="display:none;" onchange="restoreBackupFile(event)">
+        </div>
+      </div>
     </div>
-    <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Le prochain devis sera numéroté <strong>${escapeHtml(s.initiales||'')}${s.initiales?'-':''}${s.nextNumberDevis||s.nextNumber||1}</strong>, le prochain marché <strong>${escapeHtml(s.initiales||'')}${s.initiales?'-':''}${s.nextNumberMarche||1}</strong>. Modifiez le numéro de départ pour continuer votre numérotation existante.</div>
 
-    <div class="section-title">Validité par défaut</div>
-    <div class="field-row">
-      <div class="field"><label>Devis — validité (mois)</label><input type="number" id="s_validiteDevisMois" value="${s.validiteDevisMois!=null?s.validiteDevisMois:2}" min="0" step="1"></div>
-      <div class="field"><label>Marché — années supplémentaires jusqu'à fin décembre</label><input type="number" id="s_validiteMarcheAnnees" value="${s.validiteMarcheAnneesSupp||0}" min="0" step="1"></div>
+    <div style="${showIf('devis')}">
+      <div class="card card-pad">
+        <div class="section-title">Numérotation des devis / marchés</div>
+        <div class="field-row">
+          <div class="field" style="max-width:140px;"><label>Vos initiales</label><input type="text" id="s_initiales" value="${escapeHtml(s.initiales||'')}" placeholder="Ex. YG"></div>
+          <div class="field"><label>Prochain numéro de devis</label><input type="number" id="s_nextNumberDevis" value="${s.nextNumberDevis||s.nextNumber||1}" min="1" step="1"></div>
+          <div class="field"><label>Prochain numéro de marché</label><input type="number" id="s_nextNumberMarche" value="${s.nextNumberMarche||1}" min="1" step="1"></div>
+        </div>
+        <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Le prochain devis sera numéroté <strong>${escapeHtml(s.initiales||'')}${s.initiales?'-':''}${s.nextNumberDevis||s.nextNumber||1}</strong>, le prochain marché <strong>${escapeHtml(s.initiales||'')}${s.initiales?'-':''}${s.nextNumberMarche||1}</strong>. Modifiez le numéro de départ pour continuer votre numérotation existante.</div>
+        <div class="divider"></div>
+        <div class="section-title">Validité par défaut</div>
+        <div class="field-row">
+          <div class="field"><label>Devis — validité (mois)</label><input type="number" id="s_validiteDevisMois" value="${s.validiteDevisMois!=null?s.validiteDevisMois:2}" min="0" step="1"></div>
+          <div class="field"><label>Marché — années supplémentaires jusqu'à fin décembre</label><input type="number" id="s_validiteMarcheAnnees" value="${s.validiteMarcheAnneesSupp||0}" min="0" step="1"></div>
+        </div>
+        <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Calculée automatiquement à partir de la date de la pièce : <strong>Devis</strong> → ajoute le nombre de mois choisi, arrondi à la fin de ce mois-là (2 mois par défaut). <strong>Marché</strong> → 31 décembre de l'année en cours + le nombre d'années supplémentaires choisi (0 = fin de l'année en cours par défaut). Vous pouvez toujours modifier la date de validité au cas par cas dans chaque devis ou marché.</div>
+        <button class="btn btn-primary" onclick="saveSettings()">Enregistrer</button>
+      </div>
     </div>
-    <div class="helper" style="margin-top:-8px;margin-bottom:14px;">Calculée automatiquement à partir de la date de la pièce : <strong>Devis</strong> → ajoute le nombre de mois choisi, arrondi à la fin de ce mois-là (2 mois par défaut). <strong>Marché</strong> → 31 décembre de l'année en cours + le nombre d'années supplémentaires choisi (0 = fin de l'année en cours par défaut). Vous pouvez toujours modifier la date de validité au cas par cas dans chaque devis ou marché.</div>
 
-    <button class="btn btn-primary" onclick="saveSettings()">Enregistrer</button>
-  </div>
-
-  <div class="card card-pad">
-    <div class="section-title">Listes de référence</div>
-    <div class="helper" style="margin-bottom:10px;">Gérez ici les familles, unités, colisages, civilités… utilisés dans les fiches clients, articles et tarifs.</div>
-    <div class="pill-select" style="margin-bottom:14px;">
-      ${PARAM_LIST_DEFS.map(d=>`<button class="${ui.paramListSelected===d.key?'active':''}" onclick="ui.paramListSelected='${d.key}';render();">${escapeHtml(d.label)}</button>`).join('')}
+    <div style="${showIf('envoi')}">
+      <div class="card card-pad">
+        <div class="section-title">Modèle de message d'envoi des devis</div>
+        <div class="helper" style="margin-bottom:10px;">
+          Texte utilisé par défaut dans le message d'envoi d'un devis par email (modifiable au cas par cas à chaque envoi). Variables disponibles : <code>{greeting}</code> (la formule d'appel, avec le contact "À l'attention de" du devis si renseigné), <code>{type}</code> (devis/marché), <code>{numero}</code>, <code>{objet}</code> (ajoute automatiquement " concernant : ..." si l'objet est renseigné, sinon rien).
+        </div>
+        <textarea id="s_emailTemplate" rows="5" style="margin-bottom:8px;">${escapeHtml(s.emailMessageTemplate||DEFAULT_EMAIL_TEMPLATE)}</textarea>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm btn-brass" onclick="saveEmailTemplate()">Enregistrer le modèle</button>
+          <button class="btn btn-sm btn-ghost" onclick="document.getElementById('s_emailTemplate').value=DEFAULT_EMAIL_TEMPLATE;">↺ Revenir au modèle par défaut</button>
+        </div>
+        <div class="divider"></div>
+        <div class="section-title">Envoi des devis par email <span class="helper" style="display:inline;">— déjà actif, aucune configuration requise</span></div>
+        <div class="helper" style="margin-bottom:12px;">
+          Le bouton "Enregistrer et envoyer" d'un devis fonctionne déjà gratuitement, sans rien configurer ici : il télécharge le PDF et ouvre un brouillon dans votre messagerie, prêt à envoyer (il suffit d'y glisser le PDF téléchargé).
+        </div>
+        <div class="section-title" style="margin-top:4px;">Option avancée : envoi 100 % automatique via Outlook <span class="helper" style="display:inline;">(pièce jointe incluse sans rien glisser — facultatif)</span></div>
+        <div class="helper" style="margin-bottom:12px;">
+          Cette option utilise Microsoft Graph pour envoyer les devis directement depuis votre boîte Outlook, pièce jointe PDF incluse automatiquement. <strong>Elle est entièrement gratuite</strong> (l'inscription d'application Azure AD ne coûte rien, aucune carte bancaire n'est nécessaire pour cet usage — seul un compte Microsoft, personnel ou professionnel, est requis). Configuration en une seule fois :
+          <ol style="margin:8px 0 0 18px;padding:0;">
+            <li>Rendez-vous sur <strong>portal.azure.com</strong> → Azure Active Directory → Inscriptions d'applications → Nouvelle inscription.</li>
+            <li>Nom libre (ex. "Comagentco"). Type de compte : "Comptes dans un annuaire d'organisation et comptes Microsoft personnels".</li>
+            <li>Type de plateforme : <strong>Application monopage (SPA)</strong>. URI de redirection : l'adresse exacte à laquelle vous ouvrez ce fichier dans votre navigateur (actuellement : <code>${escapeHtml(window.location.href.split('#')[0].split('?')[0])}</code>).</li>
+            <li>Une fois créée, copiez l'<strong>ID d'application (client)</strong> ci-dessous.</li>
+            <li>Dans "Autorisations API" → Ajouter une autorisation → Microsoft Graph → Autorisations déléguées → cochez <strong>Mail.Send</strong>, <strong>Calendars.Read</strong> et <strong>User.Read</strong> → Ajouter, puis "Accorder le consentement administrateur" si vous y êtes invité.</li>
+          </ol>
+          <div style="margin-top:8px;">Ouvrir ce fichier localement (double-clic, adresse en <code>file://</code>) ne permet pas cette connexion : il doit être hébergé sur une adresse web (même un simple hébergement statique en https, ou http://localhost en test). Si votre compte Microsoft est un compte professionnel géré par une entreprise, l'inscription d'application peut être bloquée par votre administrateur informatique — dans ce cas, le mode gratuit ci-dessus reste disponible sans restriction.</div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>ID d'application (client) Azure AD</label><input type="text" id="s_outlookClientId" value="${escapeHtml(s.outlookClientId||'')}" placeholder="ex. 3f8a1c2e-...."></div>
+          <div class="field"><label>Locataire (tenant) <span class="helper" style="display:inline;">— laissez "common" par défaut</span></label><input type="text" id="s_outlookTenantId" value="${escapeHtml(s.outlookTenantId||'common')}"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap;">
+          ${s.outlookAccountName?`
+            <span class="chip" style="background:var(--success, #3F8A7B);">✓ Connecté : ${escapeHtml(s.outlookAccountName)}</span>
+            <button class="btn btn-sm btn-ghost" onclick="saveOutlookConfig(); disconnectOutlook();">Se déconnecter</button>
+          `:`
+            <button class="btn btn-sm btn-brass" onclick="saveOutlookConfig(); connectOutlook();">Connecter Outlook</button>
+          `}
+        </div>
+        <div id="outlookStatusMsg" class="helper" style="margin-top:8px;"></div>
+        <div class="divider"></div>
+        <div class="section-title">Lien .ics de mon agenda <span class="helper" style="display:inline;">(pour l'onglet Temps/Gains clients — alternative qui ne dépend pas d'Outlook)</span></div>
+        <div class="helper" style="margin-bottom:10px;">Collez ici le lien d'abonnement iCal (.ics) de votre agenda (Outlook, Google Calendar…). Une fois enregistré, il est réutilisable à tout moment depuis l'onglet Temps/Gains clients, sans avoir à réexporter un fichier.</div>
+        <div class="field"><label>Lien .ics</label><input type="text" id="s_icsUrl" value="${escapeHtml(s.icsCalendarUrl||'')}" placeholder="https://.../calendar.ics ou webcal://..."></div>
+        <button class="btn btn-primary" onclick="saveSettings()">Enregistrer</button>
+      </div>
     </div>
-    <div id="paramListWrap">${renderParamListPanel()}</div>
+
+    <div style="${showIf('listes')}">
+      <div class="card card-pad">
+        <div class="section-title">Listes de référence</div>
+        <div class="helper" style="margin-bottom:10px;">Gérez ici les familles, unités, colisages, civilités… utilisés dans les fiches clients, articles et tarifs.</div>
+        <div class="pill-select" style="margin-bottom:14px;">
+          ${PARAM_LIST_DEFS.map(d=>`<button class="${ui.paramListSelected===d.key?'active':''}" onclick="ui.paramListSelected='${d.key}';render();">${escapeHtml(d.label)}</button>`).join('')}
+        </div>
+        <div id="paramListWrap">${renderParamListPanel()}</div>
+      </div>
+    </div>
+
+    </div>
   </div>
   `;
 }
