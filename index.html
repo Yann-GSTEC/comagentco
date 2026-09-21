@@ -8982,6 +8982,7 @@ function renderTempsGains(){
     else if(scoreCa==null) r.importance = Math.round(scoreCommission);
     else if(scoreCommission==null) r.importance = Math.round(scoreCa);
     else r.importance = Math.round((scoreCa+scoreCommission)/2);
+    r.importanceCommissionOnly = scoreCommission!=null ? Math.round(scoreCommission) : null;
   });
   brandRows.sort((a,b)=>{
     let av, bv;
@@ -9103,6 +9104,25 @@ function renderTempsGains(){
       </tbody>
     </table></div>`}
   </div>
+  </div>
+
+  <div style="margin-top:28px;">
+    <div class="section-title">Importance par marque — uniquement par rapport aux commissions</div>
+    ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période","Renseignez la commission dans l'onglet Commissions."):`
+    <div class="helper" style="margin-bottom:10px;">Note basée uniquement sur la <strong>commission par heure passée</strong>, sans tenir compte du CA — utile pour voir quelles marques rapportent le plus, indépendamment de leur volume d'affaires.</div>
+    <div class="card table-wrap"><table>
+      <thead><tr><th>Marque</th><th>Temps</th><th>Commission</th><th>Importance (commission)</th></tr></thead>
+      <tbody>
+        ${brandRows.slice().sort((a,b)=>(b.importanceCommissionOnly==null?-1:b.importanceCommissionOnly)-(a.importanceCommissionOnly==null?-1:a.importanceCommissionOnly)).map(r=>`
+          <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
+            <td style="font-weight:600;"><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
+            <td class="num">${fmtDuree(r.minutes)}</td>
+            <td class="num" style="font-weight:600;color:var(--brass);">${fmtMoney(r.commission)}</td>
+            <td class="num" style="font-weight:700;color:${r.importanceCommissionOnly==null?'var(--muted)':(r.importanceCommissionOnly>=75?'var(--success)':(r.importanceCommissionOnly>=50?'var(--info)':(r.importanceCommissionOnly>=25?'#D9782D':'var(--danger)')))};">${r.importanceCommissionOnly!=null?r.importanceCommissionOnly+' / 100':'—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table></div>`}
   </div>
   `;
 }
