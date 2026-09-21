@@ -9161,7 +9161,7 @@ function renderTempsGains(){
     const size = blockSizes[key]||'lg';
     const cols = TG_SIZE_COLS[size];
     const customHeight = getCardHeight('tempsgains', key);
-    const heightStyle = customHeight ? `height:${customHeight}px;overflow:auto;` : '';
+    const heightStyle = customHeight ? `height:${customHeight}px;overflow:auto;` : (key==='client' ? 'grid-row:span 2;' : '');
     return `
     <div class="card card-pad tg-block" draggable="true" data-block="${key}"
          ondragstart="tgBlockDragStart(event,'${key}')" ondragover="tgBlockDragOver(event)" ondragleave="tgBlockDragLeave(event)" ondrop="tgBlockDrop(event,'${key}')" ondragend="tgBlockDragEnd(event)"
@@ -9248,9 +9248,8 @@ function ensureTempsGainsBlockOrder(){
   return order;
 }
 function ensureTempsGainsBlockSizes(){
-  const all = ['client','marqueCA','marqueCommission'];
-  const sizes = Object.assign({}, state.settings.tempsGainsBlockSizes||{});
-  all.forEach(k=>{ if(!sizes[k]) sizes[k] = 'lg'; });
+  const defaults = {client:'md', marqueCA:'md', marqueCommission:'md'};
+  const sizes = Object.assign({}, defaults, state.settings.tempsGainsBlockSizes||{});
   return sizes;
 }
 function tgBlockResize(key, delta){
