@@ -9155,14 +9155,23 @@ function renderTempsGains(){
     `,
   };
   const blockOrder = ensureTempsGainsBlockOrder();
-  const blocksHtml = blockOrder.map(key=>`
+  const TG_SIZE_COLS = {sm:1, md:2, lg:4};
+  const blockSizes = ensureTempsGainsBlockSizes();
+  const blocksHtml = blockOrder.map(key=>{
+    const size = blockSizes[key]||'lg';
+    const cols = TG_SIZE_COLS[size];
+    return `
     <div class="card card-pad tg-block" draggable="true" data-block="${key}"
          ondragstart="tgBlockDragStart(event,'${key}')" ondragover="tgBlockDragOver(event)" ondragleave="tgBlockDragLeave(event)" ondrop="tgBlockDrop(event,'${key}')" ondragend="tgBlockDragEnd(event)"
-         style="margin-bottom:18px;">
+         style="grid-column:span ${cols};">
       <span class="tg-block-handle" title="Glisser pour déplacer">⠿</span>
+      <span class="dash-size-btns" style="position:absolute;right:10px;top:10px;">
+        <button type="button" onclick="event.stopPropagation(); tgBlockResize('${key}',-1);" title="Réduire" ${size==='sm'?'disabled':''}>−</button>
+        <button type="button" onclick="event.stopPropagation(); tgBlockResize('${key}',1);" title="Agrandir" ${size==='lg'?'disabled':''}>+</button>
+      </span>
       ${blockContent[key]}
     </div>
-  `).join('');
+  `;}).join('');
 
   return `
   <div class="topbar">
@@ -9223,8 +9232,8 @@ function renderTempsGains(){
     <div class="card kpi"><div class="label">CA total généré</div><div class="value num" style="color:var(--success);">${fmtMoney(totalCa)}</div></div>
   </div>
 
-  <div class="helper" style="margin-bottom:10px;">Glissez un tableau par sa poignée ⠿ pour le réorganiser — l'ordre est mémorisé.</div>
-  ${blocksHtml}
+  <div class="helper" style="margin-bottom:10px;">Glissez un tableau par sa poignée ⠿ pour le réorganiser, ou utilisez les boutons −/+ pour ajuster sa largeur — c'est mémorisé automatiquement.</div>
+  <div class="dash-grid">${blocksHtml}</div>
   `;
 }
 function ensureTempsGainsBlockOrder(){
@@ -9234,6 +9243,22 @@ function ensureTempsGainsBlockOrder(){
   order = order.filter(k=>all.includes(k));
   all.forEach(k=>{ if(!order.includes(k)) order.push(k); });
   return order;
+}
+function ensureTempsGainsBlockSizes(){
+  const all = ['client','marqueCA','marqueCommission'];
+  const sizes = Object.assign({}, state.settings.tempsGainsBlockSizes||{});
+  all.forEach(k=>{ if(!sizes[k]) sizes[k] = 'lg'; });
+  return sizes;
+}
+function tgBlockResize(key, delta){
+  const order3 = ['sm','md','lg'];
+  const sizes = ensureTempsGainsBlockSizes();
+  let idx = order3.indexOf(sizes[key]||'lg');
+  idx = Math.max(0, Math.min(order3.length-1, idx+delta));
+  sizes[key] = order3[idx];
+  state.settings.tempsGainsBlockSizes = sizes;
+  persist('settings');
+  render();
 }
 let tgBlockDragKey = null;
 function tgBlockDragStart(ev, key){
@@ -9699,7 +9724,7 @@ function renderSuiviRelances(){
   const devisARelancer = state.devis.filter(d=>{
     if(d.status!=='Envoyé' || isDevisWon(d) || isDevisLost(d)) return false;
     const etat = (d.etatAffaire||'').trim().toLowerCase();
-    if(!relanceEtatsAutorises.includes(etat)) return false;
+    if(etat && !relanceEtatsAutorises.includes(etat)) return false;
     const days = daysSince(relanceRefDate(d));
     return days!=null && days>=relanceDevisJours;
   }).map(d=>({ d, sent: relanceRefDate(d), days: daysSince(relanceRefDate(d)) }))
@@ -9744,7 +9769,7 @@ function renderSuiviRelances(){
       <option value="date" ${relanceDateBasis==='date'?'selected':''}>Créés depuis plus de</option>
     </select>
     <input type="number" min="1" value="${relanceDevisJours}" style="width:70px;padding:4px 8px;" onchange="ui.relanceDevisJours=parseInt(this.value,10)||15; render();">
-    <span class="helper" style="display:inline;">jours, avec l'État de l'affaire "En cours", "À traiter" ou "Devis FR"</span>
+    <span class="helper" style="display:inline;">jours, avec l'État de l'affaire "En cours", "À traiter", "Devis FR" ou vide</span>
   </div>
   ${devisARelancer.length===0?emptyState('✅',"Rien à relancer","Tous vos devis envoyés ont été traités ou sont encore récents."):`
   <div class="card table-wrap" style="margin-bottom:6px;"><table>
