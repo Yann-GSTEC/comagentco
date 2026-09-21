@@ -4269,7 +4269,7 @@ function renderTarifsTableInner(){
       <thead><tr>
         ${showBrandCol?'<th>Marque</th>':''}
         <th>Référence</th><th>Désignation</th><th>Prix Catalogue</th>
-        <th>Code famille article</th><th>Code sous-famille article</th><th>Complément info</th><th></th>
+        <th>Code famille article</th><th>Code sous-famille article</th><th>Complément info</th><th>Éco-part.</th><th></th>
       </tr></thead>
       <tbody>
         ${pageItems.map(t=>{
@@ -4282,6 +4282,7 @@ function renderTarifsTableInner(){
             <td style="color:var(--ink-soft);">${escapeHtml(t.codeFamilleArticle||'—')}</td>
             <td style="color:var(--ink-soft);">${escapeHtml(t.codeSousFamilleArticle||'—')}</td>
             <td style="color:var(--brass);font-weight:600;">${t.complementInfo?escapeHtml(t.complementInfo):'—'}</td>
+            <td class="num" style="color:var(--ink-soft);">${t.ecopart?fmtMoney(t.ecopart):'—'}</td>
             <td class="table-actions">
               <button class="btn btn-sm btn-ghost" onclick="openTarifForm('${t.id}')">Modifier</button>
               <button class="btn btn-sm btn-ghost btn-danger" onclick="deleteTarif('${t.id}')">Suppr.</button>
@@ -4921,6 +4922,7 @@ function openTarifForm(id){
         <div class="field"><label>Code sous-famille article</label><input type="text" id="f_codeSousFamille" value="${t?escapeHtml(t.codeSousFamilleArticle||''):''}"></div>
       </div>
       <div class="field"><label>Complément info <span class="helper" style="display:inline;">(rappel affiché lors de l'ajout de cette référence dans un devis — n'apparaît jamais sur le PDF)</span></label><input type="text" id="f_complementInfo" value="${t?escapeHtml(t.complementInfo||''):''}" placeholder="Ex. Vérifier le délai fournisseur avant de confirmer"></div>
+      <div class="field"><label>Éco-participation (€) <span class="helper" style="display:inline;">— une ligne "Éco-participation" est ajoutée automatiquement sous cette référence dans les devis</span></label><input type="number" step="0.01" min="0" id="f_ecopart" value="${t&&t.ecopart?t.ecopart:''}" placeholder="Ex. 2.58"></div>
       <div class="section-title">Prix</div>
       <div class="field-row">
         <div class="field"><label>Prix Net (€) * <span class="helper" style="display:inline;">— utilisé dans les devis</span></label><input type="number" step="0.01" id="f_prix" value="${t?t.prixHT:''}"></div>
@@ -4977,6 +4979,7 @@ function saveTarif(id){
     codeFamilleArticle: document.getElementById('f_codeFamille').value.trim(),
     codeSousFamilleArticle: document.getElementById('f_codeSousFamille').value.trim(),
     complementInfo: document.getElementById('f_complementInfo').value.trim(),
+    ecopart: parseFloat(document.getElementById('f_ecopart').value)||0,
     prixCatalogue: parseFloat(document.getElementById('f_prixCatalogue').value)||0,
     prixAchatDistributeur: parseFloat(document.getElementById('f_prixAchatDistrib').value)||0,
     prixAchatConseilleInstallateur: parseFloat(document.getElementById('f_prixAchatConseille').value)||0,
@@ -5088,6 +5091,7 @@ function renderImportMapping(){
   const guessFamille = guessColIndex(first, /famille(?!.*sous)/i);
   const guessSousFamille = guessColIndex(first, /sous.?famille/i);
   const guessComplement = guessColIndex(first, /compl[ée]ment/i);
+  const guessEcopart = guessColIndex(first, /[ée]co.?part/i);
   const defRef = guessRef>=0 ? guessRef : 0;
   const defDesig = guessDesig>=0 && guessDesig!==defRef ? guessDesig : (nCols>1?1:0);
   const defPrix = guessPrix>=0 && guessPrix!==defRef ? guessPrix : (nCols>2?2:0);
@@ -5103,6 +5107,7 @@ function renderImportMapping(){
       <div class="field"><label>Colonne code famille article</label><select id="imp_colFamille"><option value="-1">— Non utilisé —</option>${opts(guessFamille)}</select></div>
       <div class="field"><label>Colonne code sous-famille article</label><select id="imp_colSousFamille"><option value="-1">— Non utilisé —</option>${opts(guessSousFamille)}</select></div>
       <div class="field"><label>Colonne Complément info</label><select id="imp_colComplement"><option value="-1">— Non utilisé —</option>${opts(guessComplement)}</select></div>
+      <div class="field"><label>Colonne Éco-participation</label><select id="imp_colEcopart"><option value="-1">— Non utilisé —</option>${opts(guessEcopart)}</select></div>
     </div>
     <div class="helper">${importParsedRows.length} ligne(s) détectée(s) dans le fichier. Toutes les lignes avec une référence sont importées, même sans prix (elles seront à 0 €) — seule une référence vide fait ignorer une ligne.</div>
   `;
@@ -5118,6 +5123,7 @@ function confirmImport(){
   const colFamille = parseInt(document.getElementById('imp_colFamille').value);
   const colSousFamille = parseInt(document.getElementById('imp_colSousFamille').value);
   const colComplement = parseInt(document.getElementById('imp_colComplement').value);
+  const colEcopart = parseInt(document.getElementById('imp_colEcopart').value);
   const rows = importParsedRows.slice(hasHeader?1:0);
   const btn = document.getElementById('imp_confirmBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Import en cours…'; }
@@ -5142,6 +5148,7 @@ function confirmImport(){
       const codeFamilleArticle = (colFamille>=0) ? (row[colFamille]||'').toString().trim() : '';
       const codeSousFamilleArticle = (colSousFamille>=0) ? (row[colSousFamille]||'').toString().trim() : '';
       const complementInfo = (colComplement>=0) ? (row[colComplement]||'').toString().trim() : '';
+      const ecopart = (colEcopart>=0) ? parseMoneyLoose(row[colEcopart]) : 0;
       const key = reference.toLowerCase();
       const existing = index.get(key);
       if(existing){
@@ -5150,9 +5157,10 @@ function confirmImport(){
         if(codeFamilleArticle) existing.codeFamilleArticle = codeFamilleArticle;
         if(codeSousFamilleArticle) existing.codeSousFamilleArticle = codeSousFamilleArticle;
         if(complementInfo) existing.complementInfo = complementInfo;
+        if(ecopart) existing.ecopart = ecopart;
         updated++;
       } else {
-        const newTarif = {id:uid(), brandId, reference, designation, codeFamilleArticle, codeSousFamilleArticle, complementInfo, prixHT:0, prixCatalogue:0, prixAchatDistributeur:0, prixAchatConseilleInstallateur:0};
+        const newTarif = {id:uid(), brandId, reference, designation, codeFamilleArticle, codeSousFamilleArticle, complementInfo, ecopart, prixHT:0, prixCatalogue:0, prixAchatDistributeur:0, prixAchatConseilleInstallateur:0};
         newTarif[targetField] = prix;
         state.tarifs.push(newTarif);
         index.set(key, newTarif); // évite les doublons si la même référence apparaît plusieurs fois dans le fichier
@@ -7003,7 +7011,7 @@ function devisLinesRowsHtml(){
         <td colspan="12" style="background:var(--surface-2);padding:4px 8px;">
           <div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Titre de section ou commentaire libre…" style="font-weight:700;" oninput="draft.lines[${i}].designation=this.innerHTML;">${l.designation||''}</div>
         </td>
-        <td><button class="btn btn-sm btn-ghost btn-danger" onclick="draft.lines.splice(${i},1); refreshDevisModal();">✕</button></td>
+        <td><button class="btn btn-sm btn-ghost btn-danger" onclick="removeDevisLine(${i})">✕</button></td>
       </tr>`;
     }
     const m = lineMargin(l);
@@ -7020,7 +7028,7 @@ function devisLinesRowsHtml(){
       <td><span class="chip" style="background:${brandColor(l.brandId)};font-size:9.5px;padding:3px 6px;white-space:normal;line-height:1.25;">${escapeHtml(brandName(l.brandId))}</span></td>
       <td style="font-weight:700;font-family:'Space Grotesk';font-size:12px;">${escapeHtml(l.reference)}${l.prixNetApplied?' <span class="chip" style="background:var(--success, #3F8A7B);font-size:8px;padding:1px 5px;display:inline-block;margin-top:2px;" title="Prix net client appliqué automatiquement">Prix net</span>':''}</td>
       <td><div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Désignation…" title="F3 historique prix (ce client) · F4 (département) · F5 (tous les clients) · F6 (famille / sous-famille)" oninput="draft.lines[${i}].designation=this.innerHTML;">${l.designation||''}</div>${l.complementInfo?`<div style="color:var(--brass);font-weight:600;font-size:11px;margin-top:2px;" title="Complément info du tarif — n'apparaît jamais sur le PDF">⚠ ${escapeHtml(l.complementInfo)}</div>`:''}</td>
-      <td><input type="number" min="0" step="1" value="${l.qty}" style="font-weight:700;text-align:center;" onchange="draft.lines[${i}].qty=parseFloat(this.value)||0; refreshDevisModal();"></td>
+      <td><input type="number" min="0" step="1" value="${l.qty}" style="font-weight:700;text-align:center;" onchange="devisLineSetQty(${i}, this.value)"></td>
       <td><input type="number" min="0" step="0.01" value="${l.prixUnitaire}" onchange="draft.lines[${i}].prixUnitaire=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
       <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct1||0}" onchange="draft.lines[${i}].remisePct1=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
       <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct2||0}" onchange="draft.lines[${i}].remisePct2=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
@@ -7029,7 +7037,7 @@ function devisLinesRowsHtml(){
       <td><input type="number" step="0.01" value="${Math.abs(displayMarge)<0.005?'':(+displayMarge).toFixed(2)}" placeholder="0" title="${l.margeTarget!=null?'Marge cible demandée — peut différer de quelques centièmes du calcul réel après arrondi du Prix de vente conseillé HT à la centime.':''}" style="color:${displayMarge>=0?'var(--success)':'var(--danger)'};font-weight:800;font-size:12.5px;text-align:center;background:${displayMarge>=0?'rgba(63,138,123,.12)':'rgba(179,57,44,.1)'};border:1.5px solid ${displayMarge>=0?'var(--success)':'var(--danger)'};border-radius:6px;" onchange="devisLineSetMarge(${i}, this.value)"></td>
       <td><input type="number" min="0" step="0.01" value="${l.prixClient?l.prixClient:''}" placeholder="0" style="font-weight:600;${netOnClient?'color:var(--info, #2F6FBD);font-weight:700;':''}" title="${netOnClient?'Prix repris de la liste de prix nets du client':''}" onchange="devisLineSetClient(${i}, this.value)"></td>
       <td class="num" style="font-weight:700;">${fmtMoney(lineTotalHT(l, draft.destinataire))}</td>
-      <td><button class="btn btn-sm btn-ghost btn-danger" onclick="draft.lines.splice(${i},1); refreshDevisModal();">✕</button></td>
+      <td><button class="btn btn-sm btn-ghost btn-danger" onclick="removeDevisLine(${i})">✕</button></td>
     </tr>
   `;}).join('');
 }
@@ -7397,12 +7405,49 @@ function addDevisLine(tarifId){
   const t = state.tarifs.find(x=>x.id===tarifId);
   if(!t) return;
   const pricing = computeLinePricing(t, draft.date);
+  const mainLineId = uid();
   draft.lines.push({
-    id:uid(), tarifId:t.id, brandId:t.brandId, reference:t.reference, designation:t.designation,
+    id:mainLineId, tarifId:t.id, brandId:t.brandId, reference:t.reference, designation:t.designation,
     qty:1, complementInfo:t.complementInfo||'', ...pricing,
   });
+  // Éco-participation : si le tarif en porte une, on ajoute automatiquement une ligne dédiée juste en
+  // dessous, avec la même quantité que la référence concernée — les deux lignes restent liées ensuite :
+  // modifier la quantité de la référence met à jour celle de l'éco-participation automatiquement.
+  if(t.ecopart && t.ecopart>0){
+    const ecoLineId = uid();
+    draft.lines.push({
+      id:ecoLineId, brandId:t.brandId, reference:'ECO-PART', designation:'Éco-participation',
+      qty:1, prixUnitaire:t.ecopart, remisePct1:0, remisePct2:0, remisePct3:0, prixClient:0,
+      isEcoPart:true, linkedToLineId:mainLineId,
+    });
+    draft.lines.find(l=>l.id===mainLineId).ecoPartLineId = ecoLineId;
+  }
   document.getElementById('d_search').value='';
   document.getElementById('d_searchResults').innerHTML='';
+  refreshDevisModal();
+}
+function devisLineSetQty(i, val){
+  const line = draft.lines[i];
+  line.qty = parseFloat(val)||0;
+  // Répercute la quantité sur la ligne d'éco-participation liée, le cas échéant.
+  if(line.ecoPartLineId){
+    const eco = draft.lines.find(l=>l.id===line.ecoPartLineId);
+    if(eco) eco.qty = line.qty;
+  }
+  refreshDevisModal();
+}
+function removeDevisLine(i){
+  const line = draft.lines[i];
+  // Supprime aussi la ligne d'éco-participation liée (ou détache le lien si c'est elle qu'on supprime).
+  if(line.ecoPartLineId){
+    const ecoIdx = draft.lines.findIndex(l=>l.id===line.ecoPartLineId);
+    if(ecoIdx>=0) draft.lines.splice(ecoIdx,1);
+  } else if(line.linkedToLineId){
+    const parent = draft.lines.find(l=>l.id===line.linkedToLineId);
+    if(parent) parent.ecoPartLineId = null;
+  }
+  const idx = draft.lines.indexOf(line);
+  if(idx>=0) draft.lines.splice(idx,1);
   refreshDevisModal();
 }
 function devisBrandsOverlap(d1, d2){
@@ -8132,6 +8177,13 @@ async function sendMailViaGraph(accessToken, {toEmails, subject, body, isHtml, a
     throw new Error(`Erreur Microsoft Graph (${resp.status}) ${detail}`);
   }
 }
+function friendlyGraphSendError(e){
+  const msg = (e && e.message) || String(e);
+  if(/mailbox is either inactive|soft-deleted|hosted on-premise/i.test(msg)){
+    return "La boîte mail Outlook connectée n'est pas accessible pour l'envoi (compte inactif, ou messagerie hébergée sur un serveur Exchange local/on-premise plutôt que dans le cloud Microsoft 365). C'est une restriction côté Microsoft, propre à ce compte — vérifiez qu'une licence Exchange Online est bien attribuée à ce compte, ou utilisez en attendant le mode gratuit sans configuration (bouton \"Enregistrer et envoyer\" sans connecter Outlook) qui fonctionne dans tous les cas.";
+  }
+  return "Échec de l'envoi : "+msg;
+}
 function saveDraftAndOpenSend(){
   if(!draft.clientId){ showToast('Sélectionnez un client.'); return; }
   if(draft.lines.length===0){ showToast('Ajoutez au moins une ligne au devis.'); return; }
@@ -8222,7 +8274,7 @@ async function confirmSendDevisMail(id, soleBrandId){
   }catch(e){
     console.error(e);
     if(btn){ btn.disabled = false; btn.textContent = 'Envoyer'; }
-    showToast("Échec de l'envoi : "+(e.message||String(e)));
+    showToast(friendlyGraphSendError(e), 8000);
   }
 }
 async function confirmSendDevisMailFallback(id, signaturePlain){
@@ -8772,7 +8824,7 @@ async function confirmSendRapportMail(){
   }catch(e){
     console.error(e);
     if(btn){ btn.disabled = false; btn.textContent = 'Envoyer'; }
-    showToast("Échec de l'envoi : "+(e.message||String(e)));
+    showToast(friendlyGraphSendError(e), 8000);
   }
 }
 async function confirmSendRapportMailFallback(){
@@ -8898,6 +8950,7 @@ function renderTempsGains(){
     <div><h1>Temps / Gains clients</h1><div class="sub">Temps passé en clientèle (suivi commercial) comparé au CA généré, par client — ${escapeHtml(periodLabel)}</div></div>
     <div style="display:flex;gap:8px;">
       <button class="btn" onclick="openImportAgendaModal()" title="${connected?'Importer les rendez-vous de votre agenda Outlook sur la période sélectionnée':'Connectez Outlook dans Paramètres pour importer votre agenda'}">📅 Importer depuis mon agenda Outlook</button>
+      <button class="btn" onclick="openImportIcsPicker()" title="Fonctionne toujours, même sans Outlook connecté : exportez votre agenda en fichier .ics (Outlook, Google Calendar…) puis importez-le ici">📁 Importer un fichier .ics</button>
     </div>
   </div>
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
@@ -8994,6 +9047,82 @@ function renderTempsGains(){
   </div>
   </div>
   `;
+}
+
+/* ---- Import d'un fichier .ics (alternative sans Outlook : export standard de tout calendrier) ---- */
+function parseIcsFile(text){
+  // Déplie les lignes repliées (RFC 5545) : une ligne commençant par une espace ou une tabulation est
+  // la suite de la ligne précédente.
+  const rawLines = text.split(/\r\n|\n|\r/);
+  const lines = [];
+  rawLines.forEach(line=>{
+    if(/^[ \t]/.test(line) && lines.length){ lines[lines.length-1] += line.slice(1); }
+    else lines.push(line);
+  });
+  const events = [];
+  let cur = null;
+  lines.forEach(line=>{
+    if(/^BEGIN:VEVENT/i.test(line)){ cur = {}; return; }
+    if(/^END:VEVENT/i.test(line)){ if(cur) events.push(cur); cur=null; return; }
+    if(!cur) return;
+    const idx = line.indexOf(':');
+    if(idx<0) return;
+    const key = line.slice(0,idx).split(';')[0].toUpperCase();
+    const value = line.slice(idx+1);
+    if(key==='SUMMARY') cur.summary = icsUnescape(value);
+    else if(key==='LOCATION') cur.location = icsUnescape(value);
+    else if(key==='DTSTART') cur.dtstart = value;
+    else if(key==='DTEND') cur.dtend = value;
+    else if(key==='ATTENDEE'){ cur.attendees = cur.attendees||[]; cur.attendees.push(icsUnescape(value)); }
+  });
+  return events;
+}
+function icsUnescape(s){
+  return String(s||'').replace(/\\n/gi,' ').replace(/\\,/g,',').replace(/\\;/g,';').replace(/\\\\/g,'\\');
+}
+function parseIcsDate(raw){
+  if(!raw) return null;
+  const m = raw.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/);
+  if(!m) return null;
+  const [,y,mo,d,h,mi,s,z] = m;
+  if(h===undefined) return new Date(Date.UTC(+y,+mo-1,+d));
+  if(z) return new Date(Date.UTC(+y,+mo-1,+d,+h,+mi,+s));
+  return new Date(+y,+mo-1,+d,+h,+mi,+s); // heure locale approximative si le fichier n'indique pas "Z"
+}
+function openImportIcsPicker(){
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.ics,text/calendar';
+  input.onchange = handleIcsFile;
+  input.click();
+}
+async function handleIcsFile(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  try{
+    const text = await file.text();
+    const events = parseIcsFile(text);
+    if(events.length===0){ showToast("Aucun événement trouvé dans ce fichier .ics."); return; }
+    const matched = events.map(ev=>{
+      const start = parseIcsDate(ev.dtstart);
+      const end = parseIcsDate(ev.dtend);
+      const haystack = `${ev.summary||''} ${ev.location||''} ${(ev.attendees||[]).join(' ')}`.toUpperCase();
+      let bestClient = null, bestLen = 0;
+      state.clients.forEach(c=>{
+        const label = (c.company||c.name||'').trim();
+        if(label.length<=3) return;
+        if(haystack.includes(label.toUpperCase()) && label.length>bestLen){ bestLen = label.length; bestClient = c; }
+      });
+      let dureeMin = 30;
+      if(start && end && end>start) dureeMin = Math.round((end-start)/60000);
+      const dateStr = start ? start.toISOString().slice(0,10) : todayStr();
+      return { subject: ev.summary||'', clientId: bestClient?bestClient.id:'', dureeMin, dateStr, include: !!bestClient };
+    }).filter(m=>!m.subject || !/^(déjeuner|pause|congés?|absence|rdv perso)/i.test(m.subject));
+    openAgendaImportReview(matched);
+  }catch(e){
+    console.error(e);
+    showToast("Impossible de lire ce fichier .ics : "+(e.message||String(e)));
+  }
 }
 
 /* ---- Import de l'agenda Outlook (temps passé par client) ---- */
