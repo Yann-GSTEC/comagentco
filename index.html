@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ComAgentCo — Gestion multi-marques</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1E2A2C">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ComAgentCo">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
@@ -72,8 +79,7 @@ button{font-family:inherit;}
   padding:4px 8px 22px 8px;
 }
 .brand-mark .dot{
-  width:12px;height:12px;border-radius:3px;background:var(--accent);
-  transform:rotate(45deg);
+  width:26px;height:26px;border-radius:6px;object-fit:contain;flex-shrink:0;
 }
 .brand-mark span{font-weight:700;font-size:16.5px;}
 .nav{display:flex;flex-direction:column;gap:2px;flex:1;}
@@ -1740,7 +1746,7 @@ function renderSidebar(){
   const items = getOrderedNavItems();
   return `
   <div class="sidebar">
-    <div class="brand-mark"><div class="dot"></div><span>ComAgentCo</span></div>
+    <div class="brand-mark"><img class="dot" src="data:image/png;base64,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" alt="ComAgentCo"><span>ComAgentCo</span></div>
     <div class="nav">
       ${items.map(it=>`
         <button class="nav-item ${ui.tab===it.id?'active':''}" data-nav="${it.id}" draggable="true"
@@ -10362,6 +10368,11 @@ function syncKeyFromLocalStorage(k){
   }catch(e){ console.error('Erreur de synchronisation inter-fenêtres', k, e); }
 }
 loadAll();
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(e=>console.warn('Service worker non enregistré (normal en ouverture locale file://) :', e));
+  });
+}
 </script>
 
 
