@@ -8931,12 +8931,28 @@ function renderTempsGains(){
       }
     });
     const ca = month ? (getCommissionEntry(b.id, year, month).ca||0) : Array.from({length:12},(_,i)=>getCommissionEntry(b.id, year, i+1).ca||0).reduce((s,v)=>s+v,0);
+    const commission = month ? (getCommissionEntry(b.id, year, month).commission||0) : Array.from({length:12},(_,i)=>getCommissionEntry(b.id, year, i+1).commission||0).reduce((s,v)=>s+v,0);
     const heures = minutes/60;
-    return { brand:b, minutes, visites, ca, heures };
-  }).filter(r=>r.minutes>0 || r.ca>0);
-  brandRows.forEach(r=>{ r.ratio = r.heures>0.0166 ? r.ca/r.heures : null; });
-  const maxBrandRatio = brandRows.reduce((m,r)=>r.ratio!=null?Math.max(m,r.ratio):m, 0);
-  brandRows.forEach(r=>{ r.importance = (r.ratio!=null && maxBrandRatio>0) ? Math.round(100*r.ratio/maxBrandRatio) : null; });
+    return { brand:b, minutes, visites, ca, commission, heures };
+  }).filter(r=>r.minutes>0 || r.ca>0 || r.commission>0);
+  // L'importance d'une marque combine ses TROIS critères — temps passé, CA et commission — plutôt qu'un
+  // seul : on calcule le CA par heure passée et la commission par heure passée, on note chacun sur 100
+  // par rapport à la meilleure marque sur ce critère, puis on fait la moyenne des deux notes. Une marque
+  // à fort CA mais à faible taux de commission n'est ainsi plus artificiellement mise en avant.
+  brandRows.forEach(r=>{
+    r.ratioCa = r.heures>0.0166 ? r.ca/r.heures : null;
+    r.ratioCommission = r.heures>0.0166 ? r.commission/r.heures : null;
+  });
+  const maxCaRatio = brandRows.reduce((m,r)=>r.ratioCa!=null?Math.max(m,r.ratioCa):m, 0);
+  const maxCommissionRatio = brandRows.reduce((m,r)=>r.ratioCommission!=null?Math.max(m,r.ratioCommission):m, 0);
+  brandRows.forEach(r=>{
+    const scoreCa = (r.ratioCa!=null && maxCaRatio>0) ? 100*r.ratioCa/maxCaRatio : null;
+    const scoreCommission = (r.ratioCommission!=null && maxCommissionRatio>0) ? 100*r.ratioCommission/maxCommissionRatio : null;
+    if(scoreCa==null && scoreCommission==null) r.importance = null;
+    else if(scoreCa==null) r.importance = Math.round(scoreCommission);
+    else if(scoreCommission==null) r.importance = Math.round(scoreCa);
+    else r.importance = Math.round((scoreCa+scoreCommission)/2);
+  });
   brandRows.sort((a,b)=>{
     let av, bv;
     if(sortBy==='temps'){ av=a.minutes; bv=b.minutes; }
@@ -9038,18 +9054,19 @@ function renderTempsGains(){
   </div>
 
   <div>
-    <div class="section-title">Importance par marque <span class="helper" style="display:inline;">(CA de l'onglet Commissions)</span></div>
-    ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période","Cochez une ou plusieurs marques sur vos rendez-vous (fiche client → note de suivi) et renseignez le CA dans l'onglet Commissions."):`
-    <div class="helper" style="margin-bottom:10px;">CA repris de l'onglet Commissions, temps passé issu des marques cochées sur vos rendez-vous.</div>
+    <div class="section-title">Importance par marque <span class="helper" style="display:inline;">(CA et commission de l'onglet Commissions)</span></div>
+    ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période","Cochez une ou plusieurs marques sur vos rendez-vous (fiche client → note de suivi) et renseignez le CA/la commission dans l'onglet Commissions."):`
+    <div class="helper" style="margin-bottom:10px;">Note combinant les <strong>trois critères</strong> : temps passé, CA et commission par heure investie — la moyenne des notes CA/heure et Commission/heure, chacune comparée à la meilleure marque de la période. Une marque à fort CA mais à faible taux de commission n'est ainsi plus mise en avant artificiellement.</div>
     <div class="card table-wrap"><table>
-      <thead><tr><th>Marque</th><th>Visites</th><th>Temps</th><th>CA (Commissions)</th><th>Importance</th></tr></thead>
+      <thead><tr><th>Marque</th><th>Visites</th><th>Temps</th><th>CA (Commissions)</th><th>Commission</th><th>Importance</th></tr></thead>
       <tbody>
         ${brandRows.map(r=>`
           <tr>
             <td style="font-weight:600;"><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
             <td class="num">${r.visites}</td>
             <td class="num">${fmtDuree(r.minutes)}</td>
-            <td class="num" style="font-weight:600;">${fmtMoney(r.ca)}</td>
+            <td class="num">${fmtMoney(r.ca)}</td>
+            <td class="num" style="font-weight:600;color:var(--brass);">${fmtMoney(r.commission)}</td>
             <td class="num" style="font-weight:700;color:${r.importance==null?'var(--muted)':(r.importance>=75?'var(--success)':(r.importance>=50?'var(--info)':(r.importance>=25?'#D9782D':'var(--danger)')))};">${r.importance!=null?r.importance+' / 100':'—'}</td>
           </tr>
         `).join('')}
@@ -9101,23 +9118,38 @@ function parseIcsDate(raw){
   if(z) return new Date(Date.UTC(+y,+mo-1,+d,+h,+mi,+s));
   return new Date(+y,+mo-1,+d,+h,+mi,+s); // heure locale approximative si le fichier n'indique pas "Z"
 }
+function normalizeForWordMatch(s){
+  return String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9]+/g,' ').trim();
+}
+function labelMatchesHaystackWords(label, haystackWords){
+  // Compare mot à mot plutôt qu'une correspondance exacte de toute la chaîne : "SONEPAR+ BLOIS" (tel
+  // qu'enregistré dans l'app) retrouve ainsi "SONEPAR BLOIS" (tel qu'écrit dans l'agenda), même sans le
+  // "+" ni un ordre ou un espacement identique.
+  const words = normalizeForWordMatch(label).split(/\s+/).filter(w=>w.length>=3);
+  if(words.length===0) return {match:false, score:0};
+  const allPresent = words.every(w=>haystackWords.includes(w));
+  if(!allPresent) return {match:false, score:0};
+  return {match:true, score: words.reduce((s,w)=>s+w.length,0)};
+}
 function buildIcsMatchedRows(events){
   return events.map(ev=>{
     const start = parseIcsDate(ev.dtstart);
     const end = parseIcsDate(ev.dtend);
     // Recherche uniquement dans l'objet (titre) du rendez-vous lui-même — ni le lieu/les participants,
     // ni les devis, ne sont utilisés pour deviner le client ou la marque.
-    const haystack = (ev.summary||'').toUpperCase();
-    let bestClient = null, bestLen = 0;
+    const haystackWords = normalizeForWordMatch(ev.summary||'').split(/\s+/).filter(Boolean);
+    let bestClient = null, bestScore = 0;
     state.clients.forEach(c=>{
       const label = (c.company||c.name||'').trim();
       if(label.length<=3) return;
-      if(haystack.includes(label.toUpperCase()) && label.length>bestLen){ bestLen = label.length; bestClient = c; }
+      const r = labelMatchesHaystackWords(label, haystackWords);
+      if(r.match && r.score>bestScore){ bestScore = r.score; bestClient = c; }
     });
-    let bestBrand = null, bestBrandLen = 0;
+    let bestBrand = null, bestBrandScore = 0;
     state.brands.forEach(b=>{
       if(!b.name || b.name.length<=3) return;
-      if(haystack.includes(b.name.toUpperCase()) && b.name.length>bestBrandLen){ bestBrandLen = b.name.length; bestBrand = b; }
+      const r = labelMatchesHaystackWords(b.name, haystackWords);
+      if(r.match && r.score>bestBrandScore){ bestBrandScore = r.score; bestBrand = b; }
     });
     let dureeMin = 30;
     if(start && end && end>start) dureeMin = Math.round((end-start)/60000);
