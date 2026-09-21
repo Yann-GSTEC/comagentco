@@ -4269,7 +4269,7 @@ function renderTarifsTableInner(){
       <thead><tr>
         ${showBrandCol?'<th>Marque</th>':''}
         <th>Référence</th><th>Désignation</th><th>Prix Catalogue</th>
-        <th>Code famille article</th><th>Code sous-famille article</th><th></th>
+        <th>Code famille article</th><th>Code sous-famille article</th><th>Complément info</th><th></th>
       </tr></thead>
       <tbody>
         ${pageItems.map(t=>{
@@ -4281,6 +4281,7 @@ function renderTarifsTableInner(){
             <td class="num" style="font-weight:600;${!t.prixCatalogue?'color:var(--danger, #b3392c);':''}">${t.prixCatalogue?fmtMoney(t.prixCatalogue):'⚠ 0,00 €'}</td>
             <td style="color:var(--ink-soft);">${escapeHtml(t.codeFamilleArticle||'—')}</td>
             <td style="color:var(--ink-soft);">${escapeHtml(t.codeSousFamilleArticle||'—')}</td>
+            <td style="color:var(--brass);font-weight:600;">${t.complementInfo?escapeHtml(t.complementInfo):'—'}</td>
             <td class="table-actions">
               <button class="btn btn-sm btn-ghost" onclick="openTarifForm('${t.id}')">Modifier</button>
               <button class="btn btn-sm btn-ghost btn-danger" onclick="deleteTarif('${t.id}')">Suppr.</button>
@@ -4919,6 +4920,7 @@ function openTarifForm(id){
         <div class="field"><label>Code famille article</label><input type="text" id="f_codeFamille" list="dl_tarifFamillesArticles" value="${t?escapeHtml(t.codeFamilleArticle||''):''}"><span id="dl_tarifFamillesArticles_wrap">${datalistHtml('dl_tarifFamillesArticles','famillesArticles',defaultBrand)}</span></div>
         <div class="field"><label>Code sous-famille article</label><input type="text" id="f_codeSousFamille" value="${t?escapeHtml(t.codeSousFamilleArticle||''):''}"></div>
       </div>
+      <div class="field"><label>Complément info <span class="helper" style="display:inline;">(rappel affiché lors de l'ajout de cette référence dans un devis — n'apparaît jamais sur le PDF)</span></label><input type="text" id="f_complementInfo" value="${t?escapeHtml(t.complementInfo||''):''}" placeholder="Ex. Vérifier le délai fournisseur avant de confirmer"></div>
       <div class="section-title">Prix</div>
       <div class="field-row">
         <div class="field"><label>Prix Net (€) * <span class="helper" style="display:inline;">— utilisé dans les devis</span></label><input type="number" step="0.01" id="f_prix" value="${t?t.prixHT:''}"></div>
@@ -4974,6 +4976,7 @@ function saveTarif(id){
     designation: document.getElementById('f_desig').value.trim(),
     codeFamilleArticle: document.getElementById('f_codeFamille').value.trim(),
     codeSousFamilleArticle: document.getElementById('f_codeSousFamille').value.trim(),
+    complementInfo: document.getElementById('f_complementInfo').value.trim(),
     prixCatalogue: parseFloat(document.getElementById('f_prixCatalogue').value)||0,
     prixAchatDistributeur: parseFloat(document.getElementById('f_prixAchatDistrib').value)||0,
     prixAchatConseilleInstallateur: parseFloat(document.getElementById('f_prixAchatConseille').value)||0,
@@ -5084,6 +5087,7 @@ function renderImportMapping(){
   const guessPrix = guessColIndex(first, /prix|tarif|montant|p\.?u\.?|net/i);
   const guessFamille = guessColIndex(first, /famille(?!.*sous)/i);
   const guessSousFamille = guessColIndex(first, /sous.?famille/i);
+  const guessComplement = guessColIndex(first, /compl[ée]ment/i);
   const defRef = guessRef>=0 ? guessRef : 0;
   const defDesig = guessDesig>=0 && guessDesig!==defRef ? guessDesig : (nCols>1?1:0);
   const defPrix = guessPrix>=0 && guessPrix!==defRef ? guessPrix : (nCols>2?2:0);
@@ -5098,6 +5102,7 @@ function renderImportMapping(){
     <div class="field-row">
       <div class="field"><label>Colonne code famille article</label><select id="imp_colFamille"><option value="-1">— Non utilisé —</option>${opts(guessFamille)}</select></div>
       <div class="field"><label>Colonne code sous-famille article</label><select id="imp_colSousFamille"><option value="-1">— Non utilisé —</option>${opts(guessSousFamille)}</select></div>
+      <div class="field"><label>Colonne Complément info</label><select id="imp_colComplement"><option value="-1">— Non utilisé —</option>${opts(guessComplement)}</select></div>
     </div>
     <div class="helper">${importParsedRows.length} ligne(s) détectée(s) dans le fichier. Toutes les lignes avec une référence sont importées, même sans prix (elles seront à 0 €) — seule une référence vide fait ignorer une ligne.</div>
   `;
@@ -5112,6 +5117,7 @@ function confirmImport(){
   const colPrix = parseInt(document.getElementById('imp_colPrix').value);
   const colFamille = parseInt(document.getElementById('imp_colFamille').value);
   const colSousFamille = parseInt(document.getElementById('imp_colSousFamille').value);
+  const colComplement = parseInt(document.getElementById('imp_colComplement').value);
   const rows = importParsedRows.slice(hasHeader?1:0);
   const btn = document.getElementById('imp_confirmBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Import en cours…'; }
@@ -5135,6 +5141,7 @@ function confirmImport(){
       const designation = colDesig!==undefined ? (row[colDesig]||'').toString().trim() : '';
       const codeFamilleArticle = (colFamille>=0) ? (row[colFamille]||'').toString().trim() : '';
       const codeSousFamilleArticle = (colSousFamille>=0) ? (row[colSousFamille]||'').toString().trim() : '';
+      const complementInfo = (colComplement>=0) ? (row[colComplement]||'').toString().trim() : '';
       const key = reference.toLowerCase();
       const existing = index.get(key);
       if(existing){
@@ -5142,9 +5149,10 @@ function confirmImport(){
         if(designation){ existing.designation = designation; existing._sk = null; existing._skn = null; }
         if(codeFamilleArticle) existing.codeFamilleArticle = codeFamilleArticle;
         if(codeSousFamilleArticle) existing.codeSousFamilleArticle = codeSousFamilleArticle;
+        if(complementInfo) existing.complementInfo = complementInfo;
         updated++;
       } else {
-        const newTarif = {id:uid(), brandId, reference, designation, codeFamilleArticle, codeSousFamilleArticle, prixHT:0, prixCatalogue:0, prixAchatDistributeur:0, prixAchatConseilleInstallateur:0};
+        const newTarif = {id:uid(), brandId, reference, designation, codeFamilleArticle, codeSousFamilleArticle, complementInfo, prixHT:0, prixCatalogue:0, prixAchatDistributeur:0, prixAchatConseilleInstallateur:0};
         newTarif[targetField] = prix;
         state.tarifs.push(newTarif);
         index.set(key, newTarif); // évite les doublons si la même référence apparaît plusieurs fois dans le fichier
@@ -7011,7 +7019,7 @@ function devisLinesRowsHtml(){
       ${dragHandle}
       <td><span class="chip" style="background:${brandColor(l.brandId)};font-size:9.5px;padding:3px 6px;white-space:normal;line-height:1.25;">${escapeHtml(brandName(l.brandId))}</span></td>
       <td style="font-weight:700;font-family:'Space Grotesk';font-size:12px;">${escapeHtml(l.reference)}${l.prixNetApplied?' <span class="chip" style="background:var(--success, #3F8A7B);font-size:8px;padding:1px 5px;display:inline-block;margin-top:2px;" title="Prix net client appliqué automatiquement">Prix net</span>':''}</td>
-      <td><div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Désignation…" title="F3 historique prix (ce client) · F4 (département) · F5 (tous les clients) · F6 (famille / sous-famille)" oninput="draft.lines[${i}].designation=this.innerHTML;">${l.designation||''}</div></td>
+      <td><div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Désignation…" title="F3 historique prix (ce client) · F4 (département) · F5 (tous les clients) · F6 (famille / sous-famille)" oninput="draft.lines[${i}].designation=this.innerHTML;">${l.designation||''}</div>${l.complementInfo?`<div style="color:var(--brass);font-weight:600;font-size:11px;margin-top:2px;" title="Complément info du tarif — n'apparaît jamais sur le PDF">⚠ ${escapeHtml(l.complementInfo)}</div>`:''}</td>
       <td><input type="number" min="0" step="1" value="${l.qty}" style="font-weight:700;text-align:center;" onchange="draft.lines[${i}].qty=parseFloat(this.value)||0; refreshDevisModal();"></td>
       <td><input type="number" min="0" step="0.01" value="${l.prixUnitaire}" onchange="draft.lines[${i}].prixUnitaire=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
       <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct1||0}" onchange="draft.lines[${i}].remisePct1=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
@@ -7233,6 +7241,7 @@ function devisSearchRefsRun(q){
       <span class="chip" style="background:${brandColor(t.brandId)};font-size:10px;margin-right:6px;">${escapeHtml(brandName(t.brandId))}</span>
       <span class="ref">${escapeHtml(t.reference)}</span> — <span class="num">${fmtMoney(t.prixCatalogue)}</span>
       <div class="desig">${escapeHtml(t.designation||'')}</div>
+      ${t.complementInfo?`<div style="color:var(--brass);font-weight:600;font-size:11.5px;margin-top:2px;">⚠ ${escapeHtml(t.complementInfo)}</div>`:''}
     </div>
   `).join('')}</div>`;
 }
@@ -7390,7 +7399,7 @@ function addDevisLine(tarifId){
   const pricing = computeLinePricing(t, draft.date);
   draft.lines.push({
     id:uid(), tarifId:t.id, brandId:t.brandId, reference:t.reference, designation:t.designation,
-    qty:1, ...pricing,
+    qty:1, complementInfo:t.complementInfo||'', ...pricing,
   });
   document.getElementById('d_search').value='';
   document.getElementById('d_searchResults').innerHTML='';
