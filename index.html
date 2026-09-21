@@ -163,6 +163,10 @@ button{font-family:inherit;}
 .param-subnav button:hover{background:var(--surface-2);}
 .param-subnav button.active{background:var(--surface);border-color:var(--line);color:var(--ink);font-weight:700;box-shadow:var(--shadow);}
 @media (max-width:800px){.param-subnav{flex-direction:row;flex-wrap:wrap;min-width:0;}}
+.tg-block{position:relative;padding-left:34px;}
+.tg-block-handle{position:absolute;left:10px;top:14px;cursor:grab;color:var(--muted);font-size:16px;user-select:none;}
+.tg-block.dragging{opacity:.4;}
+.tg-block.drag-over{box-shadow:0 0 0 2px var(--accent) inset;}
 @media (max-width:1000px){
   .grid-4{grid-template-columns:repeat(2,1fr);}
   .grid-2{grid-template-columns:1fr;}
@@ -615,6 +619,7 @@ let ui = {
   parametresSubTab: 'coordonnees',
   tempsGainsExpanded: null,
   relanceDevisJours: 15,
+  relanceDevisDateBasis: 'sent',
   relanceClientJours: 60,
   rapportSections:{
     synthese:{caGagne:true, devisEnCours:true, devisGagnes:true, devisPerdus:true, caCommissions:true, commission:true, rdvCount:true},
@@ -9090,6 +9095,75 @@ function renderTempsGains(){
   const brandCommissionSorted = brandRows.slice().sort((a,b)=>(b.importanceCommissionOnly==null?-1:b.importanceCommissionOnly)-(a.importanceCommissionOnly==null?-1:a.importanceCommissionOnly));
   const brandCommissionRowsShown = tgExpanded==='marqueCommission' ? brandCommissionSorted : brandCommissionSorted.slice(0,10);
 
+  const blockContent = {
+    client: `
+    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('client')}" title="Cliquer pour afficher tout / réduire">Importance par client ${tgExpanded==='client'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='client'?`(${rows.length} au total)`:(rows.length>20?`(20 sur ${rows.length})`:'')}</span></div>
+    ${rows.length===0?emptyState('⏱',"Aucune donnée pour cette période","Ajoutez une durée sur vos notes de suivi commercial (fiche client → Personnes vues / Note) pour voir apparaître ce rapport, ou importez votre agenda Outlook."):`
+    <div class="helper" style="margin:8px 0 10px;">Note sur 100 basée sur la rentabilité horaire (CA généré ÷ temps passé), comparée au client le plus rentable de la période. "—" = pas de durée renseignée.</div>
+    <div class="card table-wrap"><table>
+      <thead><tr><th>Client</th><th>Visites</th><th>Temps</th><th>CA généré</th><th>Importance</th></tr></thead>
+      <tbody>
+        ${clientRowsShown.map(r=>`
+          <tr style="cursor:pointer;" onclick="openClientSuiviOnlyModal('${r.client.id}')">
+            <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
+            <td class="num">${r.visites}</td>
+            <td class="num">${fmtDuree(r.minutes)}</td>
+            <td class="num" style="font-weight:600;">${fmtMoney(r.ca)}</td>
+            <td class="num" style="font-weight:700;color:${r.importance==null?'var(--muted)':(r.importance>=75?'var(--success)':(r.importance>=50?'var(--info)':(r.importance>=25?'#D9782D':'var(--danger)')))};">${r.importance!=null?r.importance+' / 100':'—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table></div>`}
+    `,
+    marqueCA: `
+    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('marqueCA')}" title="Cliquer pour afficher tout / réduire">Importance par marque ${tgExpanded==='marqueCA'?'▲':'▼'} <span class="helper" style="display:inline;">(CA et commission de l'onglet Commissions)${tgExpanded==='marqueCA'?` — ${brandRows.length} au total`:(brandRows.length>10?` — 10 sur ${brandRows.length}`:'')}</span></div>
+    ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période","Cochez une ou plusieurs marques sur vos rendez-vous (fiche client → note de suivi) et renseignez le CA/la commission dans l'onglet Commissions."):`
+    <div class="helper" style="margin:8px 0 10px;">Note combinant les <strong>trois critères</strong> : temps passé, CA et commission par heure investie — la moyenne des notes CA/heure et Commission/heure, chacune comparée à la meilleure marque de la période. Une marque à fort CA mais à faible taux de commission n'est ainsi plus mise en avant artificiellement. Cliquez sur une ligne pour corriger le CA, la commission ou le temps passé.</div>
+    <div class="card table-wrap"><table>
+      <thead><tr><th>Marque</th><th>Visites</th><th>Temps</th><th>CA (Commissions)</th><th>Commission</th><th>Importance</th></tr></thead>
+      <tbody>
+        ${brandCaRowsShown.map(r=>`
+          <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
+            <td style="font-weight:600;"><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
+            <td class="num">${r.visites}</td>
+            <td class="num">${fmtDuree(r.minutes)}</td>
+            <td class="num">${fmtMoney(r.ca)}</td>
+            <td class="num" style="font-weight:600;color:var(--brass);">${fmtMoney(r.commission)}</td>
+            <td class="num" style="font-weight:700;color:${r.importance==null?'var(--muted)':(r.importance>=75?'var(--success)':(r.importance>=50?'var(--info)':(r.importance>=25?'#D9782D':'var(--danger)')))};">${r.importance!=null?r.importance+' / 100':'—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table></div>`}
+    `,
+    marqueCommission: `
+    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('marqueCommission')}" title="Cliquer pour afficher tout / réduire">Importance par marque — uniquement par rapport aux commissions ${tgExpanded==='marqueCommission'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='marqueCommission'?`(${brandCommissionSorted.length} au total)`:(brandCommissionSorted.length>10?`(10 sur ${brandCommissionSorted.length})`:'')}</span></div>
+    ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période",""):`
+    <div class="helper" style="margin:8px 0 10px;">Note basée uniquement sur la <strong>commission par heure passée</strong>, sans tenir compte du CA — utile pour voir quelles marques rapportent le plus, indépendamment de leur volume d'affaires.</div>
+    <div class="card table-wrap"><table>
+      <thead><tr><th>Marque</th><th>Temps</th><th>Commission</th><th>Importance (commission)</th></tr></thead>
+      <tbody>
+        ${brandCommissionRowsShown.map(r=>`
+          <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
+            <td style="font-weight:600;"><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
+            <td class="num">${fmtDuree(r.minutes)}</td>
+            <td class="num" style="font-weight:600;color:var(--brass);">${fmtMoney(r.commission)}</td>
+            <td class="num" style="font-weight:700;color:${r.importanceCommissionOnly==null?'var(--muted)':(r.importanceCommissionOnly>=75?'var(--success)':(r.importanceCommissionOnly>=50?'var(--info)':(r.importanceCommissionOnly>=25?'#D9782D':'var(--danger)')))};">${r.importanceCommissionOnly!=null?r.importanceCommissionOnly+' / 100':'—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table></div>`}
+    `,
+  };
+  const blockOrder = ensureTempsGainsBlockOrder();
+  const blocksHtml = blockOrder.map(key=>`
+    <div class="card card-pad tg-block" draggable="true" data-block="${key}"
+         ondragstart="tgBlockDragStart(event,'${key}')" ondragover="tgBlockDragOver(event)" ondragleave="tgBlockDragLeave(event)" ondrop="tgBlockDrop(event,'${key}')" ondragend="tgBlockDragEnd(event)"
+         style="margin-bottom:18px;">
+      <span class="tg-block-handle" title="Glisser pour déplacer">⠿</span>
+      ${blockContent[key]}
+    </div>
+  `).join('');
+
   return `
   <div class="topbar">
     <div><h1>Temps / Gains clients</h1><div class="sub">Temps passé en clientèle (suivi commercial) comparé au CA généré, par client — ${escapeHtml(periodLabel)}</div></div>
@@ -9147,69 +9221,47 @@ function renderTempsGains(){
   <div class="grid grid-4" style="margin-bottom:20px;">
     <div class="card kpi"><div class="label">Temps total passé</div><div class="value num">${fmtDuree(totalMinutes)}</div></div>
     <div class="card kpi"><div class="label">CA total généré</div><div class="value num" style="color:var(--success);">${fmtMoney(totalCa)}</div></div>
-    <div class="card kpi"><div class="label">Clients avec activité</div><div class="value num">${rows.length}</div></div>
   </div>
 
-  <div class="settings-top-grid">
-  <div>
-    <div class="section-title" style="cursor:pointer;" onclick="${tgToggle('client')}" title="Cliquer pour afficher tout / réduire">Importance par client ${tgExpanded==='client'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='client'?`(${rows.length} au total)`:(rows.length>20?`(20 sur ${rows.length})`:'')}</span></div>
-    ${rows.length===0?emptyState('⏱',"Aucune donnée pour cette période","Ajoutez une durée sur vos notes de suivi commercial (fiche client → Personnes vues / Note) pour voir apparaître ce rapport, ou importez votre agenda Outlook."):`
-    <div class="helper" style="margin-bottom:10px;">Note sur 100 basée sur la rentabilité horaire (CA généré ÷ temps passé), comparée au client le plus rentable de la période. "—" = pas de durée renseignée.</div>
-    <div class="card table-wrap"><table>
-      <thead><tr><th>Client</th><th>Visites</th><th>Temps</th><th>CA généré</th><th>Importance</th></tr></thead>
-      <tbody>
-        ${clientRowsShown.map(r=>`
-          <tr style="cursor:pointer;" onclick="openClientSuiviOnlyModal('${r.client.id}')">
-            <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
-            <td class="num">${r.visites}</td>
-            <td class="num">${fmtDuree(r.minutes)}</td>
-            <td class="num" style="font-weight:600;">${fmtMoney(r.ca)}</td>
-            <td class="num" style="font-weight:700;color:${r.importance==null?'var(--muted)':(r.importance>=75?'var(--success)':(r.importance>=50?'var(--info)':(r.importance>=25?'#D9782D':'var(--danger)')))};">${r.importance!=null?r.importance+' / 100':'—'}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table></div>`}
-  </div>
-
-  <div>
-    <div class="section-title" style="cursor:pointer;" onclick="${tgToggle('marqueCA')}" title="Cliquer pour afficher tout / réduire">Importance par marque ${tgExpanded==='marqueCA'?'▲':'▼'} <span class="helper" style="display:inline;">(CA et commission de l'onglet Commissions)${tgExpanded==='marqueCA'?` — ${brandRows.length} au total`:(brandRows.length>10?` — 10 sur ${brandRows.length}`:'')}</span></div>
-    ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période","Cochez une ou plusieurs marques sur vos rendez-vous (fiche client → note de suivi) et renseignez le CA/la commission dans l'onglet Commissions."):`
-    <div class="helper" style="margin-bottom:10px;">Note combinant les <strong>trois critères</strong> : temps passé, CA et commission par heure investie — la moyenne des notes CA/heure et Commission/heure, chacune comparée à la meilleure marque de la période. Une marque à fort CA mais à faible taux de commission n'est ainsi plus mise en avant artificiellement. Cliquez sur une ligne pour corriger le CA, la commission ou le temps passé.</div>
-    <div class="card table-wrap"><table>
-      <thead><tr><th>Marque</th><th>Visites</th><th>Temps</th><th>CA (Commissions)</th><th>Commission</th><th>Importance</th></tr></thead>
-      <tbody>
-        ${brandCaRowsShown.map(r=>`
-          <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
-            <td style="font-weight:600;"><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
-            <td class="num">${r.visites}</td>
-            <td class="num">${fmtDuree(r.minutes)}</td>
-            <td class="num">${fmtMoney(r.ca)}</td>
-            <td class="num" style="font-weight:600;color:var(--brass);">${fmtMoney(r.commission)}</td>
-            <td class="num" style="font-weight:700;color:${r.importance==null?'var(--muted)':(r.importance>=75?'var(--success)':(r.importance>=50?'var(--info)':(r.importance>=25?'#D9782D':'var(--danger)')))};">${r.importance!=null?r.importance+' / 100':'—'}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table></div>`}
-
-    <div class="section-title" style="margin-top:20px;cursor:pointer;" onclick="${tgToggle('marqueCommission')}" title="Cliquer pour afficher tout / réduire">Importance par marque — uniquement par rapport aux commissions ${tgExpanded==='marqueCommission'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='marqueCommission'?`(${brandCommissionSorted.length} au total)`:(brandCommissionSorted.length>10?`(10 sur ${brandCommissionSorted.length})`:'')}</span></div>
-    ${brandRows.length===0?'':`
-    <div class="helper" style="margin-bottom:10px;">Note basée uniquement sur la <strong>commission par heure passée</strong>, sans tenir compte du CA — utile pour voir quelles marques rapportent le plus, indépendamment de leur volume d'affaires.</div>
-    <div class="card table-wrap"><table>
-      <thead><tr><th>Marque</th><th>Temps</th><th>Commission</th><th>Importance (commission)</th></tr></thead>
-      <tbody>
-        ${brandCommissionRowsShown.map(r=>`
-          <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
-            <td style="font-weight:600;"><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
-            <td class="num">${fmtDuree(r.minutes)}</td>
-            <td class="num" style="font-weight:600;color:var(--brass);">${fmtMoney(r.commission)}</td>
-            <td class="num" style="font-weight:700;color:${r.importanceCommissionOnly==null?'var(--muted)':(r.importanceCommissionOnly>=75?'var(--success)':(r.importanceCommissionOnly>=50?'var(--info)':(r.importanceCommissionOnly>=25?'#D9782D':'var(--danger)')))};">${r.importanceCommissionOnly!=null?r.importanceCommissionOnly+' / 100':'—'}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table></div>`}
-  </div>
-  </div>
+  <div class="helper" style="margin-bottom:10px;">Glissez un tableau par sa poignée ⠿ pour le réorganiser — l'ordre est mémorisé.</div>
+  ${blocksHtml}
   `;
+}
+function ensureTempsGainsBlockOrder(){
+  const all = ['client','marqueCA','marqueCommission'];
+  let order = state.settings.tempsGainsBlockOrder;
+  if(!Array.isArray(order)) order = [];
+  order = order.filter(k=>all.includes(k));
+  all.forEach(k=>{ if(!order.includes(k)) order.push(k); });
+  return order;
+}
+let tgBlockDragKey = null;
+function tgBlockDragStart(ev, key){
+  tgBlockDragKey = key;
+  ev.dataTransfer.effectAllowed = 'move';
+  try{ ev.dataTransfer.setData('text/plain', key); }catch(e){}
+  ev.currentTarget.classList.add('dragging');
+}
+function tgBlockDragOver(ev){ ev.preventDefault(); ev.dataTransfer.dropEffect='move'; ev.currentTarget.classList.add('drag-over'); }
+function tgBlockDragLeave(ev){ ev.currentTarget.classList.remove('drag-over'); }
+function tgBlockDragEnd(ev){
+  ev.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.tg-block.drag-over').forEach(el=>el.classList.remove('drag-over'));
+}
+function tgBlockDrop(ev, targetKey){
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drag-over');
+  if(!tgBlockDragKey || tgBlockDragKey===targetKey) return;
+  const order = ensureTempsGainsBlockOrder();
+  const from = order.indexOf(tgBlockDragKey);
+  const to = order.indexOf(targetKey);
+  if(from<0||to<0) return;
+  order.splice(from,1);
+  order.splice(to,0,tgBlockDragKey);
+  state.settings.tempsGainsBlockOrder = order;
+  tgBlockDragKey = null;
+  persist('settings');
+  render();
 }
 
 /* ---- Import d'un fichier .ics (alternative sans Outlook : export standard de tout calendrier) ---- */
@@ -9639,13 +9691,18 @@ function renderSuiviRelances(){
   const relanceClientJours = ui.relanceClientJours||60;
   const expanded = ui.suiviRelancesExpanded||null; // 'devis' | 'validite' | 'clients' | null
 
-  // 1. Devis à relancer : envoyés, ni gagnés ni perdus, depuis plus de X jours.
+  // 1. Devis à relancer : envoyés, ni gagnés ni perdus, depuis plus de X jours, et dont l'État de
+  // l'affaire fait partie de celles qui méritent une relance ("En cours", "À traiter", "Devis FR").
+  const relanceEtatsAutorises = ['en cours','à traiter','devis fr'];
+  const relanceDateBasis = ui.relanceDevisDateBasis||'sent';
+  const relanceRefDate = (d)=> relanceDateBasis==='date' ? d.date : devisSentDate(d);
   const devisARelancer = state.devis.filter(d=>{
     if(d.status!=='Envoyé' || isDevisWon(d) || isDevisLost(d)) return false;
-    const sent = devisSentDate(d);
-    const days = daysSince(sent);
+    const etat = (d.etatAffaire||'').trim().toLowerCase();
+    if(!relanceEtatsAutorises.includes(etat)) return false;
+    const days = daysSince(relanceRefDate(d));
     return days!=null && days>=relanceDevisJours;
-  }).map(d=>({ d, sent: devisSentDate(d), days: daysSince(devisSentDate(d)) }))
+  }).map(d=>({ d, sent: relanceRefDate(d), days: daysSince(relanceRefDate(d)) }))
     .sort((a,b)=>b.days-a.days);
 
   // 2. Validité expirée : encore "en cours" (ni gagné ni perdu) mais date de validité dépassée.
@@ -9682,13 +9739,16 @@ function renderSuiviRelances(){
 
   <div class="section-title" style="display:flex;align-items:center;gap:10px;">
     <span>📨 Devis à relancer</span>
-    <span class="helper" style="display:inline;">— envoyés depuis plus de</span>
+    <select onchange="ui.relanceDevisDateBasis=this.value; render();" style="width:auto;padding:4px 8px;font-size:12.5px;">
+      <option value="sent" ${relanceDateBasis==='sent'?'selected':''}>Envoyés depuis plus de</option>
+      <option value="date" ${relanceDateBasis==='date'?'selected':''}>Créés depuis plus de</option>
+    </select>
     <input type="number" min="1" value="${relanceDevisJours}" style="width:70px;padding:4px 8px;" onchange="ui.relanceDevisJours=parseInt(this.value,10)||15; render();">
-    <span class="helper" style="display:inline;">jours, sans être gagnés ni perdus</span>
+    <span class="helper" style="display:inline;">jours, avec l'État de l'affaire "En cours", "À traiter" ou "Devis FR"</span>
   </div>
   ${devisARelancer.length===0?emptyState('✅',"Rien à relancer","Tous vos devis envoyés ont été traités ou sont encore récents."):`
   <div class="card table-wrap" style="margin-bottom:6px;"><table>
-    <thead><tr><th>N°</th><th>Client</th><th>Objet</th><th>Envoyé le</th><th>Jours sans réponse</th><th class="num">Total HT</th><th>État de l'affaire</th><th></th></tr></thead>
+    <thead><tr><th>N°</th><th>Client</th><th>Objet</th><th>${relanceDateBasis==='date'?'Créé le':'Envoyé le'}</th><th>Jours sans réponse</th><th class="num">Total HT</th><th>État de l'affaire</th><th></th></tr></thead>
     <tbody>
       ${devisShown.map(r=>{
         const oc = etatAffaireColor(etatAffaireOutcome(r.d));
