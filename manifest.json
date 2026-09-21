@@ -1,0 +1,17 @@
+{
+  "name": "ComAgentCo",
+  "short_name": "ComAgentCo",
+  "description": "Gestion commerciale pour agent multi-marques : devis, tarifs, clients, commissions, suivi et relances.",
+  "start_url": "./comagentco.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F4F1E8",
+  "theme_color": "#1E2A2C",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
