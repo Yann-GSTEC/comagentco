@@ -2979,12 +2979,55 @@ function deleteClient(id){
   showToast('Client supprimé.');
 }
 let historyNoteSelectedBrands = [];
+let suiviOnlyModalClientId = null;
+function refreshClientDetailOrSuivi(clientId){
+  if(suiviOnlyModalClientId===clientId) openClientSuiviOnlyModal(clientId);
+  else openClientDetail(clientId);
+}
+function renderClientSuiviCommercialSection(c, timelineMaxHeight){
+  const history = (c.history||[]).slice().sort((a,b)=>b.date.localeCompare(a.date));
+  return `
+      <div class="section-title" id="suiviCommercialAnchor" style="display:flex;align-items:center;gap:10px;">
+        <span>Suivi commercial</span>
+        <button class="btn btn-brass btn-sm" onclick="openAddHistoryNoteModal('${c.id}')">+ Ajouter un rendez-vous</button>
+      </div>
+      <div style="height:6px;"></div>
+      ${history.length>0?`
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);font-weight:600;">
+          <input type="checkbox" style="width:auto;" ${history.every(h=>ui.historySelected[h.id])?'checked':''} onchange="toggleHistorySelectAll('${c.id}', this.checked)"> Tout sélectionner
+        </label>
+        <button class="btn btn-sm btn-ghost btn-danger" style="${Object.keys(ui.historySelected||{}).some(k=>ui.historySelected[k] && history.some(h=>h.id===k))?'':'display:none;'}" onclick="deleteSelectedHistory('${c.id}')">Supprimer la sélection</button>
+      </div>`:''}
+      <div class="timeline" style="${timelineMaxHeight?`max-height:${timelineMaxHeight};`:''}overflow-y:auto;margin-bottom:10px;">
+        ${history.length===0?'<div class="helper">Aucune note pour le moment.</div>':history.map(h=>`
+          <div class="timeline-item" style="align-items:flex-start;">
+            <input type="checkbox" style="width:auto;margin-top:2px;" ${ui.historySelected[h.id]?'checked':''} onchange="toggleHistorySelect('${h.id}', this.checked)">
+            <div class="tdot"></div>
+            <div style="flex:1;cursor:pointer;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')"><div class="tdate">${fmtDate(h.date)}${h.typeVisite?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:6px;">${escapeHtml(h.typeVisite)}</span>`:''}${h.duree?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:4px;">⏱ ${h.duree} min</span>`:''}${historyBrandIds(h).map(bid=>` <span class="chip" style="background:${brandColor(bid)};font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(brandName(bid))}</span>`).join('')}${historyTasks(h).map(t=>` <span class="chip" title="${t.comment?escapeHtml(t.comment):''}" style="background:${taskColor(t.name)};color:#fff;font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(t.name)}${t.comment?' 💬':''}</span>`).join('')}</div>${historyPersonneNames(h,c).length>0?`<div class="helper" style="margin:2px 0 2px;">👤 ${historyPersonneNames(h,c).map(escapeHtml).join(', ')}</div>`:''}<div style="white-space:pre-wrap;">${escapeHtml(h.text).replace(/\n/g,'<br>')}</div></div>
+            <button class="btn btn-sm btn-ghost" style="padding:2px 8px;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')">✎</button>
+            <button class="btn btn-sm btn-ghost btn-danger" style="padding:2px 8px;" onclick="deleteHistoryNote('${c.id}','${h.id}')">✕</button>
+          </div>
+        `).join('')}
+      </div>
+  `;
+}
+function openClientSuiviOnlyModal(clientId){
+  suiviOnlyModalClientId = clientId;
+  const c = state.clients.find(x=>x.id===clientId);
+  if(!c) return;
+  openModal(`
+    <div class="modal-head"><h3>${escapeHtml(clientDisplayName(c))} — Suivi commercial</h3><button class="close-x" onclick="suiviOnlyModalClientId=null; closeModal(); render();">✕</button></div>
+    <div class="modal-body">${renderClientSuiviCommercialSection(c, null)}</div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="suiviOnlyModalClientId=null; closeModal(); render();">Fermer</button></div>
+  `, {full:true});
+}
 function openClientDetail(id, scrollToSuivi){
+  suiviOnlyModalClientId = null;
   const c = state.clients.find(x=>x.id===id);
   if(!c) return;
   historyNoteSelectedBrands = [];
   const devisList = state.devis.filter(d=>d.clientId===id).sort((a,b)=>b.date.localeCompare(a.date));
-  const history = (c.history||[]).slice().sort((a,b)=>b.date.localeCompare(a.date));
   const contacts = c.contacts||[];
   openModal(`
     <div class="modal-head">
@@ -3029,29 +3072,7 @@ function openClientDetail(id, scrollToSuivi){
       <div class="section-title">Personnes à contacter</div>
       <div class="helper" style="margin-bottom:14px;">Aucun contact enregistré pour ce client. <a href="#" onclick="event.preventDefault(); openClientForm('${c.id}');">+ Ajouter un contact</a></div>`}
 
-      <div class="section-title" id="suiviCommercialAnchor" style="display:flex;align-items:center;gap:10px;">
-        <span>Suivi commercial</span>
-        <button class="btn btn-brass btn-sm" onclick="openAddHistoryNoteModal('${c.id}')">+ Ajouter un rendez-vous</button>
-      </div>
-      <div style="height:6px;"></div>
-      ${history.length>0?`
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);font-weight:600;">
-          <input type="checkbox" style="width:auto;" ${history.every(h=>ui.historySelected[h.id])?'checked':''} onchange="toggleHistorySelectAll('${c.id}', this.checked)"> Tout sélectionner
-        </label>
-        <button class="btn btn-sm btn-ghost btn-danger" style="${Object.keys(ui.historySelected||{}).some(k=>ui.historySelected[k] && history.some(h=>h.id===k))?'':'display:none;'}" onclick="deleteSelectedHistory('${c.id}')">Supprimer la sélection</button>
-      </div>`:''}
-      <div class="timeline" style="max-height:180px;overflow-y:auto;margin-bottom:10px;">
-        ${history.length===0?'<div class="helper">Aucune note pour le moment.</div>':history.map(h=>`
-          <div class="timeline-item" style="align-items:flex-start;">
-            <input type="checkbox" style="width:auto;margin-top:2px;" ${ui.historySelected[h.id]?'checked':''} onchange="toggleHistorySelect('${h.id}', this.checked)">
-            <div class="tdot"></div>
-            <div style="flex:1;cursor:pointer;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')"><div class="tdate">${fmtDate(h.date)}${h.typeVisite?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:6px;">${escapeHtml(h.typeVisite)}</span>`:''}${h.duree?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:4px;">⏱ ${h.duree} min</span>`:''}${historyBrandIds(h).map(bid=>` <span class="chip" style="background:${brandColor(bid)};font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(brandName(bid))}</span>`).join('')}${historyTasks(h).map(t=>` <span class="chip" title="${t.comment?escapeHtml(t.comment):''}" style="background:${taskColor(t.name)};color:#fff;font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(t.name)}${t.comment?' 💬':''}</span>`).join('')}</div>${historyPersonneNames(h,c).length>0?`<div class="helper" style="margin:2px 0 2px;">👤 ${historyPersonneNames(h,c).map(escapeHtml).join(', ')}</div>`:''}<div style="white-space:pre-wrap;">${escapeHtml(h.text).replace(/\n/g,'<br>')}</div></div>
-            <button class="btn btn-sm btn-ghost" style="padding:2px 8px;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')">✎</button>
-            <button class="btn btn-sm btn-ghost btn-danger" style="padding:2px 8px;" onclick="deleteHistoryNote('${c.id}','${h.id}')">✕</button>
-          </div>
-        `).join('')}
-      </div>
+      ${renderClientSuiviCommercialSection(c, '180px')}
 
       <div class="section-title">Devis</div>
       ${devisList.length===0?'<div class="helper">Aucun devis pour ce client.</div>':`
@@ -3205,7 +3226,7 @@ function addHistoryNote(clientId){
   historyNoteSelectedTasks = {};
   historyNoteSelectedPersonnes = [];
   closeModal();
-  openClientDetail(clientId);
+  refreshClientDetailOrSuivi(clientId);
 }
 let historyEditSelectedBrands = [];
 function renderHistoryEditBrandChips(){
@@ -3298,14 +3319,14 @@ function saveEditedHistoryNote(clientId, noteId){
   delete h.brandId; // ancien format éventuel, remplacé par brandIds
   persist('clients');
   closeModal();
-  openClientDetail(clientId);
+  refreshClientDetailOrSuivi(clientId);
 }
 function toggleHistorySelect(noteId, checked){
   ui.historySelected = ui.historySelected || {};
   if(checked) ui.historySelected[noteId] = true;
   else delete ui.historySelected[noteId];
   const c = state.clients.find(cl=>cl.history && cl.history.some(h=>h.id===noteId));
-  if(c) openClientDetail(c.id);
+  if(c) refreshClientDetailOrSuivi(c.id);
 }
 function toggleHistorySelectAll(clientId, checked){
   const c = state.clients.find(x=>x.id===clientId);
@@ -3315,7 +3336,7 @@ function toggleHistorySelectAll(clientId, checked){
     if(checked) ui.historySelected[h.id] = true;
     else delete ui.historySelected[h.id];
   });
-  openClientDetail(clientId);
+  refreshClientDetailOrSuivi(clientId);
 }
 function deleteHistoryNote(clientId, noteId){
   const c = state.clients.find(x=>x.id===clientId);
@@ -3324,7 +3345,7 @@ function deleteHistoryNote(clientId, noteId){
   c.history = (c.history||[]).filter(h=>h.id!==noteId);
   delete ui.historySelected[noteId];
   persist('clients');
-  openClientDetail(clientId);
+  refreshClientDetailOrSuivi(clientId);
 }
 function deleteSelectedHistory(clientId){
   const c = state.clients.find(x=>x.id===clientId);
@@ -3335,7 +3356,7 @@ function deleteSelectedHistory(clientId){
   c.history = (c.history||[]).filter(h=>!ids.includes(h.id));
   ids.forEach(id=>delete ui.historySelected[id]);
   persist('clients');
-  openClientDetail(clientId);
+  refreshClientDetailOrSuivi(clientId);
 }
 
 /* ============================= CLIENTS : IMPORT / EXPORT EXCEL ============================= */
@@ -9047,7 +9068,7 @@ function renderTempsGains(){
       <thead><tr><th>Client</th><th>Visites</th><th>Temps</th><th>CA généré</th><th>Importance</th></tr></thead>
       <tbody>
         ${rows.map(r=>`
-          <tr style="cursor:pointer;" onclick="openClientDetail('${r.client.id}', true)">
+          <tr style="cursor:pointer;" onclick="openClientSuiviOnlyModal('${r.client.id}')">
             <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
             <td class="num">${r.visites}</td>
             <td class="num">${fmtDuree(r.minutes)}</td>
@@ -9198,9 +9219,37 @@ function openBrandTempsGainsModal(brandId){
       <div class="section-title">Temps passé directement avec la marque <span class="helper" style="display:inline;">(hors visites clients — celles-ci se modifient depuis la fiche du client concerné)</span></div>
       <div id="brandHistoryWrap">${renderBrandHistoryRows(b, year, month)}</div>
       <button class="btn btn-sm btn-ghost" style="margin-top:10px;" onclick="addBrandHistoryEntry('${brandId}')">+ Ajouter une entrée de temps</button>
+
+      <div class="section-title" style="margin-top:24px;">Rendez-vous clients où cette marque est sélectionnée</div>
+      ${renderBrandClientVisitsRows(brandId, year, month)}
     </div>
     <div class="modal-foot"><button class="btn btn-primary" onclick="closeModal(); render();">Fermer</button></div>
   `, {full:true});
+}
+function renderBrandClientVisitsRows(brandId, year, month){
+  const rows = [];
+  state.clients.forEach(c=>{
+    (c.history||[]).forEach(h=>{
+      if(periodMatchesReport(h.date, year, month) && historyBrandIds(h).includes(brandId)){
+        rows.push({ client:c, h });
+      }
+    });
+  });
+  if(rows.length===0) return '<div class="helper">Aucun rendez-vous client avec cette marque sélectionnée sur cette période.</div>';
+  rows.sort((a,b)=>b.h.date.localeCompare(a.h.date));
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Date</th><th>Client</th><th>Note</th><th style="width:100px;">Durée</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`
+        <tr style="cursor:pointer;" onclick="closeModal(); openClientSuiviOnlyModal('${r.client.id}')">
+          <td>${fmtDate(r.h.date)}</td>
+          <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
+          <td>${escapeHtml(r.h.text||'')}</td>
+          <td class="num">${r.h.duree?fmtDuree(r.h.duree):'—'}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table></div>`;
 }
 function renderBrandHistoryRows(b, year, month){
   const entries = (b.history||[]).filter(h=>periodMatchesReport(h.date, year, month)).sort((a,c)=>c.date.localeCompare(a.date));
