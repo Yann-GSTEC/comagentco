@@ -607,6 +607,8 @@ let ui = {
   tempsGainsFamilleFilter:'all',
   tempsGainsSousFamilleFilter:'all',
   tempsGainsDepartementFilter:'all',
+  relanceDevisJours: 15,
+  relanceClientJours: 60,
   rapportSections:{
     synthese:{caGagne:true, devisEnCours:true, devisGagnes:true, devisPerdus:true, caCommissions:true, commission:true, rdvCount:true},
     devisEnCours:true, devisGagnes:true, devisPerdus:true, rdv:true
@@ -1675,6 +1677,7 @@ const NAV_ITEMS_DEFAULT = [
   {id:'devis', label:'Devis', ic:'▧'},
   {id:'rapport', label:'Rapport', ic:'▩'},
   {id:'tempsgains', label:'Temps/Gains clients', ic:'⏱'},
+  {id:'suivirelances', label:'Suivi et relances', ic:'🔔'},
   {id:'commissions', label:'Commissions', ic:'%'},
   {id:'recherche', label:'Recherche', ic:'⌕'},
   {id:'parametres', label:'Paramètres', ic:'⚙'},
@@ -1767,6 +1770,7 @@ function renderMain(){
     case 'devis': return renderDevis();
     case 'rapport': return renderRapport();
     case 'tempsgains': return renderTempsGains();
+    case 'suivirelances': return renderSuiviRelances();
     case 'commissions': return renderCommissions();
     case 'recherche': return renderRecherche();
     case 'parametres': return renderParametres();
@@ -9526,6 +9530,128 @@ function confirmAgendaImport(){
   closeModal();
   render();
   showToast(added>0 ? `${added} événement(s) ajouté(s) (${addedClients} côté clients, ${addedBrands} côté marques).` : "Aucun événement importé (ni client ni marque choisi).");
+}
+
+/* ============================= SUIVI ET RELANCES ============================= */
+function daysSince(dateStr){
+  if(!dateStr) return null;
+  const d = new Date(dateStr+'T00:00:00');
+  if(isNaN(d)) return null;
+  const today = new Date(todayStr()+'T00:00:00');
+  return Math.round((today-d)/86400000);
+}
+function devisSentDate(d){
+  // Repère la date d'envoi réelle via l'historique ("Statut : ... → Envoyé") si disponible, sinon
+  // retombe sur la date du devis lui-même.
+  const hist = (d.history||[]).filter(h=>/→\s*Envoyé/i.test((h.changes||[]).join(' ')));
+  if(hist.length) return hist[hist.length-1].ts.slice(0,10);
+  return d.date;
+}
+function clientLastVisitDate(c){
+  const dates = (c.history||[]).map(h=>h.date).filter(Boolean).sort();
+  return dates.length ? dates[dates.length-1] : null;
+}
+function renderSuiviRelances(){
+  const relanceDevisJours = ui.relanceDevisJours||15;
+  const relanceClientJours = ui.relanceClientJours||60;
+
+  // 1. Devis à relancer : envoyés, ni gagnés ni perdus, depuis plus de X jours.
+  const devisARelancer = state.devis.filter(d=>{
+    if(d.status!=='Envoyé' || isDevisWon(d) || isDevisLost(d)) return false;
+    const sent = devisSentDate(d);
+    const days = daysSince(sent);
+    return days!=null && days>=relanceDevisJours;
+  }).map(d=>({ d, sent: devisSentDate(d), days: daysSince(devisSentDate(d)) }))
+    .sort((a,b)=>b.days-a.days);
+
+  // 2. Validité expirée : encore "en cours" (ni gagné ni perdu) mais date de validité dépassée.
+  const validiteExpiree = state.devis.filter(d=>{
+    if(isDevisWon(d) || isDevisLost(d)) return false;
+    if(!d.validUntil) return false;
+    const days = daysSince(d.validUntil);
+    return days!=null && days>0;
+  }).map(d=>({ d, days: daysSince(d.validUntil) }))
+    .sort((a,b)=>b.days-a.days);
+
+  // 3. Clients non visités depuis longtemps.
+  const clientsNonVisites = state.clients.map(c=>{
+    const last = clientLastVisitDate(c);
+    const days = last ? daysSince(last) : null;
+    return { c, last, days };
+  }).filter(r=>r.days==null || r.days>=relanceClientJours)
+    .sort((a,b)=>(b.days==null?999999:b.days)-(a.days==null?999999:a.days));
+
+  return `
+  <div class="topbar"><div><h1>Suivi et relances</h1><div class="sub">Ce qui mérite votre attention : devis sans réponse, validités dépassées, clients délaissés</div></div></div>
+
+  <div class="grid grid-4" style="margin-bottom:24px;">
+    <div class="card kpi"><div class="label">Devis à relancer</div><div class="value num" style="color:${devisARelancer.length?'var(--danger)':'inherit'};">${devisARelancer.length}</div></div>
+    <div class="card kpi"><div class="label">Validités expirées</div><div class="value num" style="color:${validiteExpiree.length?'var(--danger)':'inherit'};">${validiteExpiree.length}</div></div>
+    <div class="card kpi"><div class="label">Clients délaissés</div><div class="value num" style="color:${clientsNonVisites.length?'#D9782D':'inherit'};">${clientsNonVisites.length}</div></div>
+  </div>
+
+  <div class="section-title" style="display:flex;align-items:center;gap:10px;">
+    <span>📨 Devis à relancer</span>
+    <span class="helper" style="display:inline;">— envoyés depuis plus de</span>
+    <input type="number" min="1" value="${relanceDevisJours}" style="width:70px;padding:4px 8px;" onchange="ui.relanceDevisJours=parseInt(this.value,10)||15; render();">
+    <span class="helper" style="display:inline;">jours, sans être gagnés ni perdus</span>
+  </div>
+  ${devisARelancer.length===0?emptyState('✅',"Rien à relancer","Tous vos devis envoyés ont été traités ou sont encore récents."):`
+  <div class="card table-wrap" style="margin-bottom:28px;"><table>
+    <thead><tr><th>N°</th><th>Client</th><th>Objet</th><th>Envoyé le</th><th>Jours sans réponse</th><th class="num">Total HT</th><th></th></tr></thead>
+    <tbody>
+      ${devisARelancer.map(r=>`
+        <tr style="cursor:pointer;" onclick="openDevisForm('${r.d.id}')">
+          <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(r.d.number)}</td>
+          <td>${escapeHtml(clientSocieteLabel(r.d.clientId))}</td>
+          <td>${escapeHtml(r.d.objet||'—')}</td>
+          <td>${fmtDate(r.sent)}</td>
+          <td style="font-weight:700;color:var(--danger);">${r.days} j</td>
+          <td class="num" style="font-weight:600;">${fmtMoney(devisTotal(r.d).ht)}</td>
+          <td onclick="event.stopPropagation();"><button class="btn btn-sm btn-brass" onclick="openDevisForm('${r.d.id}')">Relancer</button></td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table></div>`}
+
+  <div class="section-title">⏳ Validités expirées <span class="helper" style="display:inline;">— toujours "en cours" mais la date de validité est dépassée</span></div>
+  ${validiteExpiree.length===0?emptyState('✅',"Aucune validité expirée","Tous vos devis en cours restent dans leur période de validité."):`
+  <div class="card table-wrap" style="margin-bottom:28px;"><table>
+    <thead><tr><th>N°</th><th>Client</th><th>Objet</th><th>Validité expirée le</th><th>Jours de retard</th><th class="num">Total HT</th></tr></thead>
+    <tbody>
+      ${validiteExpiree.map(r=>`
+        <tr style="cursor:pointer;" onclick="openDevisForm('${r.d.id}')">
+          <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(r.d.number)}</td>
+          <td>${escapeHtml(clientSocieteLabel(r.d.clientId))}</td>
+          <td>${escapeHtml(r.d.objet||'—')}</td>
+          <td>${fmtDate(r.d.validUntil)}</td>
+          <td style="font-weight:700;color:var(--danger);">${r.days} j</td>
+          <td class="num" style="font-weight:600;">${fmtMoney(devisTotal(r.d).ht)}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table></div>`}
+
+  <div class="section-title" style="display:flex;align-items:center;gap:10px;">
+    <span>🕸 Clients non visités depuis longtemps</span>
+    <span class="helper" style="display:inline;">— aucune visite depuis plus de</span>
+    <input type="number" min="1" value="${relanceClientJours}" style="width:70px;padding:4px 8px;" onchange="ui.relanceClientJours=parseInt(this.value,10)||60; render();">
+    <span class="helper" style="display:inline;">jours (ou jamais visités)</span>
+  </div>
+  ${clientsNonVisites.length===0?emptyState('✅',"Tous vos clients ont été vus récemment","Aucun client ne dépasse le seuil choisi."):`
+  <div class="card table-wrap"><table>
+    <thead><tr><th>Client</th><th>Dernière visite</th><th>Jours écoulés</th></tr></thead>
+    <tbody>
+      ${clientsNonVisites.map(r=>`
+        <tr style="cursor:pointer;" onclick="openClientSuiviOnlyModal('${r.c.id}')">
+          <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.c))}</td>
+          <td>${r.last?fmtDate(r.last):'Jamais visité'}</td>
+          <td style="font-weight:700;color:${r.days==null?'var(--muted)':'#D9782D'};">${r.days==null?'—':r.days+' j'}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table></div>`}
+  `;
 }
 
 /* ============================= DASHBOARD ============================= */
