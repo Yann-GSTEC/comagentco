@@ -9090,14 +9090,14 @@ function renderTempsGains(){
 
   const tgExpanded = ui.tempsGainsExpanded||null; // 'client' | 'marqueCA' | 'marqueCommission' | null
   const tgToggle = (key)=> `ui.tempsGainsExpanded=(ui.tempsGainsExpanded==='${key}'?null:'${key}'); render();`;
-  const clientRowsShown = tgExpanded==='client' ? rows : rows.slice(0,20);
-  const brandCaRowsShown = tgExpanded==='marqueCA' ? brandRows : brandRows.slice(0,10);
+  const clientRowsShown = tgExpanded==='client' ? rows : rows.slice(0,15);
+  const brandCaRowsShown = tgExpanded==='marqueCA' ? brandRows : brandRows.slice(0,5);
   const brandCommissionSorted = brandRows.slice().sort((a,b)=>(b.importanceCommissionOnly==null?-1:b.importanceCommissionOnly)-(a.importanceCommissionOnly==null?-1:a.importanceCommissionOnly));
-  const brandCommissionRowsShown = tgExpanded==='marqueCommission' ? brandCommissionSorted : brandCommissionSorted.slice(0,10);
+  const brandCommissionRowsShown = tgExpanded==='marqueCommission' ? brandCommissionSorted : brandCommissionSorted.slice(0,5);
 
   const blockContent = {
     client: `
-    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('client')}" title="Cliquer pour afficher tout / réduire">Importance par client ${tgExpanded==='client'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='client'?`(${rows.length} au total)`:(rows.length>20?`(20 sur ${rows.length})`:'')}</span></div>
+    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('client')}" title="Cliquer pour afficher tout / réduire">Importance par client ${tgExpanded==='client'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='client'?`(${rows.length} au total)`:(rows.length>15?`(15 sur ${rows.length})`:'')}</span></div>
     ${rows.length===0?emptyState('⏱',"Aucune donnée pour cette période","Ajoutez une durée sur vos notes de suivi commercial (fiche client → Personnes vues / Note) pour voir apparaître ce rapport, ou importez votre agenda Outlook."):`
     <div class="helper" style="margin:8px 0 10px;">Note sur 100 basée sur la rentabilité horaire (CA généré ÷ temps passé), comparée au client le plus rentable de la période. "—" = pas de durée renseignée.</div>
     <div class="card table-wrap"><table>
@@ -9116,7 +9116,7 @@ function renderTempsGains(){
     </table></div>`}
     `,
     marqueCA: `
-    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('marqueCA')}" title="Cliquer pour afficher tout / réduire">Importance par marque ${tgExpanded==='marqueCA'?'▲':'▼'} <span class="helper" style="display:inline;">(CA et commission de l'onglet Commissions)${tgExpanded==='marqueCA'?` — ${brandRows.length} au total`:(brandRows.length>10?` — 10 sur ${brandRows.length}`:'')}</span></div>
+    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('marqueCA')}" title="Cliquer pour afficher tout / réduire">Importance par marque ${tgExpanded==='marqueCA'?'▲':'▼'} <span class="helper" style="display:inline;">(CA et commission de l'onglet Commissions)${tgExpanded==='marqueCA'?` — ${brandRows.length} au total`:(brandRows.length>5?` — 5 sur ${brandRows.length}`:'')}</span></div>
     ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période","Cochez une ou plusieurs marques sur vos rendez-vous (fiche client → note de suivi) et renseignez le CA/la commission dans l'onglet Commissions."):`
     <div class="helper" style="margin:8px 0 10px;">Note combinant les <strong>trois critères</strong> : temps passé, CA et commission par heure investie — la moyenne des notes CA/heure et Commission/heure, chacune comparée à la meilleure marque de la période. Une marque à fort CA mais à faible taux de commission n'est ainsi plus mise en avant artificiellement. Cliquez sur une ligne pour corriger le CA, la commission ou le temps passé.</div>
     <div class="card table-wrap"><table>
@@ -9136,7 +9136,7 @@ function renderTempsGains(){
     </table></div>`}
     `,
     marqueCommission: `
-    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('marqueCommission')}" title="Cliquer pour afficher tout / réduire">Importance par marque — uniquement par rapport aux commissions ${tgExpanded==='marqueCommission'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='marqueCommission'?`(${brandCommissionSorted.length} au total)`:(brandCommissionSorted.length>10?`(10 sur ${brandCommissionSorted.length})`:'')}</span></div>
+    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('marqueCommission')}" title="Cliquer pour afficher tout / réduire">Importance par marque — uniquement par rapport aux commissions ${tgExpanded==='marqueCommission'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='marqueCommission'?`(${brandCommissionSorted.length} au total)`:(brandCommissionSorted.length>5?`(5 sur ${brandCommissionSorted.length})`:'')}</span></div>
     ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période",""):`
     <div class="helper" style="margin:8px 0 10px;">Note basée uniquement sur la <strong>commission par heure passée</strong>, sans tenir compte du CA — utile pour voir quelles marques rapportent le plus, indépendamment de leur volume d'affaires.</div>
     <div class="card table-wrap"><table>
@@ -9160,16 +9160,19 @@ function renderTempsGains(){
   const blocksHtml = blockOrder.map(key=>{
     const size = blockSizes[key]||'lg';
     const cols = TG_SIZE_COLS[size];
+    const customHeight = getCardHeight('tempsgains', key);
+    const heightStyle = customHeight ? `height:${customHeight}px;overflow:auto;` : '';
     return `
     <div class="card card-pad tg-block" draggable="true" data-block="${key}"
          ondragstart="tgBlockDragStart(event,'${key}')" ondragover="tgBlockDragOver(event)" ondragleave="tgBlockDragLeave(event)" ondrop="tgBlockDrop(event,'${key}')" ondragend="tgBlockDragEnd(event)"
-         style="grid-column:span ${cols};">
+         style="grid-column:span ${cols};${heightStyle}">
       <span class="tg-block-handle" title="Glisser pour déplacer">⠿</span>
       <span class="dash-size-btns" style="position:absolute;right:10px;top:10px;">
         <button type="button" onclick="event.stopPropagation(); tgBlockResize('${key}',-1);" title="Réduire" ${size==='sm'?'disabled':''}>−</button>
         <button type="button" onclick="event.stopPropagation(); tgBlockResize('${key}',1);" title="Agrandir" ${size==='lg'?'disabled':''}>+</button>
       </span>
       ${blockContent[key]}
+      ${cardResizeHandleHtml('tempsgains', key)}
     </div>
   `;}).join('');
 
@@ -9232,7 +9235,7 @@ function renderTempsGains(){
     <div class="card kpi"><div class="label">CA total généré</div><div class="value num" style="color:var(--success);">${fmtMoney(totalCa)}</div></div>
   </div>
 
-  <div class="helper" style="margin-bottom:10px;">Glissez un tableau par sa poignée ⠿ pour le réorganiser, ou utilisez les boutons −/+ pour ajuster sa largeur — c'est mémorisé automatiquement.</div>
+  <div class="helper" style="margin-bottom:10px;">Glissez un tableau par sa poignée ⠿ pour le réorganiser, utilisez les boutons −/+ pour ajuster sa largeur, ou tirez le coin inférieur droit pour ajuster sa hauteur — c'est mémorisé automatiquement.</div>
   <div class="dash-grid">${blocksHtml}</div>
   `;
 }
