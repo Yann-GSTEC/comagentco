@@ -163,10 +163,7 @@ button{font-family:inherit;}
 .param-subnav button:hover{background:var(--surface-2);}
 .param-subnav button.active{background:var(--surface);border-color:var(--line);color:var(--ink);font-weight:700;box-shadow:var(--shadow);}
 @media (max-width:800px){.param-subnav{flex-direction:row;flex-wrap:wrap;min-width:0;}}
-.tg-block{position:relative;padding-left:34px;}
-.tg-block-handle{position:absolute;left:10px;top:14px;cursor:grab;color:var(--muted);font-size:16px;user-select:none;}
-.tg-block.dragging{opacity:.4;}
-.tg-block.drag-over{box-shadow:0 0 0 2px var(--accent) inset;}
+
 @media (max-width:1000px){
   .grid-4{grid-template-columns:repeat(2,1fr);}
   .grid-2{grid-template-columns:1fr;}
@@ -9154,25 +9151,13 @@ function renderTempsGains(){
     </table></div>`}
     `,
   };
-  const blockOrder = ensureTempsGainsBlockOrder();
-  const TG_SIZE_COLS = {sm:1, md:2, lg:4};
-  const blockSizes = ensureTempsGainsBlockSizes();
+  const blockOrder = ['client','marqueCA','marqueCommission'];
   const blocksHtml = blockOrder.map(key=>{
-    const size = blockSizes[key]||'lg';
-    const cols = TG_SIZE_COLS[size];
-    const customHeight = getCardHeight('tempsgains', key);
-    const heightStyle = customHeight ? `height:${customHeight}px;overflow:auto;` : (key==='client' ? 'grid-row:span 2;' : '');
+    const cols = 2;
+    const rowStyle = key==='client' ? 'grid-row:span 2;' : '';
     return `
-    <div class="card card-pad tg-block" draggable="true" data-block="${key}"
-         ondragstart="tgBlockDragStart(event,'${key}')" ondragover="tgBlockDragOver(event)" ondragleave="tgBlockDragLeave(event)" ondrop="tgBlockDrop(event,'${key}')" ondragend="tgBlockDragEnd(event)"
-         style="grid-column:span ${cols};${heightStyle}">
-      <span class="tg-block-handle" title="Glisser pour déplacer">⠿</span>
-      <span class="dash-size-btns" style="position:absolute;right:10px;top:10px;">
-        <button type="button" onclick="event.stopPropagation(); tgBlockResize('${key}',-1);" title="Réduire" ${size==='sm'?'disabled':''}>−</button>
-        <button type="button" onclick="event.stopPropagation(); tgBlockResize('${key}',1);" title="Agrandir" ${size==='lg'?'disabled':''}>+</button>
-      </span>
+    <div class="card card-pad" style="grid-column:span ${cols};${rowStyle}">
       ${blockContent[key]}
-      ${cardResizeHandleHtml('tempsgains', key)}
     </div>
   `;}).join('');
 
@@ -9211,18 +9196,21 @@ function renderTempsGains(){
       <button class="btn" onclick="ui.tempsGainsSortDir=(ui.tempsGainsSortDir==='asc'?'desc':'asc'); render();">${sortDir==='asc'?'▲ Croissant':'▼ Décroissant'}</button>
     </div>
     <div class="field" style="margin-bottom:0;max-width:200px;">
+      <label>&nbsp;</label>
       <select onchange="ui.tempsGainsFamilleFilter=this.value; ui.tempsGainsSousFamilleFilter='all'; render();">
         <option value="all">Toutes les familles</option>
         ${(state.paramLists.famillesClients||[]).slice().sort((a,b)=>(a.libelle||'').localeCompare(b.libelle||'')).map(f=>`<option value="${escapeHtml(f.libelle)}" ${ui.tempsGainsFamilleFilter===f.libelle?'selected':''}>${escapeHtml(f.libelle)}</option>`).join('')}
       </select>
     </div>
     <div class="field" style="margin-bottom:0;max-width:200px;">
+      <label>&nbsp;</label>
       <select onchange="ui.tempsGainsSousFamilleFilter=this.value; render();">
         <option value="all">Toutes les sous-familles</option>
         ${sousFamillesForFamilleFilter(ui.tempsGainsFamilleFilter).map(f=>`<option value="${escapeHtml(f.libelle)}" ${ui.tempsGainsSousFamilleFilter===f.libelle?'selected':''}>${escapeHtml(f.libelle)}</option>`).join('')}
       </select>
     </div>
     <div class="field" style="margin-bottom:0;max-width:220px;">
+      <label>&nbsp;</label>
       <select onchange="ui.tempsGainsDepartementFilter=this.value; render();">
         <option value="all">Tous les départements</option>
         ${departementsInUse().map(d=>`<option value="${d}" ${ui.tempsGainsDepartementFilter===d?'selected':''}>${escapeHtml(departementLabel(d))}</option>`).join('')}
@@ -9235,60 +9223,8 @@ function renderTempsGains(){
     <div class="card kpi"><div class="label">CA total généré</div><div class="value num" style="color:var(--success);">${fmtMoney(totalCa)}</div></div>
   </div>
 
-  <div class="helper" style="margin-bottom:10px;">Glissez un tableau par sa poignée ⠿ pour le réorganiser, utilisez les boutons −/+ pour ajuster sa largeur, ou tirez le coin inférieur droit pour ajuster sa hauteur — c'est mémorisé automatiquement.</div>
   <div class="dash-grid">${blocksHtml}</div>
   `;
-}
-function ensureTempsGainsBlockOrder(){
-  const all = ['client','marqueCA','marqueCommission'];
-  let order = state.settings.tempsGainsBlockOrder;
-  if(!Array.isArray(order)) order = [];
-  order = order.filter(k=>all.includes(k));
-  all.forEach(k=>{ if(!order.includes(k)) order.push(k); });
-  return order;
-}
-function ensureTempsGainsBlockSizes(){
-  const defaults = {client:'md', marqueCA:'md', marqueCommission:'md'};
-  const sizes = Object.assign({}, defaults, state.settings.tempsGainsBlockSizes||{});
-  return sizes;
-}
-function tgBlockResize(key, delta){
-  const order3 = ['sm','md','lg'];
-  const sizes = ensureTempsGainsBlockSizes();
-  let idx = order3.indexOf(sizes[key]||'lg');
-  idx = Math.max(0, Math.min(order3.length-1, idx+delta));
-  sizes[key] = order3[idx];
-  state.settings.tempsGainsBlockSizes = sizes;
-  persist('settings');
-  render();
-}
-let tgBlockDragKey = null;
-function tgBlockDragStart(ev, key){
-  tgBlockDragKey = key;
-  ev.dataTransfer.effectAllowed = 'move';
-  try{ ev.dataTransfer.setData('text/plain', key); }catch(e){}
-  ev.currentTarget.classList.add('dragging');
-}
-function tgBlockDragOver(ev){ ev.preventDefault(); ev.dataTransfer.dropEffect='move'; ev.currentTarget.classList.add('drag-over'); }
-function tgBlockDragLeave(ev){ ev.currentTarget.classList.remove('drag-over'); }
-function tgBlockDragEnd(ev){
-  ev.currentTarget.classList.remove('dragging');
-  document.querySelectorAll('.tg-block.drag-over').forEach(el=>el.classList.remove('drag-over'));
-}
-function tgBlockDrop(ev, targetKey){
-  ev.preventDefault();
-  ev.currentTarget.classList.remove('drag-over');
-  if(!tgBlockDragKey || tgBlockDragKey===targetKey) return;
-  const order = ensureTempsGainsBlockOrder();
-  const from = order.indexOf(tgBlockDragKey);
-  const to = order.indexOf(targetKey);
-  if(from<0||to<0) return;
-  order.splice(from,1);
-  order.splice(to,0,tgBlockDragKey);
-  state.settings.tempsGainsBlockOrder = order;
-  tgBlockDragKey = null;
-  persist('settings');
-  render();
 }
 
 /* ---- Import d'un fichier .ics (alternative sans Outlook : export standard de tout calendrier) ---- */
