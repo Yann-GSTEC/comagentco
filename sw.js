@@ -1,8 +1,11 @@
 // Service worker de ComAgentCo.
-// Stratégie : "réseau d'abord" — en ligne, on va toujours chercher la dernière version déposée sur
-// GitHub Pages (donc vos mises à jour s'appliquent automatiquement, sans réinstallation). Hors ligne,
-// on retombe sur la dernière version mise en cache.
-const CACHE_NAME = 'comagentco-cache-v2';
+// Stratégie : "réseau d'abord" pour les fichiers de l'application elle-même — en ligne, on va toujours
+// chercher la dernière version déposée sur GitHub Pages (vos mises à jour s'appliquent donc
+// automatiquement, sans réinstallation). Hors ligne, on retombe sur la dernière version en cache.
+// IMPORTANT : ce service worker ne touche QUE aux fichiers hébergés sur ce même site (comagentco.html,
+// manifest, icônes). Toute requête vers un autre site (bibliothèques CDN, Microsoft Graph, lien .ics,
+// etc.) n'est jamais interceptée et suit son chemin normal, sans passer par ce cache.
+const CACHE_NAME = 'comagentco-cache-v3';
 const CORE_ASSETS = [
   './comagentco.html',
   './manifest.json',
@@ -30,17 +33,18 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  // On laisse passer, sans y toucher, toute requête qui ne vise pas ce même site (CDN, Microsoft Graph,
+  // agenda .ics…) : ne pas appeler respondWith() ici revient à laisser le navigateur la traiter normalement.
+  if (new URL(event.request.url).origin !== self.location.origin) return;
 
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // Copie la réponse fraîche dans le cache pour le prochain accès hors-ligne.
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(()=>{});
         return response;
       })
       .catch(() =>
-        // Hors-ligne (ou requête échouée) : on sert la dernière version connue en cache.
         caches.match(event.request).then((cached) => cached || caches.match('./comagentco.html'))
       )
   );
