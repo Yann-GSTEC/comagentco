@@ -2979,7 +2979,7 @@ function deleteClient(id){
   showToast('Client supprimé.');
 }
 let historyNoteSelectedBrands = [];
-function openClientDetail(id){
+function openClientDetail(id, scrollToSuivi){
   const c = state.clients.find(x=>x.id===id);
   if(!c) return;
   historyNoteSelectedBrands = [];
@@ -3029,7 +3029,7 @@ function openClientDetail(id){
       <div class="section-title">Personnes à contacter</div>
       <div class="helper" style="margin-bottom:14px;">Aucun contact enregistré pour ce client. <a href="#" onclick="event.preventDefault(); openClientForm('${c.id}');">+ Ajouter un contact</a></div>`}
 
-      <div class="section-title" style="display:flex;align-items:center;gap:10px;">
+      <div class="section-title" id="suiviCommercialAnchor" style="display:flex;align-items:center;gap:10px;">
         <span>Suivi commercial</span>
         <button class="btn btn-brass btn-sm" onclick="openAddHistoryNoteModal('${c.id}')">+ Ajouter un rendez-vous</button>
       </div>
@@ -3072,7 +3072,13 @@ function openClientDetail(id){
       <button class="btn" onclick="closeModal()">Fermer</button>
       <button class="btn btn-primary" onclick="closeModal();openDevisForm(null,'${c.id}')">+ Nouveau devis</button>
     </div>
-  `, {lg:true});
+  `, {full:true});
+  if(scrollToSuivi){
+    setTimeout(()=>{
+      const el = document.getElementById('suiviCommercialAnchor');
+      if(el) el.scrollIntoView({block:'start'});
+    }, 50);
+  }
 }
 function renderHistoryBrandChips(){
   return state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>{
@@ -9041,7 +9047,7 @@ function renderTempsGains(){
       <thead><tr><th>Client</th><th>Visites</th><th>Temps</th><th>CA généré</th><th>Importance</th></tr></thead>
       <tbody>
         ${rows.map(r=>`
-          <tr style="cursor:pointer;" onclick="openClientDetail('${r.client.id}')">
+          <tr style="cursor:pointer;" onclick="openClientDetail('${r.client.id}', true)">
             <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
             <td class="num">${r.visites}</td>
             <td class="num">${fmtDuree(r.minutes)}</td>
@@ -9056,12 +9062,12 @@ function renderTempsGains(){
   <div>
     <div class="section-title">Importance par marque <span class="helper" style="display:inline;">(CA et commission de l'onglet Commissions)</span></div>
     ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période","Cochez une ou plusieurs marques sur vos rendez-vous (fiche client → note de suivi) et renseignez le CA/la commission dans l'onglet Commissions."):`
-    <div class="helper" style="margin-bottom:10px;">Note combinant les <strong>trois critères</strong> : temps passé, CA et commission par heure investie — la moyenne des notes CA/heure et Commission/heure, chacune comparée à la meilleure marque de la période. Une marque à fort CA mais à faible taux de commission n'est ainsi plus mise en avant artificiellement.</div>
+    <div class="helper" style="margin-bottom:10px;">Note combinant les <strong>trois critères</strong> : temps passé, CA et commission par heure investie — la moyenne des notes CA/heure et Commission/heure, chacune comparée à la meilleure marque de la période. Une marque à fort CA mais à faible taux de commission n'est ainsi plus mise en avant artificiellement. Cliquez sur une ligne pour corriger le CA, la commission ou le temps passé.</div>
     <div class="card table-wrap"><table>
       <thead><tr><th>Marque</th><th>Visites</th><th>Temps</th><th>CA (Commissions)</th><th>Commission</th><th>Importance</th></tr></thead>
       <tbody>
         ${brandRows.map(r=>`
-          <tr>
+          <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
             <td style="font-weight:600;"><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
             <td class="num">${r.visites}</td>
             <td class="num">${fmtDuree(r.minutes)}</td>
@@ -9164,6 +9170,83 @@ function isIcsUidAlreadyImported(uid){
   if(inClients) return true;
   return state.brands.some(b=>(b.history||[]).some(h=>h.icsUid===uid));
 }
+/* ---- Modifier les données d'une marque depuis le tableau Temps/Gains ---- */
+function openBrandTempsGainsModal(brandId){
+  const b = state.brands.find(x=>x.id===brandId);
+  if(!b) return;
+  const year = ui.tempsGainsYear||new Date().getFullYear(), month = ui.tempsGainsMonth||0;
+  b.history = b.history || [];
+  const periodLabel = month ? `${MOIS_LABELS[month-1]} ${year}` : `Année ${year}`;
+  const monthsToShow = month ? [month] : Array.from({length:12},(_,i)=>i+1);
+  openModal(`
+    <div class="modal-head"><h3>${escapeHtml(b.name)} — ${escapeHtml(periodLabel)}</h3><button class="close-x" onclick="closeModal(); render();">✕</button></div>
+    <div class="modal-body">
+      <div class="section-title">CA et commission <span class="helper" style="display:inline;">(onglet Commissions)</span></div>
+      <div class="table-wrap" style="margin-bottom:20px;"><table>
+        <thead><tr><th>Mois</th><th>CA</th><th>Commission</th></tr></thead>
+        <tbody>
+          ${monthsToShow.map(m=>{
+            const entry = getCommissionEntry(brandId, year, m);
+            return `<tr>
+              <td>${escapeHtml(MOIS_LABELS[m-1])}</td>
+              <td><input type="number" step="0.01" value="${entry.ca||''}" placeholder="0" onchange="setCommissionEntry('${brandId}', ${year}, ${m}, 'ca', this.value);"></td>
+              <td><input type="number" step="0.01" value="${entry.commission||''}" placeholder="0" onchange="setCommissionEntry('${brandId}', ${year}, ${m}, 'commission', this.value);"></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table></div>
+      <div class="section-title">Temps passé directement avec la marque <span class="helper" style="display:inline;">(hors visites clients — celles-ci se modifient depuis la fiche du client concerné)</span></div>
+      <div id="brandHistoryWrap">${renderBrandHistoryRows(b, year, month)}</div>
+      <button class="btn btn-sm btn-ghost" style="margin-top:10px;" onclick="addBrandHistoryEntry('${brandId}')">+ Ajouter une entrée de temps</button>
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="closeModal(); render();">Fermer</button></div>
+  `, {full:true});
+}
+function renderBrandHistoryRows(b, year, month){
+  const entries = (b.history||[]).filter(h=>periodMatchesReport(h.date, year, month)).sort((a,c)=>c.date.localeCompare(a.date));
+  if(entries.length===0) return '<div class="helper">Aucune entrée directe sur cette période.</div>';
+  return `<div class="table-wrap"><table>
+    <thead><tr><th style="width:150px;">Date</th><th>Texte</th><th style="width:120px;">Durée (min)</th><th></th></tr></thead>
+    <tbody>
+      ${entries.map(h=>`<tr>
+        <td><input type="date" value="${h.date}" onchange="updateBrandHistoryField('${b.id}','${h.id}','date',this.value)"></td>
+        <td><input type="text" value="${escapeHtml(h.text||'')}" onchange="updateBrandHistoryField('${b.id}','${h.id}','text',this.value)"></td>
+        <td><input type="number" min="0" step="5" value="${h.duree||0}" onchange="updateBrandHistoryField('${b.id}','${h.id}','duree',this.value)"></td>
+        <td><button class="btn btn-sm btn-ghost btn-danger" onclick="deleteBrandHistoryEntry('${b.id}','${h.id}')">✕</button></td>
+      </tr>`).join('')}
+    </tbody>
+  </table></div>`;
+}
+function updateBrandHistoryField(brandId, historyId, field, value){
+  const b = state.brands.find(x=>x.id===brandId);
+  if(!b) return;
+  const h = (b.history||[]).find(x=>x.id===historyId);
+  if(!h) return;
+  h[field] = field==='duree' ? (parseInt(value,10)||0) : value;
+  persist('brands');
+  const wrap = document.getElementById('brandHistoryWrap');
+  if(wrap) wrap.innerHTML = renderBrandHistoryRows(b, ui.tempsGainsYear||new Date().getFullYear(), ui.tempsGainsMonth||0);
+}
+function deleteBrandHistoryEntry(brandId, historyId){
+  const b = state.brands.find(x=>x.id===brandId);
+  if(!b) return;
+  b.history = (b.history||[]).filter(h=>h.id!==historyId);
+  persist('brands');
+  const wrap = document.getElementById('brandHistoryWrap');
+  if(wrap) wrap.innerHTML = renderBrandHistoryRows(b, ui.tempsGainsYear||new Date().getFullYear(), ui.tempsGainsMonth||0);
+}
+function addBrandHistoryEntry(brandId){
+  const b = state.brands.find(x=>x.id===brandId);
+  if(!b) return;
+  b.history = b.history || [];
+  const year = ui.tempsGainsYear||new Date().getFullYear(), month = ui.tempsGainsMonth||0;
+  const defaultDate = month ? `${year}-${String(month).padStart(2,'0')}-01` : todayStr();
+  b.history.push({id:uid(), date:defaultDate, text:'', duree:30});
+  persist('brands');
+  const wrap = document.getElementById('brandHistoryWrap');
+  if(wrap) wrap.innerHTML = renderBrandHistoryRows(b, year, month);
+}
+
 function openImportIcsPicker(){
   const input = document.createElement('input');
   input.type = 'file';
