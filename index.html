@@ -9151,15 +9151,13 @@ function renderTempsGains(){
     </table></div>`}
     `,
   };
-  const blockOrder = ['client','marqueCA','marqueCommission'];
-  const blocksHtml = blockOrder.map(key=>{
-    const cols = 2;
-    const rowStyle = key==='client' ? 'grid-row:span 2;' : '';
-    return `
-    <div class="card card-pad" style="grid-column:span ${cols};${rowStyle}">
-      ${blockContent[key]}
+  const blocksHtml = `
+    <div class="card card-pad">${blockContent.client}</div>
+    <div>
+      <div class="card card-pad" style="margin-bottom:16px;">${blockContent.marqueCA}</div>
+      <div class="card card-pad">${blockContent.marqueCommission}</div>
     </div>
-  `;}).join('');
+  `;
 
   return `
   <div class="topbar">
@@ -9223,7 +9221,7 @@ function renderTempsGains(){
     <div class="card kpi"><div class="label">CA total généré</div><div class="value num" style="color:var(--success);">${fmtMoney(totalCa)}</div></div>
   </div>
 
-  <div class="dash-grid">${blocksHtml}</div>
+  <div class="settings-top-grid" style="align-items:start;">${blocksHtml}</div>
   `;
 }
 
