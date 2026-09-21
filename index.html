@@ -8945,7 +8945,10 @@ function renderTempsGains(){
     clientsScope.forEach(c=>{
       (c.history||[]).forEach(h=>{
         if(periodMatchesReport(h.date, year, month) && historyBrandIds(h).includes(b.id)){
-          minutes += h.duree||0;
+          // Le temps du rendez-vous est réparti entre les marques cochées (ex. 60 min sur 3 marques =
+          // 20 min chacune), pour ne pas compter plusieurs fois le même temps sur chaque marque.
+          const brandCount = historyBrandIds(h).length || 1;
+          minutes += (h.duree||0) / brandCount;
           visites++;
         }
       });
