@@ -9084,6 +9084,7 @@ function parseIcsFile(text){
     else if(key==='LOCATION') cur.location = icsUnescape(value);
     else if(key==='DTSTART') cur.dtstart = value;
     else if(key==='DTEND') cur.dtend = value;
+    else if(key==='UID') cur.uid = value.trim();
     else if(key==='ATTENDEE'){ cur.attendees = cur.attendees||[]; cur.attendees.push(icsUnescape(value)); }
   });
   return events;
@@ -9100,47 +9101,36 @@ function parseIcsDate(raw){
   if(z) return new Date(Date.UTC(+y,+mo-1,+d,+h,+mi,+s));
   return new Date(+y,+mo-1,+d,+h,+mi,+s); // heure locale approximative si le fichier n'indique pas "Z"
 }
-function findClientByObjetMatch(haystack){
-  // Deuxième passe si le nom de société n'a rien donné : compare les mots significatifs de l'objet de
-  // chacun de vos devis à ceux du rendez-vous (ex. un RDV "Suivi Pantomeca" retrouvé via l'objet de devis
-  // "Affaire PANTOMECA NIORT"), plutôt que d'exiger une correspondance exacte du nom de société.
-  const stopwords = new Set(['DEMANDE','PRIX','OFFRE','DEVIS','MARCHE','MARCHÉ','AFFAIRE','POUR','AVEC','DANS','CETTE','CONCERNANT','POLE','PÔLE']);
-  let bestDevis = null, bestScore = 0;
-  state.devis.forEach(d=>{
-    const objet = (d.objet||'').trim().toUpperCase();
-    if(!objet) return;
-    const words = objet.split(/[^A-ZÀ-Ÿ0-9]+/).filter(w=>w.length>=4 && !stopwords.has(w));
-    let score = 0;
-    words.forEach(w=>{ if(haystack.includes(w)) score += w.length; });
-    if(score>bestScore){ bestScore = score; bestDevis = d; }
-  });
-  return (bestDevis && bestScore>=4) ? (state.clients.find(c=>c.id===bestDevis.clientId)||null) : null;
-}
 function buildIcsMatchedRows(events){
   return events.map(ev=>{
     const start = parseIcsDate(ev.dtstart);
     const end = parseIcsDate(ev.dtend);
-    const haystack = `${ev.summary||''} ${ev.location||''} ${(ev.attendees||[]).join(' ')}`.toUpperCase();
+    // Recherche uniquement dans l'objet (titre) du rendez-vous lui-même — ni le lieu/les participants,
+    // ni les devis, ne sont utilisés pour deviner le client ou la marque.
+    const haystack = (ev.summary||'').toUpperCase();
     let bestClient = null, bestLen = 0;
     state.clients.forEach(c=>{
       const label = (c.company||c.name||'').trim();
       if(label.length<=3) return;
       if(haystack.includes(label.toUpperCase()) && label.length>bestLen){ bestLen = label.length; bestClient = c; }
     });
-    // Marque : certains rendez-vous concernent une marque (réunion fournisseur, formation…) et non un
-    // client précis — un nom de marque trouvé explicitement dans le titre est un signal plus fiable que
-    // la correspondance approximative par objet de devis ci-dessous, donc on le teste avant.
     let bestBrand = null, bestBrandLen = 0;
     state.brands.forEach(b=>{
       if(!b.name || b.name.length<=3) return;
       if(haystack.includes(b.name.toUpperCase()) && b.name.length>bestBrandLen){ bestBrandLen = b.name.length; bestBrand = b; }
     });
-    if(!bestClient && !bestBrand) bestClient = findClientByObjetMatch(haystack);
     let dureeMin = 30;
     if(start && end && end>start) dureeMin = Math.round((end-start)/60000);
     const dateStr = start ? start.toISOString().slice(0,10) : todayStr();
-    return { subject: ev.summary||'', clientId: bestClient?bestClient.id:'', brandId: bestBrand?bestBrand.id:'', dureeMin, dateStr, include: !!(bestClient||bestBrand) };
-  }).filter(m=>!m.subject || !/^(déjeuner|pause|congés?|absence|rdv perso)/i.test(m.subject));
+    const alreadyImported = ev.uid ? isIcsUidAlreadyImported(ev.uid) : false;
+    return { subject: ev.summary||'', clientId: bestClient?bestClient.id:'', brandId: bestBrand?bestBrand.id:'', dureeMin, dateStr, uid: ev.uid||'', alreadyImported, include: !!(bestClient||bestBrand) && !alreadyImported };
+  }).filter(m=>!m.subject || !/\b(déjeuner|pause|congés?|absence|rdv perso|route|trajet|d[ée]placement|autoroute|p[ée]age|parking|essence|carburant|h[ôo]tel|restaurant|d[îi]ner|petit.?d[ée]jeuner)\b/i.test(m.subject));
+}
+function isIcsUidAlreadyImported(uid){
+  if(!uid) return false;
+  const inClients = state.clients.some(c=>(c.history||[]).some(h=>h.icsUid===uid));
+  if(inClients) return true;
+  return state.brands.some(b=>(b.history||[]).some(h=>h.icsUid===uid));
 }
 function openImportIcsPicker(){
   const input = document.createElement('input');
@@ -9287,10 +9277,11 @@ let agendaImportRows = [];
 function openAgendaImportReview(matched){
   agendaImportRows = matched;
   const notMatched = matched.filter(m=>!m.clientId && !m.brandId).length;
+  const alreadyCount = matched.filter(m=>m.alreadyImported).length;
   openModal(`
     <div class="modal-head"><h3>Vérifier avant d'enregistrer</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
-      <div class="helper" style="margin-bottom:12px;">${matched.length} événement(s) trouvé(s)${notMatched?`, dont ${notMatched} sans client ni marque identifié automatiquement — choisissez-en un manuellement ou décochez la ligne`:''}. Décochez ce que vous ne souhaitez pas importer. Certains rendez-vous concernent une marque plutôt qu'un client précis (réunion fournisseur, formation…) : renseignez la colonne correspondante.</div>
+      <div class="helper" style="margin-bottom:12px;">${matched.length} événement(s) trouvé(s)${notMatched?`, dont ${notMatched} sans client ni marque identifié automatiquement — choisissez-en un manuellement ou décochez la ligne`:''}${alreadyCount?`, dont ${alreadyCount} déjà importé(s) précédemment (décochés automatiquement, grisés)`:''}. Décochez ce que vous ne souhaitez pas importer. Certains rendez-vous concernent une marque plutôt qu'un client précis (réunion fournisseur, formation…) : renseignez la colonne correspondante.</div>
       <div id="agendaImportRowsWrap" style="max-height:65vh;overflow-y:auto;">${renderAgendaImportRows()}</div>
     </div>
     <div class="modal-foot">
@@ -9305,10 +9296,10 @@ function renderAgendaImportRows(){
     <thead><tr><th style="width:30px;"></th><th>Date</th><th>Événement</th><th>Client</th><th>Marque</th><th style="width:120px;">Durée (min)</th></tr></thead>
     <tbody>
       ${agendaImportRows.map((m,i)=>`
-        <tr>
+        <tr${m.alreadyImported?' style="opacity:.5;"':''}>
           <td><input type="checkbox" ${m.include?'checked':''} onchange="agendaImportRows[${i}].include=this.checked;"></td>
           <td>${fmtDate(m.dateStr)}</td>
-          <td>${escapeHtml(m.subject||'—')}</td>
+          <td>${escapeHtml(m.subject||'—')}${m.alreadyImported?' <span class="helper" style="display:inline;">(déjà importé)</span>':''}</td>
           <td><select onchange="agendaImportRows[${i}].clientId=this.value; agendaImportRows[${i}].include=!!(this.value||agendaImportRows[${i}].brandId);">
             <option value="">— Aucun —</option>
             ${state.clients.slice().sort((a,b)=>clientDisplayName(a).localeCompare(clientDisplayName(b))).map(c=>`<option value="${c.id}" ${m.clientId===c.id?'selected':''}>${escapeHtml(clientDisplayName(c))}</option>`).join('')}
@@ -9331,7 +9322,7 @@ function confirmAgendaImport(){
       const c = state.clients.find(x=>x.id===m.clientId);
       if(c){
         c.history = c.history || [];
-        c.history.push({ id:uid(), date:m.dateStr, text: `Rendez-vous (importé de l'agenda) : ${m.subject||'Sans titre'}`, brandIds: m.brandId?[m.brandId]:[], typeVisite:'', duree:m.dureeMin, taches:[], personnesVues:[] });
+        c.history.push({ id:uid(), date:m.dateStr, text: `Rendez-vous (importé de l'agenda) : ${m.subject||'Sans titre'}`, brandIds: m.brandId?[m.brandId]:[], typeVisite:'', duree:m.dureeMin, taches:[], personnesVues:[], icsUid:m.uid||'' });
         added++; addedClients++; clientsTouched = true;
       }
     } else if(m.brandId){
@@ -9340,7 +9331,7 @@ function confirmAgendaImport(){
       const b = state.brands.find(x=>x.id===m.brandId);
       if(b){
         b.history = b.history || [];
-        b.history.push({ id:uid(), date:m.dateStr, text: `Rendez-vous (importé de l'agenda) : ${m.subject||'Sans titre'}`, duree:m.dureeMin });
+        b.history.push({ id:uid(), date:m.dateStr, text: `Rendez-vous (importé de l'agenda) : ${m.subject||'Sans titre'}`, duree:m.dureeMin, icsUid:m.uid||'' });
         added++; addedBrands++; brandsTouched = true;
       }
     }
