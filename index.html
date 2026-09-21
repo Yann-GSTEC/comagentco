@@ -5283,6 +5283,16 @@ function renderParametres(){
       <button class="btn btn-ghost btn-danger" onclick="forgetBackupFolder()">Oublier ce dossier</button>`:''}
     </div>
     <div class="divider"></div>
+    <div class="section-title">Modèle de message d'envoi des devis</div>
+    <div class="helper" style="margin-bottom:10px;">
+      Texte utilisé par défaut dans le message d'envoi d'un devis par email (modifiable au cas par cas à chaque envoi). Variables disponibles : <code>{greeting}</code> (la formule d'appel, avec le contact "À l'attention de" du devis si renseigné), <code>{type}</code> (devis/marché), <code>{numero}</code>, <code>{objet}</code> (ajoute automatiquement " concernant : ..." si l'objet est renseigné, sinon rien).
+    </div>
+    <textarea id="s_emailTemplate" rows="5" style="margin-bottom:8px;">${escapeHtml(s.emailMessageTemplate||DEFAULT_EMAIL_TEMPLATE)}</textarea>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-sm btn-brass" onclick="saveEmailTemplate()">Enregistrer le modèle</button>
+      <button class="btn btn-sm btn-ghost" onclick="document.getElementById('s_emailTemplate').value=DEFAULT_EMAIL_TEMPLATE;">↺ Revenir au modèle par défaut</button>
+    </div>
+    <div class="divider"></div>
     <div class="section-title">Sauvegarde manuelle</div>
     <div class="helper" style="margin-bottom:10px;">À utiliser dans tous les cas en complément (ou sur Firefox/Safari) : télécharge un fichier que vous pouvez déposer vous-même dans votre dossier OneDrive.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -5490,6 +5500,27 @@ function deleteParamItem(listKey, id){
   updateParamListOnly();
   showToast('Élément supprimé.');
 }
+const DEFAULT_EMAIL_TEMPLATE = `{greeting}
+
+Veuillez trouver ci-joint notre {type} n° {numero}{objet}.
+
+N'hésitez pas à revenir vers nous pour toute question.`;
+function buildDevisEmailBody(d){
+  const template = state.settings.emailMessageTemplate || DEFAULT_EMAIL_TEMPLATE;
+  const greeting = 'Bonjour' + (d.attentionA ? ' '+d.attentionA : '') + ',';
+  const objetPart = d.objet ? ' concernant : '+d.objet : '';
+  return template
+    .replace(/\{greeting\}/g, greeting)
+    .replace(/\{type\}/g, (d.type||'devis').toLowerCase())
+    .replace(/\{numero\}/g, d.number)
+    .replace(/\{objet\}/g, objetPart);
+}
+function saveEmailTemplate(){
+  const val = document.getElementById('s_emailTemplate').value;
+  state.settings.emailMessageTemplate = val;
+  persist('settings');
+  showToast('Modèle de message enregistré.');
+}
 function saveSettings(){
   Object.assign(state.settings, {
     companyName: document.getElementById('s_name').value.trim(),
@@ -5506,6 +5537,7 @@ function saveSettings(){
     validiteDevisMois: parseInt(document.getElementById('s_validiteDevisMois').value)||0,
     validiteMarcheAnneesSupp: parseInt(document.getElementById('s_validiteMarcheAnnees').value)||0,
     icsCalendarUrl: document.getElementById('s_icsUrl').value.trim(),
+    emailMessageTemplate: document.getElementById('s_emailTemplate').value,
   });
   persist('settings');
   render();
@@ -8233,14 +8265,18 @@ function openSendDevisModal(id){
   const contacts = c ? (c.contacts||[]) : [];
   const attentionContact = d.attentionA ? contacts.find(p=>contactFullName(p)===d.attentionA) : null;
   const clientEmail = (attentionContact && attentionContact.email) || (primaryContact(c||{}) && primaryContact(c||{}).email) || '';
-  const defaultSubject = `${d.type||'Devis'} ${d.number}${d.objet?' — '+d.objet:''}`;
+  const defaultSubject = (()=>{
+    const brandLabels = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean).map(id=>brandName(id)).filter(Boolean);
+    const brandPrefix = brandLabels.length ? brandLabels.join(' + ')+' / ' : '';
+    return `${brandPrefix}${d.type||'Devis'} ${d.number}${d.objet?' / '+d.objet:''}`;
+  })();
   const involvedBrandIds = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean);
   const soleBrand = involvedBrandIds.length===1 ? state.brands.find(b=>b.id===involvedBrandIds[0]) : null;
   const hasCustomSignature = soleBrand && (soleBrand.emailSignatureHtml||'').trim();
   const fallbackSignatureText = `Cordialement,\n${state.settings.representantNom||state.settings.companyName||''}`;
   const signaturePlain = hasCustomSignature ? (soleBrand.emailSignature||'').trim() : fallbackSignatureText;
   const signatureHtmlForPreview = hasCustomSignature ? soleBrand.emailSignatureHtml : escapeHtmlBody(fallbackSignatureText);
-  const defaultBody = `Bonjour${d.attentionA?' '+d.attentionA:''},\n\nVeuillez trouver ci-joint notre ${(d.type||'devis').toLowerCase()} n° ${d.number}${d.objet?' concernant : '+d.objet:''}.\n\nN'hésitez pas à revenir vers nous pour toute question.\n\n${signaturePlain}`;
+  const defaultBody = `${buildDevisEmailBody(d)}\n\n${signaturePlain}`;
   const connected = !!state.settings.outlookAccountName;
   openModal(`
     <div class="modal-head"><h3>Envoyer le devis ${escapeHtml(d.number)} par email</h3><button class="close-x" onclick="closeModal()">✕</button></div>
@@ -8256,7 +8292,7 @@ function openSendDevisModal(id){
       `}
       <div class="field"><label>Destinataire(s) *</label><input type="text" id="sendmail_to" value="${escapeHtml(clientEmail)}" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
       <div class="field"><label>Objet</label><input type="text" id="sendmail_subject" value="${escapeHtml(defaultSubject)}"></div>
-      <div class="field"><label>Message</label><textarea id="sendmail_body" rows="6">Bonjour${d.attentionA?' '+d.attentionA:''},\n\nVeuillez trouver ci-joint notre ${(d.type||'devis').toLowerCase()} n° ${d.number}${d.objet?' concernant : '+d.objet:''}.\n\nN'hésitez pas à revenir vers nous pour toute question.</textarea></div>
+      <div class="field"><label>Message</label><textarea id="sendmail_body" rows="6">${escapeHtml(defaultBody)}</textarea></div>
       <div class="field">
         <label>Signature ${hasCustomSignature?`— ${escapeHtml(soleBrand.name)}`:'par défaut'} <span class="helper" style="display:inline;">${connected?'(jointe automatiquement, images comprises)':'(le texte sera ajouté ; les images ne peuvent pas s\'afficher en mode gratuit sans Outlook)'}</span></label>
         <div class="signature-editor" style="background:var(--surface-2);">${signatureHtmlForPreview}</div>
@@ -9554,6 +9590,7 @@ function clientLastVisitDate(c){
 function renderSuiviRelances(){
   const relanceDevisJours = ui.relanceDevisJours||15;
   const relanceClientJours = ui.relanceClientJours||60;
+  const expanded = ui.suiviRelancesExpanded||null; // 'devis' | 'validite' | 'clients' | null
 
   // 1. Devis à relancer : envoyés, ni gagnés ni perdus, depuis plus de X jours.
   const devisARelancer = state.devis.filter(d=>{
@@ -9581,13 +9618,19 @@ function renderSuiviRelances(){
   }).filter(r=>r.days==null || r.days>=relanceClientJours)
     .sort((a,b)=>(b.days==null?999999:b.days)-(a.days==null?999999:a.days));
 
+  const devisShown = expanded==='devis' ? devisARelancer : devisARelancer.slice(0,10);
+  const validiteShown = expanded==='validite' ? validiteExpiree : validiteExpiree.slice(0,10);
+  const clientsShown = expanded==='clients' ? clientsNonVisites : clientsNonVisites.slice(0,10);
+
+  const toggleCard = (key)=> `ui.suiviRelancesExpanded=(ui.suiviRelancesExpanded==='${key}'?null:'${key}'); render();`;
+
   return `
-  <div class="topbar"><div><h1>Suivi et relances</h1><div class="sub">Ce qui mérite votre attention : devis sans réponse, validités dépassées, clients délaissés</div></div></div>
+  <div class="topbar"><div><h1>Suivi et relances</h1><div class="sub">Ce qui mérite votre attention : devis sans réponse, validités dépassées, clients délaissés — cliquez sur une carte pour voir le détail complet, sinon seules les 10 lignes les plus urgentes sont affichées.</div></div></div>
 
   <div class="grid grid-4" style="margin-bottom:24px;">
-    <div class="card kpi"><div class="label">Devis à relancer</div><div class="value num" style="color:${devisARelancer.length?'var(--danger)':'inherit'};">${devisARelancer.length}</div></div>
-    <div class="card kpi"><div class="label">Validités expirées</div><div class="value num" style="color:${validiteExpiree.length?'var(--danger)':'inherit'};">${validiteExpiree.length}</div></div>
-    <div class="card kpi"><div class="label">Clients délaissés</div><div class="value num" style="color:${clientsNonVisites.length?'#D9782D':'inherit'};">${clientsNonVisites.length}</div></div>
+    <div class="card kpi" style="cursor:pointer;${expanded==='devis'?'box-shadow:0 0 0 2px var(--accent) inset;':''}" onclick="${toggleCard('devis')}"><div class="label">Devis à relancer</div><div class="value num" style="color:${devisARelancer.length?'var(--danger)':'inherit'};">${devisARelancer.length}</div></div>
+    <div class="card kpi" style="cursor:pointer;${expanded==='validite'?'box-shadow:0 0 0 2px var(--accent) inset;':''}" onclick="${toggleCard('validite')}"><div class="label">Validités expirées</div><div class="value num" style="color:${validiteExpiree.length?'var(--danger)':'inherit'};">${validiteExpiree.length}</div></div>
+    <div class="card kpi" style="cursor:pointer;${expanded==='clients'?'box-shadow:0 0 0 2px var(--accent) inset;':''}" onclick="${toggleCard('clients')}"><div class="label">Clients délaissés</div><div class="value num" style="color:${clientsNonVisites.length?'#D9782D':'inherit'};">${clientsNonVisites.length}</div></div>
   </div>
 
   <div class="section-title" style="display:flex;align-items:center;gap:10px;">
@@ -9597,10 +9640,12 @@ function renderSuiviRelances(){
     <span class="helper" style="display:inline;">jours, sans être gagnés ni perdus</span>
   </div>
   ${devisARelancer.length===0?emptyState('✅',"Rien à relancer","Tous vos devis envoyés ont été traités ou sont encore récents."):`
-  <div class="card table-wrap" style="margin-bottom:28px;"><table>
-    <thead><tr><th>N°</th><th>Client</th><th>Objet</th><th>Envoyé le</th><th>Jours sans réponse</th><th class="num">Total HT</th><th></th></tr></thead>
+  <div class="card table-wrap" style="margin-bottom:6px;"><table>
+    <thead><tr><th>N°</th><th>Client</th><th>Objet</th><th>Envoyé le</th><th>Jours sans réponse</th><th class="num">Total HT</th><th>État de l'affaire</th><th></th></tr></thead>
     <tbody>
-      ${devisARelancer.map(r=>`
+      ${devisShown.map(r=>{
+        const oc = etatAffaireColor(etatAffaireOutcome(r.d));
+        return `
         <tr style="cursor:pointer;" onclick="openDevisForm('${r.d.id}')">
           <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(r.d.number)}</td>
           <td>${escapeHtml(clientSocieteLabel(r.d.clientId))}</td>
@@ -9608,18 +9653,26 @@ function renderSuiviRelances(){
           <td>${fmtDate(r.sent)}</td>
           <td style="font-weight:700;color:var(--danger);">${r.days} j</td>
           <td class="num" style="font-weight:600;">${fmtMoney(devisTotal(r.d).ht)}</td>
+          <td onclick="event.stopPropagation();">
+            <select onchange="changeDevisEtatAffaire('${r.d.id}', this.value)" style="width:auto;padding:4px 8px;font-size:11.5px;font-weight:700;border-radius:20px;background:${oc.bg};color:${oc.fg};border-color:transparent;">
+              <option value="" ${!r.d.etatAffaire?'selected':''}>—</option>
+              ${(state.paramLists.etatAffaires||[]).map(e=>`<option value="${escapeHtml(e.libelle)}" ${r.d.etatAffaire===e.libelle?'selected':''}>${escapeHtml(e.libelle)}</option>`).join('')}
+            </select>
+          </td>
           <td onclick="event.stopPropagation();"><button class="btn btn-sm btn-brass" onclick="openDevisForm('${r.d.id}')">Relancer</button></td>
-        </tr>
-      `).join('')}
+        </tr>`;
+      }).join('')}
     </tbody>
-  </table></div>`}
+  </table></div>
+  ${expanded!=='devis' && devisARelancer.length>10?`<div class="helper" style="margin-bottom:28px;">${devisARelancer.length-10} de plus — cliquez sur la carte "Devis à relancer" ci-dessus pour tout voir.</div>`:'<div style="margin-bottom:28px;"></div>'}
+  `}
 
   <div class="section-title">⏳ Validités expirées <span class="helper" style="display:inline;">— toujours "en cours" mais la date de validité est dépassée</span></div>
   ${validiteExpiree.length===0?emptyState('✅',"Aucune validité expirée","Tous vos devis en cours restent dans leur période de validité."):`
-  <div class="card table-wrap" style="margin-bottom:28px;"><table>
+  <div class="card table-wrap" style="margin-bottom:6px;"><table>
     <thead><tr><th>N°</th><th>Client</th><th>Objet</th><th>Validité expirée le</th><th>Jours de retard</th><th class="num">Total HT</th></tr></thead>
     <tbody>
-      ${validiteExpiree.map(r=>`
+      ${validiteShown.map(r=>`
         <tr style="cursor:pointer;" onclick="openDevisForm('${r.d.id}')">
           <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(r.d.number)}</td>
           <td>${escapeHtml(clientSocieteLabel(r.d.clientId))}</td>
@@ -9630,7 +9683,9 @@ function renderSuiviRelances(){
         </tr>
       `).join('')}
     </tbody>
-  </table></div>`}
+  </table></div>
+  ${expanded!=='validite' && validiteExpiree.length>10?`<div class="helper" style="margin-bottom:28px;">${validiteExpiree.length-10} de plus — cliquez sur la carte "Validités expirées" ci-dessus pour tout voir.</div>`:'<div style="margin-bottom:28px;"></div>'}
+  `}
 
   <div class="section-title" style="display:flex;align-items:center;gap:10px;">
     <span>🕸 Clients non visités depuis longtemps</span>
@@ -9642,7 +9697,7 @@ function renderSuiviRelances(){
   <div class="card table-wrap"><table>
     <thead><tr><th>Client</th><th>Dernière visite</th><th>Jours écoulés</th></tr></thead>
     <tbody>
-      ${clientsNonVisites.map(r=>`
+      ${clientsShown.map(r=>`
         <tr style="cursor:pointer;" onclick="openClientSuiviOnlyModal('${r.c.id}')">
           <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.c))}</td>
           <td>${r.last?fmtDate(r.last):'Jamais visité'}</td>
@@ -9650,7 +9705,9 @@ function renderSuiviRelances(){
         </tr>
       `).join('')}
     </tbody>
-  </table></div>`}
+  </table></div>
+  ${expanded!=='clients' && clientsNonVisites.length>10?`<div class="helper">${clientsNonVisites.length-10} de plus — cliquez sur la carte "Clients délaissés" ci-dessus pour tout voir.</div>`:''}
+  `}
   `;
 }
 
