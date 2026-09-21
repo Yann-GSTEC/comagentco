@@ -8923,6 +8923,13 @@ function renderTempsGains(){
         }
       });
     });
+    // Temps passé directement avec la marque (rendez-vous fournisseur, formation…), sans client précis.
+    (b.history||[]).forEach(h=>{
+      if(periodMatchesReport(h.date, year, month)){
+        minutes += h.duree||0;
+        visites++;
+      }
+    });
     const ca = month ? (getCommissionEntry(b.id, year, month).ca||0) : Array.from({length:12},(_,i)=>getCommissionEntry(b.id, year, i+1).ca||0).reduce((s,v)=>s+v,0);
     const heures = minutes/60;
     return { brand:b, minutes, visites, ca, heures };
@@ -9120,11 +9127,19 @@ function buildIcsMatchedRows(events){
       if(label.length<=3) return;
       if(haystack.includes(label.toUpperCase()) && label.length>bestLen){ bestLen = label.length; bestClient = c; }
     });
-    if(!bestClient) bestClient = findClientByObjetMatch(haystack);
+    // Marque : certains rendez-vous concernent une marque (réunion fournisseur, formation…) et non un
+    // client précis — un nom de marque trouvé explicitement dans le titre est un signal plus fiable que
+    // la correspondance approximative par objet de devis ci-dessous, donc on le teste avant.
+    let bestBrand = null, bestBrandLen = 0;
+    state.brands.forEach(b=>{
+      if(!b.name || b.name.length<=3) return;
+      if(haystack.includes(b.name.toUpperCase()) && b.name.length>bestBrandLen){ bestBrandLen = b.name.length; bestBrand = b; }
+    });
+    if(!bestClient && !bestBrand) bestClient = findClientByObjetMatch(haystack);
     let dureeMin = 30;
     if(start && end && end>start) dureeMin = Math.round((end-start)/60000);
     const dateStr = start ? start.toISOString().slice(0,10) : todayStr();
-    return { subject: ev.summary||'', clientId: bestClient?bestClient.id:'', dureeMin, dateStr, include: !!bestClient };
+    return { subject: ev.summary||'', clientId: bestClient?bestClient.id:'', brandId: bestBrand?bestBrand.id:'', dureeMin, dateStr, include: !!(bestClient||bestBrand) };
   }).filter(m=>!m.subject || !/^(déjeuner|pause|congés?|absence|rdv perso)/i.test(m.subject));
 }
 function openImportIcsPicker(){
@@ -9271,32 +9286,36 @@ async function runImportAgenda(){
 let agendaImportRows = [];
 function openAgendaImportReview(matched){
   agendaImportRows = matched;
-  const notMatched = matched.filter(m=>!m.clientId).length;
+  const notMatched = matched.filter(m=>!m.clientId && !m.brandId).length;
   openModal(`
     <div class="modal-head"><h3>Vérifier avant d'enregistrer</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
-      <div class="helper" style="margin-bottom:12px;">${matched.length} événement(s) trouvé(s)${notMatched?`, dont ${notMatched} sans client identifié automatiquement — choisissez-le manuellement ou décochez la ligne`:''}. Décochez ce que vous ne souhaitez pas importer.</div>
-      <div id="agendaImportRowsWrap" style="max-height:420px;overflow-y:auto;">${renderAgendaImportRows()}</div>
+      <div class="helper" style="margin-bottom:12px;">${matched.length} événement(s) trouvé(s)${notMatched?`, dont ${notMatched} sans client ni marque identifié automatiquement — choisissez-en un manuellement ou décochez la ligne`:''}. Décochez ce que vous ne souhaitez pas importer. Certains rendez-vous concernent une marque plutôt qu'un client précis (réunion fournisseur, formation…) : renseignez la colonne correspondante.</div>
+      <div id="agendaImportRowsWrap" style="max-height:65vh;overflow-y:auto;">${renderAgendaImportRows()}</div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal()">Annuler</button>
       <button class="btn btn-primary" onclick="confirmAgendaImport()">Enregistrer le temps passé</button>
     </div>
-  `, {lg:true});
+  `, {full:true});
 }
 function renderAgendaImportRows(){
   if(agendaImportRows.length===0) return '<div class="helper">Aucun événement sur cette période.</div>';
   return `<div class="table-wrap"><table>
-    <thead><tr><th style="width:30px;"></th><th>Date</th><th>Événement</th><th>Client</th><th style="width:120px;">Durée (min)</th></tr></thead>
+    <thead><tr><th style="width:30px;"></th><th>Date</th><th>Événement</th><th>Client</th><th>Marque</th><th style="width:120px;">Durée (min)</th></tr></thead>
     <tbody>
       ${agendaImportRows.map((m,i)=>`
         <tr>
           <td><input type="checkbox" ${m.include?'checked':''} onchange="agendaImportRows[${i}].include=this.checked;"></td>
           <td>${fmtDate(m.dateStr)}</td>
           <td>${escapeHtml(m.subject||'—')}</td>
-          <td><select onchange="agendaImportRows[${i}].clientId=this.value; agendaImportRows[${i}].include=!!this.value;">
-            <option value="">— Choisir —</option>
+          <td><select onchange="agendaImportRows[${i}].clientId=this.value; agendaImportRows[${i}].include=!!(this.value||agendaImportRows[${i}].brandId);">
+            <option value="">— Aucun —</option>
             ${state.clients.slice().sort((a,b)=>clientDisplayName(a).localeCompare(clientDisplayName(b))).map(c=>`<option value="${c.id}" ${m.clientId===c.id?'selected':''}>${escapeHtml(clientDisplayName(c))}</option>`).join('')}
+          </select></td>
+          <td><select onchange="agendaImportRows[${i}].brandId=this.value; agendaImportRows[${i}].include=!!(this.value||agendaImportRows[${i}].clientId);">
+            <option value="">— Aucune —</option>
+            ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${m.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
           </select></td>
           <td><input type="number" min="0" step="5" value="${m.dureeMin}" onchange="agendaImportRows[${i}].dureeMin=parseInt(this.value,10)||0;"></td>
         </tr>
@@ -9305,19 +9324,32 @@ function renderAgendaImportRows(){
   </table></div>`;
 }
 function confirmAgendaImport(){
-  let added = 0;
+  let added = 0, addedClients=0, addedBrands=0, clientsTouched=false, brandsTouched=false;
   agendaImportRows.forEach(m=>{
-    if(!m.include || !m.clientId) return;
-    const c = state.clients.find(x=>x.id===m.clientId);
-    if(!c) return;
-    c.history = c.history || [];
-    c.history.push({ id:uid(), date:m.dateStr, text: `Rendez-vous (importé de l'agenda Outlook) : ${m.subject||'Sans titre'}`, brandIds:[], typeVisite:'', duree:m.dureeMin, taches:[], personnesVues:[] });
-    added++;
+    if(!m.include) return;
+    if(m.clientId){
+      const c = state.clients.find(x=>x.id===m.clientId);
+      if(c){
+        c.history = c.history || [];
+        c.history.push({ id:uid(), date:m.dateStr, text: `Rendez-vous (importé de l'agenda) : ${m.subject||'Sans titre'}`, brandIds: m.brandId?[m.brandId]:[], typeVisite:'', duree:m.dureeMin, taches:[], personnesVues:[] });
+        added++; addedClients++; clientsTouched = true;
+      }
+    } else if(m.brandId){
+      // Rendez-vous concernant une marque sans client précis (réunion fournisseur, formation…) : le
+      // temps est enregistré directement sur la marque, dans son propre suivi.
+      const b = state.brands.find(x=>x.id===m.brandId);
+      if(b){
+        b.history = b.history || [];
+        b.history.push({ id:uid(), date:m.dateStr, text: `Rendez-vous (importé de l'agenda) : ${m.subject||'Sans titre'}`, duree:m.dureeMin });
+        added++; addedBrands++; brandsTouched = true;
+      }
+    }
   });
-  persist('clients');
+  if(clientsTouched) persist('clients');
+  if(brandsTouched) persist('brands');
   closeModal();
   render();
-  showToast(added>0 ? `${added} événement(s) ajouté(s) au suivi commercial.` : "Aucun événement importé (client non choisi).");
+  showToast(added>0 ? `${added} événement(s) ajouté(s) (${addedClients} côté clients, ${addedBrands} côté marques).` : "Aucun événement importé (ni client ni marque choisi).");
 }
 
 /* ============================= DASHBOARD ============================= */
