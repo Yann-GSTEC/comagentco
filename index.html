@@ -679,8 +679,13 @@ function stripHtml(html){
   return tmp.textContent || tmp.innerText || '';
 }
 /* ---- Reproduction de la mise en forme riche (gras, couleur, surlignage, taille) dans le PDF ---- */
-function hexToRgb(hex){
-  hex = String(hex||'').trim().replace('#','');
+function hexToRgb(color){
+  color = String(color||'').trim();
+  // Le surlignage/la couleur appliqués via l'éditeur peuvent être enregistrés au format "rgb(r, g, b)"
+  // par le navigateur (et non en hexadécimal) — on gère donc aussi ce format.
+  const rgbMatch = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if(rgbMatch) return [parseInt(rgbMatch[1],10), parseInt(rgbMatch[2],10), parseInt(rgbMatch[3],10)];
+  let hex = color.replace('#','');
   if(hex.length===3) hex = hex.split('').map(c=>c+c).join('');
   const num = parseInt(hex,16);
   if(isNaN(num)) return [35,35,35];
@@ -713,25 +718,43 @@ function parseRichRuns(html){
   Array.from(container.childNodes).forEach(n=>walk(n, {bold:false, color:null, bg:null, fontSize:null}));
   return runs;
 }
-function reflowRunsToLines(runs, wrappedLines){
-  // Répartit les runs (texte + style) sur les lignes déjà calculées par jsPDF-autotable pour le texte brut
-  // équivalent, en consommant le même nombre de caractères par ligne.
-  const flat = [];
-  runs.forEach(r=>{ for(const ch of r.text){ flat.push({ch, style:r}); } });
-  let pos = 0;
-  return wrappedLines.map(line=>{
-    const target = line.length;
-    const segs = [];
-    let segStyle = null, segText = '';
-    let consumed = 0;
-    while(pos < flat.length && consumed < target){
-      const {ch, style} = flat[pos];
-      if(segStyle && style!==segStyle){ segs.push({text:segText, style:segStyle}); segText=''; }
-      segStyle = style; segText += ch;
-      pos++; consumed++;
+function wrapRunsToWidth(doc, runs, maxWidth, baseFontSize){
+  // Découpe les runs (texte + style) en mots et calcule soi-même les retours à la ligne en mesurant la
+  // largeur réelle de chaque mot (avec son propre style, gras compris) — plutôt que de se recaler sur un
+  // découpage déjà fait ailleurs pour du texte brut, ce qui pouvait désynchroniser le texte enrichi de
+  // sa mise en page sur les lignes longues (texte manquant, dédoublé ou mal positionné).
+  const tokens = [];
+  runs.forEach(r=>{
+    const parts = r.text.split(/(\s+)/);
+    parts.forEach(p=>{ if(p!=='') tokens.push({text:p, style:r}); });
+  });
+  function widthOf(tok){
+    const fs = (tok.style && tok.style.fontSize) || baseFontSize;
+    doc.setFontSize(fs);
+    doc.setFont('helvetica', (tok.style && tok.style.bold) ? 'bold':'normal');
+    return doc.getTextWidth(tok.text);
+  }
+  const lines = [];
+  let current = [], currentWidth = 0;
+  tokens.forEach(tok=>{
+    const isSpace = /^\s+$/.test(tok.text);
+    const w = widthOf(tok);
+    if(!isSpace && currentWidth + w > maxWidth && current.length>0){
+      while(current.length && /^\s+$/.test(current[current.length-1].text)) current.pop();
+      if(current.length) lines.push(current);
+      current = []; currentWidth = 0;
     }
-    if(segText) segs.push({text:segText, style:segStyle});
-    if(pos < flat.length && flat[pos].ch===' ') pos++; // espace de coupure ignoré entre deux lignes
+    current.push(tok);
+    currentWidth += w;
+  });
+  while(current.length && /^\s+$/.test(current[current.length-1].text)) current.pop();
+  if(current.length) lines.push(current);
+  return lines.map(lineTokens=>{
+    const segs = [];
+    lineTokens.forEach(tok=>{
+      if(segs.length && segs[segs.length-1].style===tok.style) segs[segs.length-1].text += tok.text;
+      else segs.push({text:tok.text, style:tok.style});
+    });
     return segs;
   });
 }
@@ -762,13 +785,14 @@ function drawRichCellText(doc, linesOut, x, y, lineHeight, baseFontSize, baseCol
 function drawRichDesignationCell(doc, data, html, baseColorRgb){
   const runs = parseRichRuns(html);
   if(runs.length===0) return false;
-  const plainWrapped = data.cell.text;
-  if(!plainWrapped || plainWrapped.length===0) return false;
-  const linesOut = reflowRunsToLines(runs, plainWrapped);
-  const pad = data.cell.styles.cellPadding || {top:2.6,left:2.6};
+  const pad = data.cell.styles.cellPadding || {top:2.6,left:2.6,right:2.6};
   const padTop = (typeof pad==='object') ? (pad.top||2.6) : pad;
   const padLeft = (typeof pad==='object') ? (pad.left||2.6) : pad;
+  const padRight = (typeof pad==='object') ? (pad.right!=null?pad.right:padLeft) : pad;
   const fs = data.cell.styles.fontSize || 8.5;
+  const maxWidth = data.cell.width - padLeft - padRight;
+  const linesOut = wrapRunsToWidth(doc, runs, maxWidth, fs);
+  if(linesOut.length===0) return false;
   const lh = fs*0.3528*1.15;
   drawRichCellText(doc, linesOut, data.cell.x+padLeft, data.cell.y+padTop+fs*0.3528*0.8, lh, fs, baseColorRgb);
   return true;
