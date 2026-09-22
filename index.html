@@ -545,6 +545,7 @@ let state = {
   prixNetListes: [],
   devis: [],
   commerciaux: [],
+  devisAttachments: {},
   settings: {
     companyName:'', companyAddress:'', companyEmail:'', companyPhone:'', siret:'', tvaDefault:0, initiales:'', nextNumber:1,
     nextNumberDevis:1, nextNumberMarche:1,
@@ -1056,7 +1057,7 @@ async function loadAll(){
     try{ folderData = await readFolderBackupData(); }catch(e){ folderData = null; }
   }
   try{
-    const keys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
+    const keys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
     for(const k of keys){
       if(folderData && folderData[k]!==undefined){
         state[k] = folderData[k];
@@ -1303,7 +1304,7 @@ function ensureClientContactsMigrated(){
 }
 let saveTimers = {};
 function folderStorageActive(){ return !!backupDirHandle && !backupFolderNeedsPermission; }
-const BIG_KEYS = ['tarifs','listesPrixNets'];
+const BIG_KEYS = ['tarifs','listesPrixNets','devisAttachments'];
 async function persistNow(key){
   // Tarifs et Liste de prix nets peuvent peser plusieurs dizaines de Mo pour un gros catalogue —
   // bien au-delà de ce que le stockage du navigateur (localStorage/cloud) peut accepter, même fragmenté.
@@ -1527,7 +1528,7 @@ function fullBackupPayload(){
   return JSON.stringify({
     app:'ComAgentCo', version:1, exportedAt:new Date().toISOString(),
     brands:state.brands, clients:state.clients, tarifs:state.tarifs, listesPrixNets:state.listesPrixNets,
-    prixNetListes:state.prixNetListes, devis:state.devis, commerciaux:state.commerciaux, settings:state.settings, paramLists:state.paramLists,
+    prixNetListes:state.prixNetListes, devis:state.devis, commerciaux:state.commerciaux, devisAttachments:state.devisAttachments, settings:state.settings, paramLists:state.paramLists,
     commissions:state.commissions, caVva:state.caVva, dashboardLayout:state.dashboardLayout, rapportLayout:state.rapportLayout,
   }, null, 2);
 }
@@ -1602,7 +1603,7 @@ function restoreBackupFile(evt){
     try{ data = JSON.parse(e.target.result); }
     catch(err){ showToast('Fichier de sauvegarde illisible.'); return; }
     if(!confirm('Restaurer cette sauvegarde va remplacer toutes les données actuelles. Continuer ?')) return;
-    const allKeys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
+    const allKeys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
     allKeys.forEach(k=>{
       if(data[k]!==undefined) state[k]=data[k];
     });
@@ -6141,6 +6142,7 @@ function deleteDevis(id){
   }
   state.devis = state.devis.filter(d=>d.id!==id);
   persist('devis');
+  if(state.devisAttachments[id]){ delete state.devisAttachments[id]; persist('devisAttachments'); }
   render();
   showToast('Devis supprimé.');
 }
@@ -6855,13 +6857,22 @@ function pickDevisAttachment(){
   input.onchange = async (evt)=>{
     const file = evt.target.files[0];
     if(!file) return;
-    if(file.size > 15*1024*1024){ showToast("Ce fichier dépasse 15 Mo — préférez un fichier plus léger."); return; }
+    const maxSize = backupDirHandle ? 15*1024*1024 : 3*1024*1024;
+    if(file.size > maxSize){
+      showToast(backupDirHandle
+        ? "Ce fichier dépasse 15 Mo — préférez un fichier plus léger."
+        : "Ce fichier dépasse 3 Mo — connectez un dossier de sauvegarde (Paramètres → Sauvegarde) pour joindre des fichiers plus lourds.");
+      return;
+    }
     try{
       const buf = await file.arrayBuffer();
       let binary = '';
       const bytes = new Uint8Array(buf);
       for(let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
-      draft.attachmentPdfBase64 = btoa(binary);
+      // Stockée séparément (state.devisAttachments), et non sur le devis lui-même : un PDF joint peut
+      // peser plusieurs Mo, ce qui ferait échouer la sauvegarde de tous vos devis si elle y était incluse.
+      state.devisAttachments[draft.id] = btoa(binary);
+      persist('devisAttachments');
       draft.attachmentPdfName = file.name;
       refreshDevisModal();
     }catch(e){
@@ -6872,15 +6883,17 @@ function pickDevisAttachment(){
   input.click();
 }
 function downloadDevisAttachment(){
-  if(!draft.attachmentPdfBase64) return;
+  const b64 = state.devisAttachments[draft.id];
+  if(!b64) return;
   const link = document.createElement('a');
-  link.href = 'data:application/pdf;base64,'+draft.attachmentPdfBase64;
+  link.href = 'data:application/pdf;base64,'+b64;
   link.download = draft.attachmentPdfName || 'piece-jointe.pdf';
   link.click();
 }
 function viewDevisAttachment(){
-  if(!draft.attachmentPdfBase64) return;
-  const binary = atob(draft.attachmentPdfBase64);
+  const b64 = state.devisAttachments[draft.id];
+  if(!b64) return;
+  const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
   const blob = new Blob([bytes], {type:'application/pdf'});
@@ -7017,6 +7030,10 @@ function duplicateDraftDevis(){
   clone.history = []; // un duplicata démarre son propre journal, plutôt que d'hériter de tout l'historique de l'original
   clone._duplicatedFromId = originalId;
   clone._duplicatedFromNumber = originalNumber;
+  if(state.devisAttachments[originalId]){
+    state.devisAttachments[clone.id] = state.devisAttachments[originalId];
+    persist('devisAttachments');
+  }
   draft = clone;
   refreshDevisModal();
   showToast(`Dupliqué en nouveau ${((clone.type||'Devis').toLowerCase())} (n° ${clone.number}) — pensez à Enregistrer.`, 4000);
@@ -7157,7 +7174,7 @@ function devisFormHtml(){
             <span class="chip" style="background:var(--surface-2);color:var(--ink);">📎 ${escapeHtml(draft.attachmentPdfName)}</span>
             <button type="button" class="btn btn-sm btn-ghost" onclick="viewDevisAttachment()">👁 Voir</button>
             <button type="button" class="btn btn-sm btn-ghost" onclick="downloadDevisAttachment()">Télécharger</button>
-            <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="draft.attachmentPdfName=null; draft.attachmentPdfBase64=null; refreshDevisModal();">Retirer</button>
+            <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="draft.attachmentPdfName=null; delete state.devisAttachments[draft.id]; persist('devisAttachments'); refreshDevisModal();">Retirer</button>
           </div>
         `:`
           <button type="button" class="btn btn-sm btn-ghost" onclick="pickDevisAttachment()">⇪ Joindre un PDF</button>
@@ -7788,6 +7805,13 @@ function closeDevisFormWithCheck(){
 function saveDraftDevis(thenAction, keepOpen){
   if(!draft.clientId){ showToast('Sélectionnez un client.'); return; }
   if(draft.lines.length===0){ showToast('Ajoutez au moins une ligne au devis.'); return; }
+  // Si rien n'a changé depuis le dernier enregistrement, inutile de ressauvegarder (et donc inutile de
+  // redemander "même numéro ou nouvelle version") : on exécute directement l'action demandée.
+  if(!draft.isNew && JSON.stringify(draft)===draftSavedSnapshot){
+    if(thenAction) thenAction(draft.id);
+    else showToast('Aucune modification à enregistrer.');
+    return;
+  }
   devisSaveThenAction = thenAction || null;
   devisSaveKeepOpen = !!keepOpen;
   const isNewDoc = !!draft.isNew;
@@ -10580,7 +10604,7 @@ window.addEventListener('storage', (e)=>{
   if(!e.key || !e.key.startsWith('comagentco_')) return;
   const rest = e.key.slice('comagentco_'.length);
   if(rest.indexOf('__c')>=0) return; // morceau de données : on ne réagit qu'au sommaire principal
-  const known = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
+  const known = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
   if(known.indexOf(rest)===-1) return;
   syncKeyFromLocalStorage(rest);
 });
