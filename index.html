@@ -6710,6 +6710,40 @@ function showRawPdfImportText(){
 }
 
 
+function debouncedInlineRefSearch(q, idx){
+  clearTimeout(window._inlineRefTimer);
+  window._inlineRefTimer = setTimeout(()=>inlineRefSearchRun(q, idx), 120);
+}
+function inlineRefSearchRun(q, idx){
+  const box = document.getElementById('inlineRefResults_'+idx);
+  if(!box) return;
+  q = q.trim().toLowerCase();
+  if(!q){ box.innerHTML=''; return; }
+  const qNorm = normalizeRefQuery(q);
+  const results = state.tarifs.filter(t=>tarifMatchesQuery(t, q, qNorm)).slice(0,10);
+  if(results.length===0){ box.innerHTML=''; return; }
+  box.innerHTML = results.map(t=>`
+    <div class="autocomplete-item" onmousedown="event.preventDefault(); replaceDevisLineWithTarif(${idx}, '${t.id}');">
+      <span class="chip" style="background:${brandColor(t.brandId)};font-size:9px;margin-right:5px;">${escapeHtml(brandName(t.brandId))}</span>
+      <span class="ref">${escapeHtml(t.reference)}</span> — <span class="num">${fmtMoney(t.prixCatalogue)}</span>
+      <div class="desig" style="font-size:10.5px;">${escapeHtml(t.designation||'')}</div>
+    </div>
+  `).join('');
+}
+function commitInlineRefEdit(idx, value){
+  const box = document.getElementById('inlineRefResults_'+idx);
+  if(box) box.innerHTML='';
+  const line = draft.lines[idx];
+  if(!line) return;
+  if(value===line.reference) return;
+  // Si le texte tapé correspond exactement à une référence connue (même sans avoir cliqué une
+  // suggestion), on l'utilise directement ; sinon on garde le texte tel quel comme référence libre.
+  const exact = state.tarifs.find(t=>(t.reference||'').toLowerCase()===value.trim().toLowerCase());
+  if(exact){ replaceDevisLineWithTarif(idx, exact.id); return; }
+  line.reference = value;
+  line.tarifId = null;
+  refreshDevisModal();
+}
 function openEditDevisLineModal(i){
   const l = draft.lines[i];
   if(!l) return;
@@ -7245,7 +7279,11 @@ function devisLinesRowsHtml(){
     <tr data-reference="${escapeHtml(l.reference||'')}" title="Curseur sur cette ligne : F3 historique client, F4 département, F5 tous clients, F6 famille/sous-famille">
       ${dragHandle}
       <td><span class="chip" style="background:${brandColor(l.brandId)};font-size:9.5px;padding:3px 6px;white-space:normal;line-height:1.25;">${escapeHtml(brandName(l.brandId))}</span></td>
-      <td style="font-weight:700;font-family:'Space Grotesk';font-size:12px;">${escapeHtml(l.reference)}${l.prixNetApplied?' <span class="chip" style="background:var(--success, #3F8A7B);font-size:8px;padding:1px 5px;display:inline-block;margin-top:2px;" title="Prix net client appliqué automatiquement">Prix net</span>':''}</td>
+      <td style="position:relative;font-weight:700;font-family:'Space Grotesk';font-size:12px;">
+        <input type="text" value="${escapeHtml(l.reference||'')}" oninput="debouncedInlineRefSearch(this.value, ${i})" onchange="commitInlineRefEdit(${i}, this.value)" style="width:100%;font-weight:700;font-family:'Space Grotesk';font-size:12px;padding:2px 4px;border:1px solid transparent;background:transparent;" onfocus="this.style.borderColor='var(--line)';this.style.background='#fff';" onblur="this.style.borderColor='transparent';this.style.background='transparent';">
+        ${l.prixNetApplied?'<span class="chip" style="background:var(--success, #3F8A7B);font-size:8px;padding:1px 5px;display:inline-block;margin-top:2px;" title="Prix net client appliqué automatiquement">Prix net</span>':''}
+        <div id="inlineRefResults_${i}" class="autocomplete-list" style="position:absolute;top:100%;left:0;z-index:80;min-width:260px;"></div>
+      </td>
       <td><div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Désignation…" title="F3 historique prix (ce client) · F4 (département) · F5 (tous les clients) · F6 (famille / sous-famille)" oninput="draft.lines[${i}].designation=this.innerHTML;">${l.designation||''}</div>${l.complementInfo?`<div style="color:var(--brass);font-weight:600;font-size:11px;margin-top:2px;" title="Complément info du tarif — n'apparaît jamais sur le PDF">⚠ ${escapeHtml(l.complementInfo)}</div>`:''}</td>
       <td><input type="number" min="0" step="1" value="${l.qty}" style="font-weight:700;text-align:center;" onchange="devisLineSetQty(${i}, this.value)"></td>
       <td><input type="number" min="0" step="0.01" value="${l.prixUnitaire}" onchange="draft.lines[${i}].prixUnitaire=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
@@ -7256,7 +7294,7 @@ function devisLinesRowsHtml(){
       <td><input type="number" step="0.01" value="${Math.abs(displayMarge)<0.005?'':(+displayMarge).toFixed(2)}" placeholder="0" title="${l.margeTarget!=null?'Marge cible demandée — peut différer de quelques centièmes du calcul réel après arrondi du Prix de vente conseillé HT à la centime.':''}" style="color:${displayMarge>=0?'var(--success)':'var(--danger)'};font-weight:800;font-size:12.5px;text-align:center;background:${displayMarge>=0?'rgba(63,138,123,.12)':'rgba(179,57,44,.1)'};border:1.5px solid ${displayMarge>=0?'var(--success)':'var(--danger)'};border-radius:6px;" onchange="devisLineSetMarge(${i}, this.value)"></td>
       <td><input type="number" min="0" step="0.01" value="${l.prixClient?l.prixClient:''}" placeholder="0" style="font-weight:600;${netOnClient?'color:var(--info, #2F6FBD);font-weight:700;':''}" title="${netOnClient?'Prix repris de la liste de prix nets du client':''}" onchange="devisLineSetClient(${i}, this.value)"></td>
       <td class="num" style="font-weight:700;">${fmtMoney(lineTotalHT(l, draft.destinataire))}</td>
-      <td style="white-space:nowrap;"><button class="btn btn-sm btn-ghost" onclick="openEditDevisLineModal(${i})" title="Remplacer la référence de cette ligne">✎</button><button class="btn btn-sm btn-ghost btn-danger" onclick="removeDevisLine(${i})">✕</button></td>
+      <td><button class="btn btn-sm btn-ghost btn-danger" onclick="removeDevisLine(${i})">✕</button></td>
     </tr>
   `;}).join('');
 }
