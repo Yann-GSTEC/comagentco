@@ -799,7 +799,6 @@ function drawRichDesignationCell(doc, data, html, baseColorRgb){
   const runs = parseRichRuns(html);
   if(runs.length===0) return false;
   const pad = data.cell.styles.cellPadding || {top:2.6,left:2.6,right:2.6};
-  const padTop = (typeof pad==='object') ? (pad.top||2.6) : pad;
   const padLeft = (typeof pad==='object') ? (pad.left||2.6) : pad;
   const padRight = (typeof pad==='object') ? (pad.right!=null?pad.right:padLeft) : pad;
   const fs = data.cell.styles.fontSize || 8.5;
@@ -807,7 +806,12 @@ function drawRichDesignationCell(doc, data, html, baseColorRgb){
   const linesOut = wrapRunsToWidth(doc, runs, maxWidth, fs);
   if(linesOut.length===0) return false;
   const lh = fs*0.3528*1.15;
-  drawRichCellText(doc, linesOut, data.cell.x+padLeft, data.cell.y+padTop+fs*0.3528*0.8, lh, fs, baseColorRgb);
+  // Centre le bloc de texte verticalement dans la cellule, comme les autres colonnes (valign:'middle'),
+  // plutôt que de le caler en haut — ce qui décalait tout dès que la ligne devenait plus haute qu'une
+  // seule ligne de texte (retour à la ligne, texte long...).
+  const textBlockHeight = linesOut.length*lh;
+  const startY = data.cell.y + (data.cell.height - textBlockHeight)/2 + fs*0.3528*0.8;
+  drawRichCellText(doc, linesOut, data.cell.x+padLeft, startY, lh, fs, baseColorRgb);
   return true;
 }
 
@@ -6875,6 +6879,9 @@ function pickDevisAttachment(){
       persist('devisAttachments');
       draft.attachmentPdfName = file.name;
       refreshDevisModal();
+      if(!backupDirHandle){
+        setTimeout(()=>showToast("Pièce jointe enregistrée. Pour plus de fiabilité (surtout si vous en joignez plusieurs), connectez un dossier de sauvegarde dans Paramètres → Sauvegarde.", 6000), 300);
+      }
     }catch(e){
       console.error(e);
       showToast("Impossible de joindre ce fichier : "+(e.message||String(e)));
