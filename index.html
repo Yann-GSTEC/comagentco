@@ -1483,7 +1483,7 @@ function fullBackupPayload(){
   return JSON.stringify({
     app:'ComAgentCo', version:1, exportedAt:new Date().toISOString(),
     brands:state.brands, clients:state.clients, tarifs:state.tarifs, listesPrixNets:state.listesPrixNets,
-    prixNetListes:state.prixNetListes, devis:state.devis, settings:state.settings, paramLists:state.paramLists,
+    prixNetListes:state.prixNetListes, devis:state.devis, commerciaux:state.commerciaux, settings:state.settings, paramLists:state.paramLists,
     commissions:state.commissions, caVva:state.caVva, dashboardLayout:state.dashboardLayout, rapportLayout:state.rapportLayout,
   }, null, 2);
 }
@@ -1558,7 +1558,7 @@ function restoreBackupFile(evt){
     try{ data = JSON.parse(e.target.result); }
     catch(err){ showToast('Fichier de sauvegarde illisible.'); return; }
     if(!confirm('Restaurer cette sauvegarde va remplacer toutes les données actuelles. Continuer ?')) return;
-    const allKeys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
+    const allKeys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
     allKeys.forEach(k=>{
       if(data[k]!==undefined) state[k]=data[k];
     });
@@ -6801,7 +6801,6 @@ function replaceDevisLineWithTarif(idx, tarifId){
     qty: line.qty, complementInfo:t.complementInfo||'', ...pricing,
     ecoPartLineId: line.ecoPartLineId, linkedToLineId: line.linkedToLineId,
   };
-  closeModal();
   refreshDevisModal();
 }
 function pickDevisAttachment(){
@@ -6833,6 +6832,16 @@ function downloadDevisAttachment(){
   link.href = 'data:application/pdf;base64,'+draft.attachmentPdfBase64;
   link.download = draft.attachmentPdfName || 'piece-jointe.pdf';
   link.click();
+}
+function viewDevisAttachment(){
+  if(!draft.attachmentPdfBase64) return;
+  const binary = atob(draft.attachmentPdfBase64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
+  const blob = new Blob([bytes], {type:'application/pdf'});
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  setTimeout(()=>URL.revokeObjectURL(url), 60000);
 }
 function openDevisForm(id, presetClientId){
   if(state.clients.length===0){ showToast('Ajoutez d\'abord un client.'); return; }
@@ -7100,6 +7109,7 @@ function devisFormHtml(){
         ${draft.attachmentPdfName?`
           <div style="display:flex;align-items:center;gap:10px;">
             <span class="chip" style="background:var(--surface-2);color:var(--ink);">📎 ${escapeHtml(draft.attachmentPdfName)}</span>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="viewDevisAttachment()">👁 Voir</button>
             <button type="button" class="btn btn-sm btn-ghost" onclick="downloadDevisAttachment()">Télécharger</button>
             <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="draft.attachmentPdfName=null; draft.attachmentPdfBase64=null; refreshDevisModal();">Retirer</button>
           </div>
@@ -10492,7 +10502,7 @@ window.addEventListener('storage', (e)=>{
   if(!e.key || !e.key.startsWith('comagentco_')) return;
   const rest = e.key.slice('comagentco_'.length);
   if(rest.indexOf('__c')>=0) return; // morceau de données : on ne réagit qu'au sommaire principal
-  const known = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
+  const known = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
   if(known.indexOf(rest)===-1) return;
   syncKeyFromLocalStorage(rest);
 });
