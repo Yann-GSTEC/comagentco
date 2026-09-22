@@ -6710,6 +6710,96 @@ function showRawPdfImportText(){
 }
 
 
+function openEditDevisLineModal(i){
+  const l = draft.lines[i];
+  if(!l) return;
+  openModal(`
+    <div class="modal-head"><h3>Modifier la ligne</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="helper" style="margin-bottom:10px;">Cherchez une nouvelle référence pour remplacer celle-ci — la quantité actuelle (${l.qty}) est conservée, le prix repart du tarif catalogue de la nouvelle référence.</div>
+      <input type="text" id="editLine_search" placeholder="Rechercher une référence ou une désignation…" oninput="debouncedEditLineSearch(this.value, ${i})" autocomplete="off">
+      <div id="editLine_results" style="margin-top:8px;"></div>
+      <div class="divider"></div>
+      <div class="helper" style="margin-bottom:8px;">Ou modifiez directement la marque / la référence / la désignation (utile pour une ligne hors catalogue) :</div>
+      <div class="field-row">
+        <div class="field"><label>Marque</label>
+          <select onchange="draft.lines[${i}].brandId=this.value; refreshDevisModal();">
+            ${state.brands.map(b=>`<option value="${b.id}" ${l.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Référence</label><input type="text" value="${escapeHtml(l.reference||'')}" onchange="draft.lines[${i}].reference=this.value; draft.lines[${i}].tarifId=null; refreshDevisModal();"></div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="closeModal()">Fermer</button></div>
+  `);
+}
+function debouncedEditLineSearch(q, idx){
+  clearTimeout(window._editLineSearchTimer);
+  window._editLineSearchTimer = setTimeout(()=>editLineSearchRun(q, idx), 120);
+}
+function editLineSearchRun(q, idx){
+  q = q.trim().toLowerCase();
+  const qNorm = normalizeRefQuery(q);
+  const box = document.getElementById('editLine_results');
+  if(!box) return;
+  if(!q){ box.innerHTML=''; return; }
+  const results = state.tarifs.filter(t=>tarifMatchesQuery(t, q, qNorm)).slice(0,20);
+  if(results.length===0){
+    box.innerHTML = `<div class="autocomplete-list"><div class="autocomplete-item">Aucun résultat pour « ${escapeHtml(q)} »</div></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="autocomplete-list">${results.map(t=>`
+    <div class="autocomplete-item" onclick="replaceDevisLineWithTarif(${idx}, '${t.id}')">
+      <span class="chip" style="background:${brandColor(t.brandId)};font-size:10px;margin-right:6px;">${escapeHtml(brandName(t.brandId))}</span>
+      <span class="ref">${escapeHtml(t.reference)}</span> — <span class="num">${fmtMoney(t.prixCatalogue)}</span>
+      <div class="desig">${escapeHtml(t.designation||'')}</div>
+      ${t.complementInfo?`<div style="color:var(--brass);font-weight:600;font-size:11.5px;margin-top:2px;">⚠ ${escapeHtml(t.complementInfo)}</div>`:''}
+    </div>
+  `).join('')}</div>`;
+}
+function replaceDevisLineWithTarif(idx, tarifId){
+  const t = state.tarifs.find(x=>x.id===tarifId);
+  const line = draft.lines[idx];
+  if(!t || !line) return;
+  const pricing = computeLinePricing(t, draft.date);
+  draft.lines[idx] = {
+    id: line.id, tarifId:t.id, brandId:t.brandId, reference:t.reference, designation:t.designation,
+    qty: line.qty, complementInfo:t.complementInfo||'', ...pricing,
+    ecoPartLineId: line.ecoPartLineId, linkedToLineId: line.linkedToLineId,
+  };
+  closeModal();
+  refreshDevisModal();
+}
+function pickDevisAttachment(){
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.pdf,application/pdf';
+  input.onchange = async (evt)=>{
+    const file = evt.target.files[0];
+    if(!file) return;
+    if(file.size > 15*1024*1024){ showToast("Ce fichier dépasse 15 Mo — préférez un fichier plus léger."); return; }
+    try{
+      const buf = await file.arrayBuffer();
+      let binary = '';
+      const bytes = new Uint8Array(buf);
+      for(let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
+      draft.attachmentPdfBase64 = btoa(binary);
+      draft.attachmentPdfName = file.name;
+      refreshDevisModal();
+    }catch(e){
+      console.error(e);
+      showToast("Impossible de joindre ce fichier : "+(e.message||String(e)));
+    }
+  };
+  input.click();
+}
+function downloadDevisAttachment(){
+  if(!draft.attachmentPdfBase64) return;
+  const link = document.createElement('a');
+  link.href = 'data:application/pdf;base64,'+draft.attachmentPdfBase64;
+  link.download = draft.attachmentPdfName || 'piece-jointe.pdf';
+  link.click();
+}
 function openDevisForm(id, presetClientId){
   if(state.clients.length===0){ showToast('Ajoutez d\'abord un client.'); return; }
   const existing = id ? state.devis.find(x=>x.id===id) : null;
@@ -6971,6 +7061,18 @@ function devisFormHtml(){
       </div>
 
       <div class="field" style="margin-top:16px;"><label>Notes / conditions</label><textarea id="d_notes" rows="2" onchange="draft.notes=this.value;">${escapeHtml(draft.notes||'')}</textarea></div>
+      <div class="field" style="margin-top:16px;">
+        <label>Pièce jointe (PDF) <span class="helper" style="display:inline;">— ex. CCTP, plan… consultable ici, non incluse automatiquement à l'envoi par email</span></label>
+        ${draft.attachmentPdfName?`
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="chip" style="background:var(--surface-2);color:var(--ink);">📎 ${escapeHtml(draft.attachmentPdfName)}</span>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="downloadDevisAttachment()">Télécharger</button>
+            <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="draft.attachmentPdfName=null; draft.attachmentPdfBase64=null; refreshDevisModal();">Retirer</button>
+          </div>
+        `:`
+          <button type="button" class="btn btn-sm btn-ghost" onclick="pickDevisAttachment()">⇪ Joindre un PDF</button>
+        `}
+      </div>
 
       <div class="section-title">Colonnes visibles à l'impression PDF <span class="helper" style="display:inline;">(les infos d'achat et de marge sont décochées par défaut — usage interne)</span></div>
       <div class="pill-select">
@@ -6985,6 +7087,7 @@ function devisFormHtml(){
       ${!draft.isNew?`<button class="btn btn-danger" onclick="deleteDevis(draft.id); closeModal();" style="margin-right:auto;">Supprimer</button>`:''}
       ${!draft.isNew?`<button class="btn" onclick="duplicateDraftDevis()" title="Crée une copie modifiable de ce ${draft.type==='Marché'?'marché':'devis'} avec un nouveau numéro">⧉ Dupliquer</button>`:''}
       <button class="btn" onclick="closeModal()">Annuler</button>
+      <button class="btn" onclick="exportDevisPdf(draft.id);" title="Télécharge le PDF tel qu'affiché à l'écran, sans passer par l'étape d'enregistrement">⇩ Télécharger</button>
       <button class="btn" onclick="saveDraftDevis((id)=>exportDevisPdf(id, 'preview'));">Enregistrer + Aperçu</button>
       <button class="btn" onclick="saveDraftDevis((id)=>exportDevisPdf(id));">Enregistrer + PDF</button>
       <button class="btn btn-brass" onclick="saveDraftAndOpenSend();" title="Envoyer le devis par email (mode gratuit sans configuration, ou automatique si Outlook est connecté dans Paramètres)">✉ Enregistrer et envoyer</button>
@@ -7153,7 +7256,7 @@ function devisLinesRowsHtml(){
       <td><input type="number" step="0.01" value="${Math.abs(displayMarge)<0.005?'':(+displayMarge).toFixed(2)}" placeholder="0" title="${l.margeTarget!=null?'Marge cible demandée — peut différer de quelques centièmes du calcul réel après arrondi du Prix de vente conseillé HT à la centime.':''}" style="color:${displayMarge>=0?'var(--success)':'var(--danger)'};font-weight:800;font-size:12.5px;text-align:center;background:${displayMarge>=0?'rgba(63,138,123,.12)':'rgba(179,57,44,.1)'};border:1.5px solid ${displayMarge>=0?'var(--success)':'var(--danger)'};border-radius:6px;" onchange="devisLineSetMarge(${i}, this.value)"></td>
       <td><input type="number" min="0" step="0.01" value="${l.prixClient?l.prixClient:''}" placeholder="0" style="font-weight:600;${netOnClient?'color:var(--info, #2F6FBD);font-weight:700;':''}" title="${netOnClient?'Prix repris de la liste de prix nets du client':''}" onchange="devisLineSetClient(${i}, this.value)"></td>
       <td class="num" style="font-weight:700;">${fmtMoney(lineTotalHT(l, draft.destinataire))}</td>
-      <td><button class="btn btn-sm btn-ghost btn-danger" onclick="removeDevisLine(${i})">✕</button></td>
+      <td style="white-space:nowrap;"><button class="btn btn-sm btn-ghost" onclick="openEditDevisLineModal(${i})" title="Remplacer la référence de cette ligne">✎</button><button class="btn btn-sm btn-ghost btn-danger" onclick="removeDevisLine(${i})">✕</button></td>
     </tr>
   `;}).join('');
 }
@@ -8267,18 +8370,27 @@ async function fetchOutlookCalendarEvents(startIso, endIso){
   const data = await resp.json();
   return data.value||[];
 }
-async function sendMailViaGraph(accessToken, {toEmails, subject, body, isHtml, attachmentName, attachmentBase64}){
+async function sendMailViaGraph(accessToken, {toEmails, subject, body, isHtml, attachmentName, attachmentBase64, extraAttachments}){
+  const attachments = [{
+    '@odata.type':'#microsoft.graph.fileAttachment',
+    name: attachmentName,
+    contentType:'application/pdf',
+    contentBytes: attachmentBase64
+  }];
+  (extraAttachments||[]).forEach(a=>{
+    attachments.push({
+      '@odata.type':'#microsoft.graph.fileAttachment',
+      name: a.name,
+      contentType: a.contentType||'application/pdf',
+      contentBytes: a.base64
+    });
+  });
   const message = {
     message:{
       subject,
       body:{ contentType: isHtml?'HTML':'Text', content: body },
       toRecipients: toEmails.map(email=>({ emailAddress:{ address: email } })),
-      attachments:[{
-        '@odata.type':'#microsoft.graph.fileAttachment',
-        name: attachmentName,
-        contentType:'application/pdf',
-        contentBytes: attachmentBase64
-      }]
+      attachments
     },
     saveToSentItems: true
   };
