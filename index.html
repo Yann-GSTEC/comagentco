@@ -696,14 +696,19 @@ function parseRichRuns(html){
   const container = document.createElement('div');
   container.innerHTML = html;
   const runs = [];
-  function walk(node, style){
+  const BLOCK_TAGS = new Set(['div','p']);
+  function walk(node, style, isBlockStart){
     if(node.nodeType===3){
       if(node.textContent) runs.push(Object.assign({text:node.textContent}, style));
       return;
     }
     if(node.nodeType!==1) return;
-    const s = Object.assign({}, style);
     const tag = node.tagName.toLowerCase();
+    if(tag==='br'){ runs.push({text:'\n', forceBreak:true}); return; }
+    // Un navigateur peut représenter un retour à la ligne en encapsulant chaque ligne dans son propre
+    // <div>/<p> plutôt qu'avec un <br> : on insère alors un saut de ligne explicite entre deux blocs.
+    if(BLOCK_TAGS.has(tag) && isBlockStart===false) runs.push({text:'\n', forceBreak:true});
+    const s = Object.assign({}, style);
     if(tag==='b' || tag==='strong') s.bold = true;
     const inline = node.getAttribute('style')||'';
     if(/font-weight\s*:\s*(bold|[6-9]00)/i.test(inline)) s.bold = true;
@@ -713,9 +718,9 @@ function parseRichRuns(html){
     if(bgMatch && bgMatch[1].trim().toLowerCase()!=='transparent') s.bg = bgMatch[1].trim();
     const fsMatch = inline.match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/i);
     if(fsMatch) s.fontSize = parseFloat(fsMatch[1]);
-    node.childNodes.forEach(child=>walk(child, s));
+    node.childNodes.forEach(child=>walk(child, s, false));
   }
-  Array.from(container.childNodes).forEach(n=>walk(n, {bold:false, color:null, bg:null, fontSize:null}));
+  Array.from(container.childNodes).forEach((n,idx)=>walk(n, {bold:false, color:null, bg:null, fontSize:null}, idx===0));
   return runs;
 }
 function wrapRunsToWidth(doc, runs, maxWidth, baseFontSize){
@@ -725,6 +730,7 @@ function wrapRunsToWidth(doc, runs, maxWidth, baseFontSize){
   // sa mise en page sur les lignes longues (texte manquant, dédoublé ou mal positionné).
   const tokens = [];
   runs.forEach(r=>{
+    if(r.forceBreak){ tokens.push({text:'\n', style:r, forceBreak:true}); return; }
     const parts = r.text.split(/(\s+)/);
     parts.forEach(p=>{ if(p!=='') tokens.push({text:p, style:r}); });
   });
@@ -737,6 +743,12 @@ function wrapRunsToWidth(doc, runs, maxWidth, baseFontSize){
   const lines = [];
   let current = [], currentWidth = 0;
   tokens.forEach(tok=>{
+    if(tok.forceBreak){
+      while(current.length && /^\s+$/.test(current[current.length-1].text)) current.pop();
+      lines.push(current);
+      current = []; currentWidth = 0;
+      return;
+    }
     const isSpace = /^\s+$/.test(tok.text);
     const w = widthOf(tok);
     if(!isSpace && currentWidth + w > maxWidth && current.length>0){
@@ -748,7 +760,7 @@ function wrapRunsToWidth(doc, runs, maxWidth, baseFontSize){
     currentWidth += w;
   });
   while(current.length && /^\s+$/.test(current[current.length-1].text)) current.pop();
-  if(current.length) lines.push(current);
+  if(current.length || lines.length===0) lines.push(current);
   return lines.map(lineTokens=>{
     const segs = [];
     lineTokens.forEach(tok=>{
@@ -880,6 +892,14 @@ function wrapRichSelectionWithStyle(styleStr){
   newRange.selectNodeContents(span);
   sel.addRange(newRange);
   richToolbarRange = newRange.cloneRange();
+}
+function handleRichPaste(ev){
+  // Force un collage en texte brut dans les zones enrichies (désignations, lignes de titre) : sans ça,
+  // coller depuis Word/Excel/un email importe aussi la police, les couleurs et les fonds d'origine
+  // (ex. un fond jaune) au lieu de s'adapter à la mise en forme déjà en place.
+  ev.preventDefault();
+  const text = (ev.clipboardData || window.clipboardData).getData('text/plain');
+  document.execCommand('insertText', false, text);
 }
 function richApplyBold(){
   if(!restoreRichSelection()) return;
@@ -6718,6 +6738,7 @@ function openImportedDevisReview(parsed, filename){
   draft.filterBrandId = brandIds.length===1 ? brandIds[0] : '';
   openModal(devisFormHtml(), {full:true});
   document.addEventListener('keydown', devisFormKeydownHandler);
+  draftSavedSnapshot = JSON.stringify(draft);
   if(parsed.warnings.length){
     setTimeout(()=>showToast('⚠ '+parsed.warnings.join(' ')+' — bouton "Voir le texte extrait du PDF" disponible en haut du formulaire si besoin de vérifier.', 8000), 400);
   }
@@ -6902,6 +6923,7 @@ function openDevisForm(id, presetClientId){
   }
   openModal(devisFormHtml(), {full:true});
   document.addEventListener('keydown', devisFormKeydownHandler);
+  draftSavedSnapshot = JSON.stringify(draft);
 }
 function devisFormKeydownHandler(e){
   if(!['F3','F4','F5','F6'].includes(e.key)) return;
@@ -7011,7 +7033,7 @@ function devisFormHtml(){
       <div style="display:flex;align-items:center;gap:10px;">
         ${draft.pdfImportRawText?`<button type="button" class="btn btn-sm btn-ghost" onclick="showRawPdfImportText()">📄 Voir le texte extrait du PDF</button>`:''}
         ${!draft.isNew?`<button type="button" class="btn btn-sm btn-ghost" onclick="openDevisHistoryModal()">🕒 Historique complet</button>`:''}
-        <button class="close-x" onclick="closeModal()">✕</button>
+        <button class="close-x" onclick="closeDevisFormWithCheck()">✕</button>
       </div>
     </div>
     <div class="modal-body">
@@ -7154,12 +7176,10 @@ function devisFormHtml(){
     <div class="modal-foot">
       ${!draft.isNew?`<button class="btn btn-danger" onclick="deleteDevis(draft.id); closeModal();" style="margin-right:auto;">Supprimer</button>`:''}
       ${!draft.isNew?`<button class="btn" onclick="duplicateDraftDevis()" title="Crée une copie modifiable de ce ${draft.type==='Marché'?'marché':'devis'} avec un nouveau numéro">⧉ Dupliquer</button>`:''}
-      <button class="btn" onclick="closeModal()">Annuler</button>
-      <button class="btn" onclick="exportDevisPdf(draft.id);" title="Télécharge le PDF tel qu'affiché à l'écran, sans passer par l'étape d'enregistrement">⇩ Télécharger</button>
-      <button class="btn" onclick="saveDraftDevis((id)=>exportDevisPdf(id, 'preview'));">Enregistrer + Aperçu</button>
-      <button class="btn" onclick="saveDraftDevis((id)=>exportDevisPdf(id));">Enregistrer + PDF</button>
+      <button class="btn" onclick="exportDevisPdf(draft.id);" title="Télécharge le PDF tel qu'affiché à l'écran, sans passer par l'étape d'enregistrement">⇩ Télécharger PDF</button>
+      <button class="btn" onclick="saveDraftDevis((id)=>exportDevisPdf(id, 'preview'), true);">Aperçu du PDF</button>
       <button class="btn btn-brass" onclick="saveDraftAndOpenSend();" title="Envoyer le devis par email (mode gratuit sans configuration, ou automatique si Outlook est connecté dans Paramètres)">✉ Enregistrer et envoyer</button>
-      <button class="btn btn-primary" onclick="saveDraftDevis()">Enregistrer</button>
+      <button class="btn btn-primary" onclick="saveDraftDevis(null, true)">Enregistrer</button>
     </div>
   `;
 }
@@ -7296,7 +7316,7 @@ function devisLinesRowsHtml(){
       <tr data-title-row="1">
         ${dragHandle}
         <td colspan="12" style="background:var(--surface-2);padding:4px 8px;">
-          <div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Titre de section ou commentaire libre…" style="font-weight:700;" oninput="draft.lines[${i}].designation=this.innerHTML;">${l.designation||''}</div>
+          <div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Titre de section ou commentaire libre…" style="font-weight:700;" oninput="draft.lines[${i}].designation=this.innerHTML;" onpaste="handleRichPaste(event)">${l.designation||''}</div>
         </td>
         <td><button class="btn btn-sm btn-ghost btn-danger" onclick="removeDevisLine(${i})">✕</button></td>
       </tr>`;
@@ -7318,7 +7338,7 @@ function devisLinesRowsHtml(){
         ${l.prixNetApplied?'<span class="chip" style="background:var(--success, #3F8A7B);font-size:8px;padding:1px 5px;display:inline-block;margin-top:2px;" title="Prix net client appliqué automatiquement">Prix net</span>':''}
         <div id="inlineRefResults_${i}" class="autocomplete-list" style="position:absolute;top:100%;left:0;z-index:80;min-width:260px;"></div>
       </td>
-      <td><div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Désignation…" title="F3 historique prix (ce client) · F4 (département) · F5 (tous les clients) · F6 (famille / sous-famille)" oninput="draft.lines[${i}].designation=this.innerHTML;">${l.designation||''}</div>${l.complementInfo?`<div style="color:var(--brass);font-weight:600;font-size:11px;margin-top:2px;" title="Complément info du tarif — n'apparaît jamais sur le PDF">⚠ ${escapeHtml(l.complementInfo)}</div>`:''}</td>
+      <td><div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Désignation…" title="F3 historique prix (ce client) · F4 (département) · F5 (tous les clients) · F6 (famille / sous-famille)" oninput="draft.lines[${i}].designation=this.innerHTML;" onpaste="handleRichPaste(event)">${l.designation||''}</div>${l.complementInfo?`<div style="color:var(--brass);font-weight:600;font-size:11px;margin-top:2px;" title="Complément info du tarif — n'apparaît jamais sur le PDF">⚠ ${escapeHtml(l.complementInfo)}</div>`:''}</td>
       <td><input type="number" min="0" step="1" value="${l.qty}" style="font-weight:700;text-align:center;" onchange="devisLineSetQty(${i}, this.value)"></td>
       <td><input type="number" min="0" step="0.01" value="${l.prixUnitaire}" onchange="draft.lines[${i}].prixUnitaire=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
       <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct1||0}" onchange="draft.lines[${i}].remisePct1=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
@@ -7749,10 +7769,27 @@ function devisBrandsOverlap(d1, d2){
   return false;
 }
 let devisSaveThenAction = null; // callback exécuté juste après la sauvegarde effective (Aperçu, PDF, Envoi…), une fois le choix de version tranché
-function saveDraftDevis(thenAction){
+let devisSaveKeepOpen = false;
+let draftSavedSnapshot = '';
+function closeDevisFormWithCheck(){
+  if(JSON.stringify(draft)===draftSavedSnapshot){ closeModal(); return; }
+  openModal(`
+    <div class="modal-head"><h3>Modifications non enregistrées</h3></div>
+    <div class="modal-body">
+      <div class="helper">Ce ${escapeHtml((draft.type||'devis').toLowerCase())} contient des modifications non enregistrées. Voulez-vous les enregistrer avant de fermer ?</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="refreshDevisModal()">Annuler — revenir au devis</button>
+      <button class="btn btn-danger" onclick="closeModal()">Fermer sans enregistrer</button>
+      <button class="btn btn-primary" onclick="saveDraftDevis(null, false)">Enregistrer et fermer</button>
+    </div>
+  `);
+}
+function saveDraftDevis(thenAction, keepOpen){
   if(!draft.clientId){ showToast('Sélectionnez un client.'); return; }
   if(draft.lines.length===0){ showToast('Ajoutez au moins une ligne au devis.'); return; }
   devisSaveThenAction = thenAction || null;
+  devisSaveKeepOpen = !!keepOpen;
   const isNewDoc = !!draft.isNew;
   if(isNewDoc){
     if(!draft.numberEditedManually){
@@ -7760,7 +7797,7 @@ function saveDraftDevis(thenAction){
     } else if(state.devis.some(d=>d.number===draft.number && devisBrandsOverlap(d, draft))){
       showToast(`⚠ Le numéro "${draft.number}" est déjà utilisé par un autre devis de la même marque — vérifiez-le si besoin (l'enregistrement continue quand même).`, 5500);
     }
-    finalizeSaveDraftDevis();
+    finalizeSaveDraftDevis(false, devisSaveKeepOpen);
     return;
   }
   if(draft.numberEditedManually && state.devis.some(d=>d.number===draft.number && d.id!==draft.id && devisBrandsOverlap(d, draft))){
@@ -7769,7 +7806,7 @@ function saveDraftDevis(thenAction){
   // Devis déjà enregistré : on demande d'abord si on écrase la version existante ou si on crée une nouvelle version numérotée.
   openDevisVersionChoiceModal();
 }
-function finalizeSaveDraftDevis(skipAutoLog){
+function finalizeSaveDraftDevis(skipAutoLog, keepOpen){
   const idx = state.devis.findIndex(d=>d.id===draft.id);
   const toSave = {...draft}; delete toSave.isNew;
   toSave.history = Array.isArray(toSave.history) ? toSave.history.slice() : [];
@@ -7798,9 +7835,21 @@ function finalizeSaveDraftDevis(skipAutoLog){
   }
   if(idx>=0) state.devis[idx] = toSave; else state.devis.push(toSave);
   persist('devis');
-  closeModal();
-  render();
-  showToast('Devis enregistré.');
+  if(keepOpen){
+    draft.isNew = false;
+    draft.history = toSave.history;
+    draft._duplicatedFromId = undefined;
+    draft._duplicatedFromNumber = undefined;
+    draftSavedSnapshot = JSON.stringify(draft);
+    render();
+    refreshDevisModal();
+    showToast('Devis enregistré.');
+  } else {
+    draftSavedSnapshot = JSON.stringify(draft);
+    closeModal();
+    render();
+    showToast('Devis enregistré.');
+  }
   if(devisSaveThenAction){ const fn = devisSaveThenAction; devisSaveThenAction = null; fn(toSave.id); }
 }
 function parseDevisVersion(number){
@@ -7957,7 +8006,7 @@ function openDevisVersionChoiceModal(){
   `);
 }
 function confirmSaveDevisKeepNumber(){
-  finalizeSaveDraftDevis();
+  finalizeSaveDraftDevis(false, devisSaveKeepOpen);
 }
 function confirmSaveDevisNewVersion(){
   const originalId = draft.id;
@@ -8221,6 +8270,11 @@ async function exportDevisPdf(id, mode){
           doc.setFillColor(240,239,232);
           doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
           drawRichDesignationCell(doc, data, line.designation, [30,30,30]);
+          // Le remplissage ci-dessus recouvre le quadrillage du tableau déjà tracé sous cette cellule :
+          // on retrace son cadre par-dessus pour qu'elle garde le même encadré que les autres lignes.
+          doc.setDrawColor(140,140,140);
+          doc.setLineWidth(0.3);
+          doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'S');
         }
         return;
       }
