@@ -6128,7 +6128,14 @@ function renderDevisListInner(){
   list.sort((a,b)=>{
     let cmp;
     if(sortBy==='totalht') cmp = devisTotal(a).ht - devisTotal(b).ht;
-    else cmp = (a.date||'').localeCompare(b.date||'') || a.number.localeCompare(b.number);
+    else {
+      // Devis/marchés créés avant l'ajout de l'horodatage de création : on les situe à minuit sur leur
+      // date de pièce plutôt que de les regrouper tous ensemble, pour qu'ils se trient correctement par
+      // rapport aux documents plus récents (dotés, eux, d'un horodatage précis).
+      const aKey = a.createdAt || ((a.date||'0000-00-00')+'T00:00:00');
+      const bKey = b.createdAt || ((b.date||'0000-00-00')+'T00:00:00');
+      cmp = aKey.localeCompare(bKey) || a.number.localeCompare(b.number);
+    }
     return sortDir==='asc' ? cmp : -cmp;
   });
   if(list.length===0) return emptyState('▧','Aucun devis','Créez votre premier devis à partir de vos listes de prix.');
@@ -6813,6 +6820,7 @@ function openImportedDevisReview(parsed, filename){
     lines: parsed.linesGuess,
     pdfColumns: {...DEFAULT_PDF_COLUMNS},
     isNew: true,
+    createdAt: new Date().toISOString(),
     pdfImportRawText: parsed.rawText||''
   };
   const brandIds = [...new Set((draft.lines||[]).map(l=>l.brandId))].filter(Boolean);
@@ -7005,7 +7013,8 @@ function openDevisForm(id, presetClientId){
     notes: '',
     lines: [],
     pdfColumns: {...DEFAULT_PDF_COLUMNS},
-    isNew: true
+    isNew: true,
+    createdAt: new Date().toISOString()
   };
   if(existing) draft.validUntilAuto = false;
   if(draft.destinataire===undefined) draft.destinataire = '';
@@ -7107,6 +7116,7 @@ function duplicateDraftDevis(){
   clone.isNew = true;
   clone.status = 'Brouillon';
   clone.date = todayStr();
+  clone.createdAt = new Date().toISOString();
   clone.validUntil = defaultValidUntil(clone.type||'Devis', clone.date);
   clone.validUntilAuto = true;
   clone.history = []; // un duplicata démarre son propre journal, plutôt que d'hériter de tout l'historique de l'original
