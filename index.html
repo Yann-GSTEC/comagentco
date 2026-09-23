@@ -675,9 +675,11 @@ function escapeHtml(s){
 }
 function stripHtml(html){
   if(!html) return '';
-  const tmp = document.createElement('div');
-  tmp.innerHTML = html;
-  return tmp.textContent || tmp.innerText || '';
+  // Repasse par le même analyseur que le texte enrichi (parseRichRuns) pour que les retours à la ligne
+  // (<br>, changements de paragraphe) soient bien conservés comme de vrais sauts de ligne — sinon la
+  // hauteur de cellule calculée à partir de ce texte "brut" ne correspondait plus au nombre de lignes
+  // réellement affichées, ce qui décalait tout et rognait le bas de la cellule.
+  return parseRichRuns(html).map(r=>r.text).join('');
 }
 /* ---- Reproduction de la mise en forme riche (gras, couleur, surlignage, taille) dans le PDF ---- */
 function hexToRgb(color){
@@ -771,9 +773,19 @@ function wrapRunsToWidth(doc, runs, maxWidth, baseFontSize){
     return segs;
   });
 }
-function drawRichCellText(doc, linesOut, x, y, lineHeight, baseFontSize, baseColorRgb){
+function drawRichCellText(doc, linesOut, x, y, lineHeight, baseFontSize, baseColorRgb, centerWidth){
   linesOut.forEach((segs, li)=>{
     let cx = x;
+    if(centerWidth!=null){
+      let lineWidth = 0;
+      segs.forEach(seg=>{
+        const fs = (seg.style && seg.style.fontSize) || baseFontSize;
+        doc.setFontSize(fs);
+        doc.setFont('helvetica', (seg.style && seg.style.bold) ? 'bold' : 'normal');
+        lineWidth += doc.getTextWidth(seg.text);
+      });
+      cx = x + Math.max(0, (centerWidth-lineWidth)/2);
+    }
     const ly = y + li*lineHeight;
     segs.forEach(seg=>{
       const fs = (seg.style && seg.style.fontSize) || baseFontSize;
@@ -795,7 +807,7 @@ function drawRichCellText(doc, linesOut, x, y, lineHeight, baseFontSize, baseCol
   doc.setFont('helvetica','normal');
   doc.setTextColor(baseColorRgb[0], baseColorRgb[1], baseColorRgb[2]);
 }
-function drawRichDesignationCell(doc, data, html, baseColorRgb){
+function drawRichDesignationCell(doc, data, html, baseColorRgb, centered){
   const runs = parseRichRuns(html);
   if(runs.length===0) return false;
   const pad = data.cell.styles.cellPadding || {top:2.6,left:2.6,right:2.6};
@@ -805,13 +817,13 @@ function drawRichDesignationCell(doc, data, html, baseColorRgb){
   const maxWidth = data.cell.width - padLeft - padRight;
   const linesOut = wrapRunsToWidth(doc, runs, maxWidth, fs);
   if(linesOut.length===0) return false;
-  const lh = fs*0.3528*1.15;
+  const lh = fs*0.3528*2.0;
   // Centre le bloc de texte verticalement dans la cellule, comme les autres colonnes (valign:'middle'),
   // plutôt que de le caler en haut — ce qui décalait tout dès que la ligne devenait plus haute qu'une
   // seule ligne de texte (retour à la ligne, texte long...).
   const textBlockHeight = linesOut.length*lh;
   const startY = data.cell.y + (data.cell.height - textBlockHeight)/2 + fs*0.3528*0.8;
-  drawRichCellText(doc, linesOut, data.cell.x+padLeft, startY, lh, fs, baseColorRgb);
+  drawRichCellText(doc, linesOut, data.cell.x+padLeft, startY, lh, fs, baseColorRgb, centered?maxWidth:null);
   return true;
 }
 
@@ -8256,7 +8268,7 @@ async function exportDevisPdf(id, mode){
   const cols = d.pdfColumns || DEFAULT_PDF_COLUMNS;
   const colDefs = [
     {key:'ref', head:'Code Article', always:true, get:l=>l.reference, align:'left', width:24},
-    {key:'desig', head:'Désignation', get:l=>stripHtml(l.designation)||'', align:'left', width:'auto'},
+    {key:'desig', head:'Désignation', get:l=>stripHtml(l.designation)||'', align:'center', width:'auto'},
     {key:'qty', head:'Qté', get:l=>String(l.qty), align:'center', width:14},
     {key:'puht', head:'PU Tarif HT', get:l=>fmtMoneyPdf(l.prixUnitaire), align:'right', width:20},
     {key:'remise1', head:'Remise 1', get:l=>(l.remisePct1||0)+' %', align:'right', width:16},
@@ -8280,16 +8292,43 @@ async function exportDevisPdf(id, mode){
   });
 
   const desigColIdx = colDefs.findIndex(cd=>cd.key==='desig');
+  // Largeur réelle de la colonne Désignation, calculée nous-mêmes (largeur totale du tableau moins celle
+  // de toutes les colonnes à largeur fixe) : à l'étape où le tableau nous laisse ajuster la hauteur des
+  // lignes (didParseCell), la largeur finale de la colonne "auto" n'est pas encore connue de manière
+  // fiable, ce qui faussait complètement le calcul du nombre de lignes nécessaires.
+  const fixedColsWidth = colDefs.reduce((s,c)=> s + (c.key==='desig' ? 0 : (c.width==='auto'?0:c.width)), 0);
+  const desigWidthMm = (RIGHT-LEFT) - fixedColsWidth;
   doc.autoTable({
     startY: y,
     head: [colDefs.map(c=>c.head)],
     body: rows,
     theme: 'grid',
-    styles:{fontSize:8.5, cellPadding:{top:2.6,bottom:2.6,left:2.6,right:2.6}, textColor:[35,35,35], lineColor:[140,140,140], lineWidth:0.3, valign:'middle'},
+    styles:{fontSize:8.5, cellPadding:{top:2.6,bottom:2.6,left:2.6,right:2.6}, textColor:[35,35,35], lineColor:[140,140,140], lineWidth:0.3, valign:'middle', fillColor:[255,255,255]},
+    alternateRowStyles:{fillColor:[255,255,255]},
     headStyles:{fillColor:[240,244,250], textColor:[20,20,20], fontStyle:'bold', lineColor:[140,140,140], lineWidth:0.3, halign:'center'},
-    alternateRowStyles:{fillColor:[244,248,253]},
     columnStyles: columnStyles,
     margin:{left:LEFT, right:PAGE_W-RIGHT, top:26, bottom:24},
+    didParseCell: (data)=>{
+      // La désignation mise en forme (gras, couleur…) utilise son propre espacement entre les lignes,
+      // plus généreux que celui calculé par défaut pour le texte brut : sans ce recalage, la hauteur de
+      // ligne réservée par le tableau était trop courte, ce qui poussait le texte à déborder en haut.
+      if(data.section!=='body' || data.column.index!==desigColIdx) return;
+      const line = (d.lines||[])[data.row.index];
+      if(!line || !line.designation || !/[<]/.test(line.designation)) return;
+      const runs = parseRichRuns(line.designation);
+      if(runs.length===0) return;
+      const pad = data.cell.styles.cellPadding || {top:2.6,left:2.6,right:2.6};
+      const padLeft = (typeof pad==='object') ? (pad.left||2.6) : pad;
+      const padRight = (typeof pad==='object') ? (pad.right!=null?pad.right:padLeft) : pad;
+      const padTop = (typeof pad==='object') ? (pad.top||2.6) : pad;
+      const padBottom = (typeof pad==='object') ? (pad.bottom!=null?pad.bottom:padTop) : pad;
+      const fs = data.cell.styles.fontSize || 8.5;
+      const maxWidth = desigWidthMm - padLeft - padRight;
+      const linesOut = wrapRunsToWidth(doc, runs, maxWidth, fs);
+      const lh = fs*0.3528*2.0;
+      const needed = linesOut.length*lh + padTop + padBottom;
+      data.cell.styles.minCellHeight = Math.max(data.cell.styles.minCellHeight||0, needed);
+    },
     didDrawCell: (data)=>{
       if(data.section!=='body') return;
       const line = (d.lines||[])[data.row.index];
@@ -8310,13 +8349,18 @@ async function exportDevisPdf(id, mode){
         return;
       }
       if(data.column.index !== desigColIdx) return;
-      const bg = (data.row.index % 2 === 1) ? [244,248,253] : [255,255,255];
       const drew = (()=>{
         // On ne repeint le fond (pour masquer le texte brut déjà tracé) que si une mise en forme existe réellement.
         if(!/[<]/.test(line.designation)) return false;
-        doc.setFillColor(bg[0], bg[1], bg[2]);
+        doc.setFillColor(255,255,255);
         doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
-        return drawRichDesignationCell(doc, data, line.designation, [35,35,35]);
+        const ok = drawRichDesignationCell(doc, data, line.designation, [35,35,35], true);
+        // Le remplissage ci-dessus recouvre le quadrillage déjà tracé sous cette cellule : on retrace
+        // son contour par-dessus pour qu'il reste identique à celui des autres colonnes.
+        doc.setDrawColor(140,140,140);
+        doc.setLineWidth(0.3);
+        doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'S');
+        return ok;
       })();
     },
     didDrawPage: (data)=>{
