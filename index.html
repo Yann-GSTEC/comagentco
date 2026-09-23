@@ -807,23 +807,58 @@ function drawRichCellText(doc, linesOut, x, y, lineHeight, baseFontSize, baseCol
   doc.setFont('helvetica','normal');
   doc.setTextColor(baseColorRgb[0], baseColorRgb[1], baseColorRgb[2]);
 }
-function drawRichDesignationCell(doc, data, html, baseColorRgb, centered){
+function computeLineButtonsHeight(line){
+  if(!line) return 0;
+  const hasAny = !!(line.ficheTechniqueUrl || line.noticeUrl || line.photoUrl);
+  return hasAny ? 7 : 0;
+}
+function drawDevisLineLinkButtons(doc, cellX, cellWidth, y, line){
+  const buttons = [];
+  if(line.ficheTechniqueUrl) buttons.push({label:'Fiche technique', url:line.ficheTechniqueUrl, color:[47,111,189]});
+  if(line.noticeUrl) buttons.push({label:'Notice', url:line.noticeUrl, color:[184,134,59]});
+  if(line.photoUrl) buttons.push({label:'Photo', url:line.photoUrl, color:[175,75,61]});
+  if(buttons.length===0) return;
+  const fs = 7, padX = 2.4, gap = 2.5, h = 4.8;
+  doc.setFontSize(fs);
+  doc.setFont('helvetica','normal');
+  const widths = buttons.map(b=>doc.getTextWidth(b.label) + padX*2);
+  const totalWidth = widths.reduce((s,w)=>s+w,0) + gap*(buttons.length-1);
+  let cx = cellX + (cellWidth-totalWidth)/2;
+  buttons.forEach((b,i)=>{
+    const w = widths[i];
+    doc.setDrawColor(b.color[0], b.color[1], b.color[2]);
+    doc.setTextColor(b.color[0], b.color[1], b.color[2]);
+    doc.setLineWidth(0.25);
+    doc.roundedRect(cx, y, w, h, h/2, h/2, 'S');
+    doc.text(b.label, cx+w/2, y+h/2+fs*0.3528*0.35, {align:'center'});
+    doc.link(cx, y, w, h, {url:b.url});
+    cx += w+gap;
+  });
+}
+function drawRichDesignationCell(doc, data, html, baseColorRgb, centered, line){
   const runs = parseRichRuns(html);
-  if(runs.length===0) return false;
+  const btnHeight = computeLineButtonsHeight(line);
+  if(runs.length===0 && btnHeight===0) return false;
   const pad = data.cell.styles.cellPadding || {top:2.6,left:2.6,right:2.6};
   const padLeft = (typeof pad==='object') ? (pad.left||2.6) : pad;
   const padRight = (typeof pad==='object') ? (pad.right!=null?pad.right:padLeft) : pad;
   const fs = data.cell.styles.fontSize || 8.5;
   const maxWidth = data.cell.width - padLeft - padRight;
-  const linesOut = wrapRunsToWidth(doc, runs, maxWidth, fs);
-  if(linesOut.length===0) return false;
+  const linesOut = runs.length ? wrapRunsToWidth(doc, runs, maxWidth, fs) : [];
   const lh = fs*0.3528*2.0;
-  // Centre le bloc de texte verticalement dans la cellule, comme les autres colonnes (valign:'middle'),
-  // plutôt que de le caler en haut — ce qui décalait tout dès que la ligne devenait plus haute qu'une
-  // seule ligne de texte (retour à la ligne, texte long...).
+  const btnGap = btnHeight ? 2.2 : 0;
+  // Centre l'ensemble (texte + éventuels boutons de liens) verticalement dans la cellule, comme les
+  // autres colonnes (valign:'middle'), plutôt que de le caler en haut.
   const textBlockHeight = linesOut.length*lh;
-  const startY = data.cell.y + (data.cell.height - textBlockHeight)/2 + fs*0.3528*0.8;
-  drawRichCellText(doc, linesOut, data.cell.x+padLeft, startY, lh, fs, baseColorRgb, centered?maxWidth:null);
+  const totalHeight = textBlockHeight + (btnHeight?btnGap+btnHeight:0);
+  let cursorY = data.cell.y + (data.cell.height - totalHeight)/2;
+  if(linesOut.length){
+    drawRichCellText(doc, linesOut, data.cell.x+padLeft, cursorY+fs*0.3528*0.8, lh, fs, baseColorRgb, centered?maxWidth:null);
+    cursorY += textBlockHeight;
+  }
+  if(btnHeight){
+    drawDevisLineLinkButtons(doc, data.cell.x+padLeft, maxWidth, cursorY+btnGap, line);
+  }
   return true;
 }
 
@@ -5030,6 +5065,11 @@ function openTarifForm(id){
       </div>
       <div class="field"><label>Complément info <span class="helper" style="display:inline;">(rappel affiché lors de l'ajout de cette référence dans un devis — n'apparaît jamais sur le PDF)</span></label><input type="text" id="f_complementInfo" value="${t?escapeHtml(t.complementInfo||''):''}" placeholder="Ex. Vérifier le délai fournisseur avant de confirmer"></div>
       <div class="field"><label>Éco-participation (€) <span class="helper" style="display:inline;">— une ligne "Éco-participation" est ajoutée automatiquement sous cette référence dans les devis</span></label><input type="number" step="0.01" min="0" id="f_ecopart" value="${t&&t.ecopart?t.ecopart:''}" placeholder="Ex. 2.58"></div>
+      <div class="field-row">
+        <div class="field"><label>Lien fiche technique (URL) <span class="helper" style="display:inline;">— apparaît sous forme de bouton cliquable dans les devis PDF</span></label><input type="text" id="f_ficheTechniqueUrl" value="${t?escapeHtml(t.ficheTechniqueUrl||''):''}" placeholder="https://..."></div>
+        <div class="field"><label>Lien notice (URL)</label><input type="text" id="f_noticeUrl" value="${t?escapeHtml(t.noticeUrl||''):''}" placeholder="https://..."></div>
+        <div class="field"><label>Lien photo (URL)</label><input type="text" id="f_photoUrl" value="${t?escapeHtml(t.photoUrl||''):''}" placeholder="https://..."></div>
+      </div>
       <div class="section-title">Prix</div>
       <div class="field-row">
         <div class="field"><label>Prix Net (€) * <span class="helper" style="display:inline;">— utilisé dans les devis</span></label><input type="number" step="0.01" id="f_prix" value="${t?t.prixHT:''}"></div>
@@ -5087,6 +5127,9 @@ function saveTarif(id){
     codeSousFamilleArticle: document.getElementById('f_codeSousFamille').value.trim(),
     complementInfo: document.getElementById('f_complementInfo').value.trim(),
     ecopart: parseFloat(document.getElementById('f_ecopart').value)||0,
+    ficheTechniqueUrl: document.getElementById('f_ficheTechniqueUrl').value.trim(),
+    noticeUrl: document.getElementById('f_noticeUrl').value.trim(),
+    photoUrl: document.getElementById('f_photoUrl').value.trim(),
     prixCatalogue: parseFloat(document.getElementById('f_prixCatalogue').value)||0,
     prixAchatDistributeur: parseFloat(document.getElementById('f_prixAchatDistrib').value)||0,
     prixAchatConseilleInstallateur: parseFloat(document.getElementById('f_prixAchatConseille').value)||0,
@@ -5199,6 +5242,9 @@ function renderImportMapping(){
   const guessSousFamille = guessColIndex(first, /sous.?famille/i);
   const guessComplement = guessColIndex(first, /compl[ée]ment/i);
   const guessEcopart = guessColIndex(first, /[ée]co.?part/i);
+  const guessFicheTech = guessColIndex(first, /fiche.?technique|datasheet/i);
+  const guessNotice = guessColIndex(first, /notice|manuel/i);
+  const guessPhoto = guessColIndex(first, /photo|image/i);
   const defRef = guessRef>=0 ? guessRef : 0;
   const defDesig = guessDesig>=0 && guessDesig!==defRef ? guessDesig : (nCols>1?1:0);
   const defPrix = guessPrix>=0 && guessPrix!==defRef ? guessPrix : (nCols>2?2:0);
@@ -5216,6 +5262,11 @@ function renderImportMapping(){
       <div class="field"><label>Colonne Complément info</label><select id="imp_colComplement"><option value="-1">— Non utilisé —</option>${opts(guessComplement)}</select></div>
       <div class="field"><label>Colonne Éco-participation</label><select id="imp_colEcopart"><option value="-1">— Non utilisé —</option>${opts(guessEcopart)}</select></div>
     </div>
+    <div class="field-row">
+      <div class="field"><label>Colonne lien fiche technique</label><select id="imp_colFicheTech"><option value="-1">— Non utilisé —</option>${opts(guessFicheTech)}</select></div>
+      <div class="field"><label>Colonne lien notice</label><select id="imp_colNotice"><option value="-1">— Non utilisé —</option>${opts(guessNotice)}</select></div>
+      <div class="field"><label>Colonne lien photo</label><select id="imp_colPhoto"><option value="-1">— Non utilisé —</option>${opts(guessPhoto)}</select></div>
+    </div>
     <div class="helper">${importParsedRows.length} ligne(s) détectée(s) dans le fichier. Toutes les lignes avec une référence sont importées, même sans prix (elles seront à 0 €) — seule une référence vide fait ignorer une ligne.</div>
   `;
   document.getElementById('imp_confirmBtn').style.display='inline-flex';
@@ -5231,6 +5282,9 @@ function confirmImport(){
   const colSousFamille = parseInt(document.getElementById('imp_colSousFamille').value);
   const colComplement = parseInt(document.getElementById('imp_colComplement').value);
   const colEcopart = parseInt(document.getElementById('imp_colEcopart').value);
+  const colFicheTech = parseInt(document.getElementById('imp_colFicheTech').value);
+  const colNotice = parseInt(document.getElementById('imp_colNotice').value);
+  const colPhoto = parseInt(document.getElementById('imp_colPhoto').value);
   const rows = importParsedRows.slice(hasHeader?1:0);
   const btn = document.getElementById('imp_confirmBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Import en cours…'; }
@@ -5244,7 +5298,7 @@ function confirmImport(){
     state.tarifs.forEach(t=>{
       if(t.brandId===brandId) index.set(t.reference.toLowerCase(), t);
     });
-    let added=0, updated=0, zeroPrice=0, skipped=0;
+    let added=0, updated=0, zeroPrice=0, skipped=0, withFicheTech=0, withNotice=0, withPhoto=0;
     rows.forEach(row=>{
       const reference = (row[colRef]||'').toString().trim();
       if(!reference){ skipped++; return; }
@@ -5256,6 +5310,12 @@ function confirmImport(){
       const codeSousFamilleArticle = (colSousFamille>=0) ? (row[colSousFamille]||'').toString().trim() : '';
       const complementInfo = (colComplement>=0) ? (row[colComplement]||'').toString().trim() : '';
       const ecopart = (colEcopart>=0) ? parseMoneyLoose(row[colEcopart]) : 0;
+      const ficheTechniqueUrl = (colFicheTech>=0) ? (row[colFicheTech]||'').toString().trim() : '';
+      const noticeUrl = (colNotice>=0) ? (row[colNotice]||'').toString().trim() : '';
+      const photoUrl = (colPhoto>=0) ? (row[colPhoto]||'').toString().trim() : '';
+      if(ficheTechniqueUrl) withFicheTech++;
+      if(noticeUrl) withNotice++;
+      if(photoUrl) withPhoto++;
       const key = reference.toLowerCase();
       const existing = index.get(key);
       if(existing){
@@ -5265,9 +5325,12 @@ function confirmImport(){
         if(codeSousFamilleArticle) existing.codeSousFamilleArticle = codeSousFamilleArticle;
         if(complementInfo) existing.complementInfo = complementInfo;
         if(ecopart) existing.ecopart = ecopart;
+        if(ficheTechniqueUrl) existing.ficheTechniqueUrl = ficheTechniqueUrl;
+        if(noticeUrl) existing.noticeUrl = noticeUrl;
+        if(photoUrl) existing.photoUrl = photoUrl;
         updated++;
       } else {
-        const newTarif = {id:uid(), brandId, reference, designation, codeFamilleArticle, codeSousFamilleArticle, complementInfo, ecopart, prixHT:0, prixCatalogue:0, prixAchatDistributeur:0, prixAchatConseilleInstallateur:0};
+        const newTarif = {id:uid(), brandId, reference, designation, codeFamilleArticle, codeSousFamilleArticle, complementInfo, ecopart, ficheTechniqueUrl, noticeUrl, photoUrl, prixHT:0, prixCatalogue:0, prixAchatDistributeur:0, prixAchatConseilleInstallateur:0};
         newTarif[targetField] = prix;
         state.tarifs.push(newTarif);
         index.set(key, newTarif); // évite les doublons si la même référence apparaît plusieurs fois dans le fichier
@@ -6861,7 +6924,7 @@ function replaceDevisLineWithTarif(idx, tarifId){
   const pricing = computeLinePricing(t, draft.date);
   draft.lines[idx] = {
     id: line.id, tarifId:t.id, brandId:t.brandId, reference:t.reference, designation:t.designation,
-    qty: line.qty, complementInfo:t.complementInfo||'', ...pricing,
+    qty: line.qty, complementInfo:t.complementInfo||'', ficheTechniqueUrl:t.ficheTechniqueUrl||'', noticeUrl:t.noticeUrl||'', photoUrl:t.photoUrl||'', ...pricing,
     ecoPartLineId: line.ecoPartLineId, linkedToLineId: line.linkedToLineId,
   };
   refreshDevisModal();
@@ -7181,9 +7244,11 @@ function devisFormHtml(){
         </div>
       </div>
 
+      ${draft.type!=='Marché'?`
       <div class="totals-box">
         <div class="totals-row total"><span>Total HT (Prix d'achat HT)</span><span class="num">${fmtMoney(t.ht)}</span></div>
       </div>
+      `:''}
 
       <div class="field" style="margin-top:16px;"><label>Notes / conditions</label><textarea id="d_notes" rows="2" onchange="draft.notes=this.value;">${escapeHtml(draft.notes||'')}</textarea></div>
       <div class="field" style="margin-top:16px;">
@@ -7755,7 +7820,7 @@ function addDevisLine(tarifId){
   const mainLineId = uid();
   draft.lines.push({
     id:mainLineId, tarifId:t.id, brandId:t.brandId, reference:t.reference, designation:t.designation,
-    qty:1, complementInfo:t.complementInfo||'', ...pricing,
+    qty:1, complementInfo:t.complementInfo||'', ficheTechniqueUrl:t.ficheTechniqueUrl||'', noticeUrl:t.noticeUrl||'', photoUrl:t.photoUrl||'', ...pricing,
   });
   // Éco-participation : si le tarif en porte une, on ajoute automatiquement une ligne dédiée juste en
   // dessous, avec la même quantité que la référence concernée — les deux lignes restent liées ensuite :
@@ -8314,9 +8379,11 @@ async function exportDevisPdf(id, mode){
       // ligne réservée par le tableau était trop courte, ce qui poussait le texte à déborder en haut.
       if(data.section!=='body' || data.column.index!==desigColIdx) return;
       const line = (d.lines||[])[data.row.index];
-      if(!line || !line.designation || !/[<]/.test(line.designation)) return;
-      const runs = parseRichRuns(line.designation);
-      if(runs.length===0) return;
+      if(!line) return;
+      const btnHeight = computeLineButtonsHeight(line);
+      const hasFormatting = line.designation && /[<]/.test(line.designation);
+      if(!hasFormatting && btnHeight===0) return;
+      const runs = hasFormatting ? parseRichRuns(line.designation) : [];
       const pad = data.cell.styles.cellPadding || {top:2.6,left:2.6,right:2.6};
       const padLeft = (typeof pad==='object') ? (pad.left||2.6) : pad;
       const padRight = (typeof pad==='object') ? (pad.right!=null?pad.right:padLeft) : pad;
@@ -8324,9 +8391,10 @@ async function exportDevisPdf(id, mode){
       const padBottom = (typeof pad==='object') ? (pad.bottom!=null?pad.bottom:padTop) : pad;
       const fs = data.cell.styles.fontSize || 8.5;
       const maxWidth = desigWidthMm - padLeft - padRight;
-      const linesOut = wrapRunsToWidth(doc, runs, maxWidth, fs);
+      const linesOut = runs.length ? wrapRunsToWidth(doc, runs, maxWidth, fs) : [];
       const lh = fs*0.3528*2.0;
-      const needed = linesOut.length*lh + padTop + padBottom;
+      const btnGap = btnHeight ? 2.2 : 0;
+      const needed = linesOut.length*lh + (btnHeight?btnGap+btnHeight:0) + padTop + padBottom;
       data.cell.styles.minCellHeight = Math.max(data.cell.styles.minCellHeight||0, needed);
     },
     didDrawCell: (data)=>{
@@ -8339,7 +8407,7 @@ async function exportDevisPdf(id, mode){
         if(/[<]/.test(line.designation)){
           doc.setFillColor(240,239,232);
           doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
-          drawRichDesignationCell(doc, data, line.designation, [30,30,30]);
+          drawRichDesignationCell(doc, data, line.designation, [30,30,30], false, line);
           // Le remplissage ci-dessus recouvre le quadrillage du tableau déjà tracé sous cette cellule :
           // on retrace son cadre par-dessus pour qu'elle garde le même encadré que les autres lignes.
           doc.setDrawColor(140,140,140);
@@ -8350,11 +8418,12 @@ async function exportDevisPdf(id, mode){
       }
       if(data.column.index !== desigColIdx) return;
       const drew = (()=>{
-        // On ne repeint le fond (pour masquer le texte brut déjà tracé) que si une mise en forme existe réellement.
-        if(!/[<]/.test(line.designation)) return false;
+        // On repeint le fond (pour masquer le texte brut déjà tracé) dès qu'une mise en forme existe
+        // réellement, OU que des boutons de liens (fiche technique/notice/photo) doivent être affichés.
+        if(!/[<]/.test(line.designation) && computeLineButtonsHeight(line)===0) return false;
         doc.setFillColor(255,255,255);
         doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
-        const ok = drawRichDesignationCell(doc, data, line.designation, [35,35,35], true);
+        const ok = drawRichDesignationCell(doc, data, line.designation, [35,35,35], true, line);
         // Le remplissage ci-dessus recouvre le quadrillage déjà tracé sous cette cellule : on retrace
         // son contour par-dessus pour qu'il reste identique à celui des autres colonnes.
         doc.setDrawColor(140,140,140);
@@ -8422,14 +8491,18 @@ async function exportDevisPdf(id, mode){
   const totalBoxW = Math.max(72, totalLabelW + totalStrW + 14);
   const totalBoxH = 11;
   ensureRoom(totalBoxH + 4);
-  const totalBoxX = RIGHT - totalBoxW, totalBoxY = finalY + 3;
-  doc.setFillColor(232,240,250); doc.setDrawColor(30,58,95); doc.setLineWidth(0.4);
-  doc.roundedRect(totalBoxX, totalBoxY, totalBoxW, totalBoxH, 1.2, 1.2, 'FD');
-  doc.setFont('helvetica','bold'); doc.setFontSize(12.5); doc.setTextColor(20,40,70);
-  doc.text(totalLabel, totalBoxX+5, totalBoxY+totalBoxH/2+1.6, {align:'left'});
-  doc.text(totalStr, RIGHT-5, totalBoxY+totalBoxH/2+1.6, {align:'right'});
+  const totalBoxY = finalY + 3;
+  const showTotalBox = d.type!=='Marché';
+  if(showTotalBox){
+    const totalBoxX = RIGHT - totalBoxW;
+    doc.setFillColor(232,240,250); doc.setDrawColor(30,58,95); doc.setLineWidth(0.4);
+    doc.roundedRect(totalBoxX, totalBoxY, totalBoxW, totalBoxH, 1.2, 1.2, 'FD');
+    doc.setFont('helvetica','bold'); doc.setFontSize(12.5); doc.setTextColor(20,40,70);
+    doc.text(totalLabel, totalBoxX+5, totalBoxY+totalBoxH/2+1.6, {align:'left'});
+    doc.text(totalStr, RIGHT-5, totalBoxY+totalBoxH/2+1.6, {align:'right'});
+  }
 
-  const merciLines = doc.splitTextToSize('Merci de bien vouloir mentionner le numéro de cette offre lors de votre commande.', totalBoxX-LEFT-6);
+  const merciLines = doc.splitTextToSize('Merci de bien vouloir mentionner le numéro de cette offre lors de votre commande.', showTotalBox ? (RIGHT-totalBoxW-LEFT-6) : (RIGHT-LEFT));
   doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(70);
   doc.text(merciLines, LEFT, totalBoxY+totalBoxH/2+1.6);
   finalY = totalBoxY + totalBoxH + 4;
