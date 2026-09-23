@@ -323,6 +323,7 @@ label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-
 .autocomplete-item{padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--line);font-size:13px;}
 .autocomplete-item:last-child{border-bottom:none;}
 .autocomplete-item:hover{background:var(--surface-2);}
+.autocomplete-item.active{background:var(--accent);color:var(--accent-ink);}
 .autocomplete-item .ref{font-weight:700;font-family:'Space Grotesk';}
 .autocomplete-item .desig{color:var(--ink-soft);font-size:12px;}
 
@@ -1257,6 +1258,38 @@ function reindexSearchKeys(){
   state.listesPrixNets.forEach(t=>{ t._sk = (t.reference+' '+(t.designation||'')).toLowerCase(); });
 }
 function tarifSK(t){ return t._sk || (t._sk = (t.reference+' '+(t.designation||'')).toLowerCase()); }
+function normalizeCompanyForDup(s){
+  return String(s||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .replace(/\b(sarl|sas|sasu|sa|eurl|eirl|ets|etablissements?|societe|sci)\b/g,'')
+    .replace(/[^a-z0-9]+/g,' ')
+    .trim();
+}
+function findSimilarClients(name, excludeId){
+  const norm = normalizeCompanyForDup(name);
+  if(!norm || norm.length<3) return [];
+  return state.clients.filter(c=>{
+    if(c.id===excludeId) return false;
+    const cn = normalizeCompanyForDup(c.company||c.name);
+    if(!cn || cn.length<3) return false;
+    return cn===norm || cn.includes(norm) || norm.includes(cn);
+  });
+}
+let clientDupCheckTimer = null;
+function checkClientNameDuplicate(value){
+  clearTimeout(clientDupCheckTimer);
+  clientDupCheckTimer = setTimeout(()=>{
+    const box = document.getElementById('clientDupWarning');
+    if(!box) return;
+    const matches = findSimilarClients(value, clientDraftId);
+    if(matches.length===0){ box.innerHTML=''; return; }
+    box.innerHTML = `
+      <div class="helper" style="background:#FFF3CD;border:1px solid #E9C46A;border-radius:6px;padding:8px 10px;margin:-6px 0 14px;color:#7A5B10;">
+        ⚠ ${matches.length>1?'Des sociétés existantes portent des noms proches':'Une société existante porte un nom proche'} : <strong>${matches.map(c=>escapeHtml(clientDisplayName(c))).join(', ')}</strong>. Vérifiez qu'il ne s'agit pas d'un doublon avant de continuer (une même enseigne avec plusieurs agences reste normale).
+      </div>`;
+  }, 300);
+}
 function normalizeRefQuery(s){
   return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'');
 }
@@ -2697,6 +2730,7 @@ function renderClients(){
       <button class="btn" onclick="openHistoryImportModal()" title="Importer des comptes-rendus de rendez-vous / suivi commercial depuis un autre logiciel">⇪ Importer un suivi</button>
       <button class="btn" onclick="exportClientsExcel()">⇩ Exporter (Excel)</button>
       <button class="btn" onclick="openMergeContactsModal()" title="Regroupe les fiches clients d'une même société en une seule fiche, les autres devenant des contacts">⇄ Regrouper les contacts par société</button>
+      <button class="btn" onclick="openDuplicatesFinderModal()" title="Repère les sociétés à noms proches et les contacts en double, avec fusion au cas par cas">🔍 Rechercher les doublons</button>
       <button class="btn btn-primary" onclick="openClientForm()">+ Ajouter un client</button>
     </div>
   </div>
@@ -2866,10 +2900,12 @@ function updateClientsTableOnly(){
 
 let clientDraftContacts = [];
 let clientDraftRemises = [];
+let clientDraftId = null;
 function openClientForm(id){
   const c = id ? state.clients.find(x=>x.id===id) : null;
   clientDraftContacts = c && c.contacts ? JSON.parse(JSON.stringify(c.contacts)) : [];
   clientDraftRemises = c ? JSON.parse(JSON.stringify(clientRemiseRules(c))) : [];
+  clientDraftId = id || null;
   openModal(`
     <div class="modal-head"><h3>${c?'Modifier le client':'Nouveau client'}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
@@ -2878,7 +2914,8 @@ function openClientForm(id){
           <input type="checkbox" id="f_inactif" style="width:auto;" ${c&&c.actif===false?'checked':''}> N'est plus utilisé
         </label>
       </div>
-      <div class="field"><label>Société *</label><input type="text" id="f_company" value="${c?escapeHtml(c.company||''):''}" placeholder="Ex. Boutique Lumen"></div>
+      <div class="field"><label>Société *</label><input type="text" id="f_company" value="${c?escapeHtml(c.company||''):''}" placeholder="Ex. Boutique Lumen" oninput="checkClientNameDuplicate(this.value)"></div>
+      <div id="clientDupWarning"></div>
       ${!c?`
       <div class="field" style="margin-bottom:14px;">
         <label>Ajouter un contact pour une société déjà enregistrée <span class="helper" style="display:inline;">(pré-remplit automatiquement les informations de la société ci-dessous — il ne reste plus qu'à saisir les coordonnées du nouveau contact)</span></label>
@@ -2933,7 +2970,7 @@ function openClientForm(id){
       ${datalistHtml('dl_fonctionsContacts','fonctionsContacts')}
       <div class="table-wrap lines-table">
         <table class="contacts-sheet">
-          <thead><tr><th style="width:90px;">Civilité</th><th>Nom</th><th>Prénom</th><th>Fonction</th><th>Téléphone</th><th>Portable</th><th>Email</th><th>Commentaire</th><th style="width:70px;">Inactif</th><th></th></tr></thead>
+          <thead><tr><th style="width:90px;">Civilité</th><th>Nom</th><th>Prénom</th><th>Fonction</th><th>Téléphone</th><th>Portable</th><th>Email</th><th>Commentaire</th><th style="width:70px;">Inactif</th><th></th><th></th></tr></thead>
           <tbody id="clientContactsBody">${clientContactsRowsHtml()}</tbody>
         </table>
       </div>
@@ -2993,7 +3030,7 @@ function applyExistingCompanyToNewClient(clientId){
   showToast('Informations de la société pré-remplies — il ne reste qu\'à saisir les coordonnées du nouveau contact.');
 }
 function clientContactsRowsHtml(){
-  if(clientDraftContacts.length===0) return `<tr><td colspan="10" class="helper" style="text-align:center;padding:14px;">Aucun contact ajouté.</td></tr>`;
+  if(clientDraftContacts.length===0) return `<tr><td colspan="11" class="helper" style="text-align:center;padding:14px;">Aucun contact ajouté.</td></tr>`;
   const civOpts = civiliteOptions();
   return clientDraftContacts.map((p,i)=>{
     const inactive = p.actif===false;
@@ -3008,9 +3045,80 @@ function clientContactsRowsHtml(){
       <td><input type="email" value="${escapeHtml(p.email||'')}" onchange="clientDraftContacts[${i}].email=this.value;"></td>
       <td><input type="text" value="${escapeHtml(p.commentaire||'')}" onchange="clientDraftContacts[${i}].commentaire=this.value;"></td>
       <td style="text-align:center;"><input type="checkbox" style="width:auto;" ${inactive?'checked':''} onchange="clientDraftContacts[${i}].actif=!this.checked; refreshClientContactsTable();" title="Ce contact n'est plus utilisé"></td>
+      <td><button type="button" class="btn btn-sm btn-ghost" onclick="openMoveContactModal(${i})" title="Déplacer ou dupliquer ce contact vers une autre société">⇄</button></td>
       <td><button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="clientDraftContacts.splice(${i},1); refreshClientContactsTable();">✕</button></td>
     </tr>
   `;}).join('');
+}
+let moveContactPickedTargetId = '';
+function refreshClientModal(){
+  // Reconstruit la fenêtre client à partir de la fiche enregistrée : pratique pour revenir en arrière
+  // après un déplacement/duplication de contact, mais toute autre modification du formulaire pas encore
+  // enregistrée (nom, adresse…) serait alors perdue — utilisez ce bouton juste après avoir ouvert la fiche.
+  openClientForm(clientDraftId);
+}
+function openMoveContactModal(contactIndex){
+  const p = clientDraftContacts[contactIndex];
+  if(!p) return;
+  const nomComplet = [p.civilite,p.prenom,p.nom].filter(Boolean).join(' ') || 'ce contact';
+  moveContactPickedTargetId = '';
+  openModal(`
+    <div class="modal-head"><h3>Déplacer / dupliquer ${escapeHtml(nomComplet)}</h3><button class="close-x" onclick="refreshClientModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="helper" style="margin-bottom:10px;">Utile par exemple si un même interlocuteur suit plusieurs agences d'un même groupe (chacune étant une fiche société séparée) : "Dupliquer" garde ce contact ici et l'ajoute aussi ailleurs ; "Déplacer" le retire d'ici pour l'ajouter là-bas.</div>
+      <div class="field"><label>Société de destination</label>
+        <input type="text" id="moveContactSearch" placeholder="Rechercher une société…" autocomplete="off" oninput="moveContactSearchRun(this.value, ${contactIndex})">
+        <div id="moveContactResults" style="margin-top:8px;"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="refreshClientModal()">Annuler</button>
+      <button class="btn" id="moveContactDuplicateBtn" disabled onclick="duplicateContactToClient(${contactIndex})">Dupliquer là-bas</button>
+      <button class="btn btn-primary" id="moveContactMoveBtn" disabled onclick="moveContactToClient(${contactIndex})">Déplacer là-bas</button>
+    </div>
+  `);
+}
+function moveContactSearchRun(q, contactIndex){
+  const box = document.getElementById('moveContactResults');
+  if(!box) return;
+  q = q.trim().toLowerCase();
+  moveContactPickedTargetId = '';
+  document.getElementById('moveContactDuplicateBtn').disabled = true;
+  document.getElementById('moveContactMoveBtn').disabled = true;
+  if(!q){ box.innerHTML=''; return; }
+  const results = state.clients.filter(c=>c.id!==clientDraftId && (clientDisplayName(c)||'').toLowerCase().includes(q)).slice(0,15);
+  if(results.length===0){ box.innerHTML = `<div class="helper">Aucune société trouvée pour « ${escapeHtml(q)} ».</div>`; return; }
+  box.innerHTML = `<div class="autocomplete-list">${results.map(c=>`
+    <div class="autocomplete-item" onclick="pickMoveContactTarget('${c.id}', this)">${escapeHtml(clientDisplayName(c))}${c.ville?` — <span class="helper" style="display:inline;">${escapeHtml(c.ville)}</span>`:''}</div>
+  `).join('')}</div>`;
+}
+function pickMoveContactTarget(clientId, el){
+  moveContactPickedTargetId = clientId;
+  document.querySelectorAll('#moveContactResults .autocomplete-item').forEach(x=>x.classList.remove('active'));
+  if(el) el.classList.add('active');
+  document.getElementById('moveContactDuplicateBtn').disabled = false;
+  document.getElementById('moveContactMoveBtn').disabled = false;
+}
+function duplicateContactToClient(contactIndex){
+  const p = clientDraftContacts[contactIndex];
+  const target = state.clients.find(x=>x.id===moveContactPickedTargetId);
+  if(!p || !target) return;
+  target.contacts = target.contacts || [];
+  target.contacts.push({...p, id:uid()});
+  persist('clients');
+  showToast(`Contact dupliqué chez ${clientDisplayName(target)}.`);
+  refreshClientModal();
+}
+function moveContactToClient(contactIndex){
+  const p = clientDraftContacts[contactIndex];
+  const target = state.clients.find(x=>x.id===moveContactPickedTargetId);
+  if(!p || !target) return;
+  target.contacts = target.contacts || [];
+  target.contacts.push({...p, id:uid()});
+  persist('clients');
+  clientDraftContacts.splice(contactIndex,1);
+  showToast(`Contact déplacé chez ${clientDisplayName(target)}.`);
+  refreshClientModal();
 }
 function refreshClientContactsTable(){
   const body = document.getElementById('clientContactsBody');
@@ -3894,6 +4002,136 @@ function showHistoryImportReport(totalRows, added, notFound, ambiguous, skippedR
 // Quand un import a créé une fiche client distincte par contact (au lieu d'une fiche société avec
 // plusieurs personnes à contacter), cet outil regroupe automatiquement toutes les fiches partageant
 // la même Société en une seule fiche, les autres devenant des entrées dans "Personnes à contacter".
+function computeSimilarClientGroups(){
+  const clients = state.clients.slice();
+  const used = new Set();
+  const groups = [];
+  clients.forEach(c=>{
+    if(used.has(c.id)) return;
+    const norm = normalizeCompanyForDup(c.company||c.name);
+    if(!norm || norm.length<3) return;
+    const group = clients.filter(o=>{
+      if(used.has(o.id)) return false;
+      const on = normalizeCompanyForDup(o.company||o.name);
+      if(!on || on.length<3) return false;
+      return on===norm || on.includes(norm) || norm.includes(on);
+    });
+    if(group.length>1){
+      group.forEach(g=>used.add(g.id));
+      groups.push(group);
+    }
+  });
+  return groups;
+}
+function computeDuplicateContactsWithin(c){
+  const contacts = c.contacts||[];
+  const seen = new Map(); // clé -> premier index rencontré
+  const dupPairs = [];
+  contacts.forEach((p,i)=>{
+    const emailKey = (p.email||'').trim().toLowerCase();
+    const nameKey = [(p.prenom||'').trim().toLowerCase(),(p.nom||'').trim().toLowerCase()].filter(Boolean).join(' ');
+    const key = emailKey || nameKey;
+    if(!key) return;
+    if(seen.has(key)) dupPairs.push([seen.get(key), i]);
+    else seen.set(key, i);
+  });
+  return dupPairs;
+}
+function openDuplicatesFinderModal(){
+  const groups = computeSimilarClientGroups();
+  const contactDupClients = state.clients.filter(c=>computeDuplicateContactsWithin(c).length>0);
+  if(groups.length===0 && contactDupClients.length===0){
+    showToast('Aucun doublon probable trouvé — sociétés à noms proches et contacts en double compris.');
+    return;
+  }
+  openModal(`
+    <div class="modal-head"><h3>Doublons probables</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      ${groups.length===0?'':`
+      <div class="section-title">Sociétés à noms proches (${groups.length})</div>
+      <div class="helper" style="margin-bottom:10px;">À vérifier au cas par cas — une même enseigne avec plusieurs agences (adresses différentes) n'est pas forcément un doublon.</div>
+      ${groups.map((g,gi)=>`
+        <div class="card card-pad" style="margin-bottom:12px;">
+          ${g.map(c=>`
+            <label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer;">
+              <input type="radio" name="dupGroupKeep_${gi}" value="${c.id}" ${c===g[0]?'checked':''} style="width:auto;">
+              <span><strong>${escapeHtml(clientDisplayName(c))}</strong>${c.ville?` — ${escapeHtml(c.ville)}`:''} <span class="helper" style="display:inline;">(${(c.contacts||[]).length} contact(s), ${state.devis.filter(d=>d.clientId===c.id).length} devis)</span></span>
+            </label>
+          `).join('')}
+          <div class="helper" style="margin:6px 0 8px;">La fiche cochée est conservée ; les autres deviennent des contacts et leurs devis lui sont rattachés.</div>
+          <button class="btn btn-sm btn-primary" onclick="confirmMergeClientGroup(${JSON.stringify(g.map(c=>c.id)).replace(/"/g,'&quot;')}, ${gi})">Fusionner ce groupe</button>
+        </div>
+      `).join('')}
+      `}
+      ${contactDupClients.length===0?'':`
+      <div class="section-title" style="margin-top:${groups.length?'20px':'0'};">Contacts en double au sein d'une même fiche (${contactDupClients.length})</div>
+      <div class="helper" style="margin-bottom:10px;">Même email, ou même prénom + nom, saisis deux fois sur la même fiche société.</div>
+      ${contactDupClients.map(c=>{
+        const pairs = computeDuplicateContactsWithin(c);
+        return pairs.map(([i,j])=>{
+          const p1 = c.contacts[i], p2 = c.contacts[j];
+          return `
+          <div class="card card-pad" style="margin-bottom:12px;">
+            <div style="margin-bottom:6px;"><strong>${escapeHtml(clientDisplayName(c))}</strong></div>
+            <div class="helper">1. ${escapeHtml([p1.prenom,p1.nom].filter(Boolean).join(' '))} — ${escapeHtml(p1.email||p1.telephone||p1.portable||'—')}</div>
+            <div class="helper" style="margin-bottom:8px;">2. ${escapeHtml([p2.prenom,p2.nom].filter(Boolean).join(' '))} — ${escapeHtml(p2.email||p2.telephone||p2.portable||'—')}</div>
+            <button class="btn btn-sm btn-primary" onclick="confirmMergeDuplicateContact('${c.id}', ${i}, ${j})">Fusionner ces deux contacts</button>
+          </div>`;
+        }).join('');
+      }).join('')}
+      `}
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Fermer</button></div>
+  `, {lg:true});
+}
+function confirmMergeClientGroup(groupIds, gi){
+  const keepInput = document.querySelector(`input[name="dupGroupKeep_${gi}"]:checked`);
+  const keepId = keepInput ? keepInput.value : groupIds[0];
+  if(!confirm('Fusionner ces fiches ? Une sauvegarde sera téléchargée avant, par précaution.')) return;
+  downloadBackupNow();
+  const keep = state.clients.find(c=>c.id===keepId);
+  if(!keep) return;
+  keep.contacts = keep.contacts || [];
+  keep.remisesTarif = keep.remisesTarif || [];
+  const existingEmails = new Set(keep.contacts.map(p=>(p.email||'').toLowerCase()).filter(Boolean));
+  groupIds.filter(id=>id!==keepId).forEach(id=>{
+    const other = state.clients.find(c=>c.id===id);
+    if(!other) return;
+    (other.contacts||[]).forEach(p=>{
+      const k=(p.email||'').toLowerCase();
+      if(k && existingEmails.has(k)) return;
+      keep.contacts.push(p);
+      if(k) existingEmails.add(k);
+    });
+    keep.remisesTarif = keep.remisesTarif.concat(other.remisesTarif||[]);
+    keep.history = (keep.history||[]).concat(other.history||[]);
+    state.devis.forEach(d=>{ if(d.clientId===id) d.clientId=keepId; });
+  });
+  const removeIds = new Set(groupIds.filter(id=>id!==keepId));
+  state.clients = state.clients.filter(c=>!removeIds.has(c.id));
+  persist('clients'); persist('devis');
+  render();
+  showToast('Fusion effectuée.');
+  openDuplicatesFinderModal();
+}
+function confirmMergeDuplicateContact(clientId, i, j){
+  const c = state.clients.find(x=>x.id===clientId);
+  if(!c || !c.contacts) return;
+  const p1 = c.contacts[i], p2 = c.contacts[j];
+  if(!p1 || !p2) return;
+  // Combine les deux fiches en gardant, pour chaque champ, la première valeur non vide.
+  const merged = {};
+  ['civilite','nom','prenom','fonction','telephone','portable','email','commentaire'].forEach(k=>{
+    merged[k] = p1[k] || p2[k] || '';
+  });
+  merged.id = p1.id;
+  merged.actif = (p1.actif!==false || p2.actif!==false) ? true : false;
+  c.contacts[i] = merged;
+  c.contacts.splice(j,1);
+  persist('clients');
+  showToast('Contacts fusionnés.');
+  openDuplicatesFinderModal();
+}
 function computeContactMergeGroups(){
   const groups = {};
   state.clients.forEach(c=>{
