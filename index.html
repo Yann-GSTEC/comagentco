@@ -6709,12 +6709,12 @@ function renderCommissionsTableInner(){
     return `
       <div id="commissionsTableWrap">${renderCustomizableTable('commissionsYear', [
         {key:'rang', label:'#', defaultWidth:50, cellStyle:'font-weight:700;color:var(--muted);', cell:(r)=>String(rows.indexOf(r)+1)},
-        {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};cursor:pointer;" onclick="toggleCommissionDetail('${r.b.id}')" title="Cliquer pour saisir/masquer le détail par mois"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
+        {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};cursor:pointer;" onclick="event.stopPropagation(); toggleCommissionDetail('${r.b.id}')" title="Cliquer pour saisir/masquer le détail par mois"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
         {key:'ca', label:`CA (${year})`, defaultWidth:150, cellClass:'num', cellStyle:'font-weight:600;', cell:r=>fmtMoney(r.ca)},
         {key:'commission', label:'Montant commission', defaultWidth:170, cellClass:'num', cellStyle:'font-weight:700;color:var(--success);', cell:r=>fmtMoney(r.commission)},
       ], rows, {
         actionsWidth:150,
-        actionsCol: r=>`<button class="btn btn-sm btn-ghost" onclick="toggleCommissionDetail('${r.b.id}')">${ui.commissionsExpandedBrand===r.b.id?'Masquer':'Saisir par mois'}</button>`,
+        actionsCol: r=>`<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); toggleCommissionDetail('${r.b.id}')">${ui.commissionsExpandedBrand===r.b.id?'Masquer':'Saisir par mois'}</button>`,
         afterRow: r=> ui.commissionsExpandedBrand===r.b.id ? `<tr><td colspan="99" style="padding:0 0 14px 20px;border-bottom:none;">${renderCommissionMonthlyDetail(r.b, year)}</td></tr>` : ''
       })}</div>
     `;
