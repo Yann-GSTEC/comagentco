@@ -6602,14 +6602,16 @@ function renderCommissionsTop5(){
     </div>
   `;
   return `
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:22px;">
-    <div class="card card-pad" style="${getCardHeight('commissions','top5-ca')?`height:${getCardHeight('commissions','top5-ca')}px;overflow:auto;`:''}">
+  <div class="dash-grid" style="margin-bottom:22px;">
+    <div class="card card-pad dash-card" style="grid-column:span ${DASH_SIZE_COLS[state.settings.commissionsTop5CaSize||'md']};${getCardHeight('commissions','top5-ca')?`height:${getCardHeight('commissions','top5-ca')}px;overflow:auto;`:''}">
+      ${commissionsSizeToolsHtml(state.settings.commissionsTop5CaSize||'md', 'top5ca')}
       <h3 style="margin:0 0 3px;font-size:14.5px;">🏆 Top 5 marques — CA</h3>
       <div class="helper" style="margin-bottom:12px;">${periodLabel}</div>
       ${renderList(topCa, 'ca', 'var(--accent)')}
       ${cardResizeHandleHtml('commissions','top5-ca')}
     </div>
-    <div class="card card-pad" style="${getCardHeight('commissions','top5-commission')?`height:${getCardHeight('commissions','top5-commission')}px;overflow:auto;`:''}">
+    <div class="card card-pad dash-card" style="grid-column:span ${DASH_SIZE_COLS[state.settings.commissionsTop5CommissionSize||'md']};${getCardHeight('commissions','top5-commission')?`height:${getCardHeight('commissions','top5-commission')}px;overflow:auto;`:''}">
+      ${commissionsSizeToolsHtml(state.settings.commissionsTop5CommissionSize||'md', 'top5commission')}
       <h3 style="margin:0 0 3px;font-size:14.5px;">🏆 Top 5 marques — Commission</h3>
       <div class="helper" style="margin-bottom:12px;">${periodLabel}</div>
       ${renderList(topCommission, 'commission', 'var(--success)')}
@@ -6671,8 +6673,8 @@ function renderCommissions(){
     const size = (state.settings.commissionsTableSize)||'lg';
     const cols = DASH_SIZE_COLS[size];
     return `<div class="dash-grid">
-      <div class="card" id="commissionsTableCard" style="position:relative;grid-column:span ${cols};${getCardHeight('commissions','table')?`height:${getCardHeight('commissions','table')}px;overflow:auto;`:''}">
-        ${commissionsSizeToolsHtml(size)}
+      <div class="card dash-card" id="commissionsTableCard" style="position:relative;grid-column:span ${cols};${getCardHeight('commissions','table')?`height:${getCardHeight('commissions','table')}px;overflow:auto;`:''}">
+        ${commissionsSizeToolsHtml(size,'table')}
         ${renderCommissionsTableInner()}
         ${cardResizeHandleHtml('commissions','table')}
       </div>
@@ -6680,28 +6682,30 @@ function renderCommissions(){
   })()}
   `;
 }
-function commissionsTableResize(delta){
-  const order = ['sm','md','lg'];
-  const current = state.settings.commissionsTableSize || 'lg';
-  let idx = order.indexOf(current);
-  idx = Math.max(0, Math.min(order.length-1, idx+delta));
-  state.settings.commissionsTableSize = order[idx];
-  persist('settings');
-  render();
-}
-function commissionsSizeToolsHtml(size){
+function commissionsSizeToolsHtml(size, which){
+  which = which||'table';
   return `<div class="dash-card-tools">
-    <span class="dash-drag-handle" style="visibility:hidden;" title="Un seul tableau ici — rien à réordonner">⠿</span>
+    <span class="dash-drag-handle" title="Aucun déplacement possible ici">⠿</span>
     <span class="dash-size-btns">
-      <button type="button" onclick="commissionsTableResize(-1);" title="Réduire" ${size==='sm'?'disabled':''}>−</button>
-      <button type="button" onclick="commissionsTableResize(1);" title="Agrandir" ${size==='lg'?'disabled':''}>+</button>
+      <button type="button" onclick="commissionsSizeResize('${which}',-1);" title="Réduire" ${size==='sm'?'disabled':''}>−</button>
+      <button type="button" onclick="commissionsSizeResize('${which}',1);" title="Agrandir" ${size==='lg'?'disabled':''}>+</button>
     </span>
   </div>`;
+}
+function commissionsSizeResize(which, delta){
+  const order = ['sm','md','lg'];
+  const key = which==='table' ? 'commissionsTableSize' : which==='top5ca' ? 'commissionsTop5CaSize' : 'commissionsTop5CommissionSize';
+  const current = state.settings[key] || (which==='table'?'lg':'md');
+  let idx = order.indexOf(current);
+  idx = Math.max(0, Math.min(order.length-1, idx+delta));
+  state.settings[key] = order[idx];
+  persist('settings');
+  render();
 }
 function updateCommissionsTableOnly(){
   const wrap = document.getElementById('commissionsTableCard');
   const size = state.settings.commissionsTableSize || 'lg';
-  if(wrap) wrap.innerHTML = commissionsSizeToolsHtml(size)+renderCommissionsTableInner()+cardResizeHandleHtml('commissions','table');
+  if(wrap) wrap.innerHTML = commissionsSizeToolsHtml(size,'table')+renderCommissionsTableInner()+cardResizeHandleHtml('commissions','table');
 }
 function renderCommissionsTableInner(){
   if(state.brands.length===0) return emptyState('%','Aucune marque','Ajoutez vos marques / fournisseurs pour saisir leurs commissions.');
