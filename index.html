@@ -3235,12 +3235,13 @@ function refreshClientDetailOrSuivi(clientId){
   if(suiviOnlyModalClientId===clientId) openClientSuiviOnlyModal(clientId);
   else openClientDetail(clientId);
 }
-function renderClientSuiviCommercialSection(c, timelineMaxHeight){
+function renderClientSuiviCommercialSection(c, timelineMaxHeight, showFullscreenBtn){
   const history = (c.history||[]).slice().sort((a,b)=>b.date.localeCompare(a.date));
   return `
       <div class="section-title" id="suiviCommercialAnchor" style="display:flex;align-items:center;gap:10px;">
         <span>Suivi commercial</span>
         <button class="btn btn-brass btn-sm" onclick="openAddHistoryNoteModal('${c.id}')">+ Ajouter un rendez-vous</button>
+        ${showFullscreenBtn?`<button class="btn btn-sm btn-ghost" onclick="openClientSuiviOnlyModal('${c.id}')" title="Afficher le suivi commercial en plein écran">⤢ Plein écran</button>`:''}
       </div>
       <div style="height:6px;"></div>
       ${history.length>0?`
@@ -3323,7 +3324,7 @@ function openClientDetail(id, scrollToSuivi){
       <div class="section-title">Personnes à contacter</div>
       <div class="helper" style="margin-bottom:14px;">Aucun contact enregistré pour ce client. <a href="#" onclick="event.preventDefault(); openClientForm('${c.id}');">+ Ajouter un contact</a></div>`}
 
-      ${renderClientSuiviCommercialSection(c, '180px')}
+      ${renderClientSuiviCommercialSection(c, '180px', true)}
 
       <div class="section-title">Devis</div>
       ${devisList.length===0?'<div class="helper">Aucun devis pour ce client.</div>':`
