@@ -224,6 +224,8 @@ tbody tr:hover{background:var(--surface-2);}
 .rapport-widget-resize{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;background:linear-gradient(135deg, transparent 50%, var(--line) 50%);z-index:2;}
 .rapport-widget-resize:hover{background:linear-gradient(135deg, transparent 50%, var(--accent) 50%);}
 .card-resize-handle{position:absolute;right:2px;bottom:2px;width:14px;height:14px;cursor:ns-resize;z-index:3;background:linear-gradient(135deg, transparent 50%, var(--line) 50%);border-bottom-right-radius:10px;}
+.card-resize-handle-w{position:absolute;top:0;right:0;bottom:0;width:8px;cursor:ew-resize;z-index:3;}
+.card-resize-handle-w:hover{background:var(--line);}
 .card-resize-handle:hover{background:linear-gradient(135deg, transparent 50%, var(--accent) 50%);}
 .card{position:relative;}
 .table-actions{display:flex;gap:6px;justify-content:flex-end;}
@@ -6662,7 +6664,7 @@ function renderCommissions(){
     </div>
   </div>
   ${renderCommissionsTop5()}
-  <div class="card" style="${getCardHeight('commissions','table')?`height:${getCardHeight('commissions','table')}px;overflow:auto;`:''}" id="commissionsTableCard">${renderCommissionsTableInner()}${cardResizeHandleHtml('commissions','table')}</div>
+  <div class="card" style="position:relative;${getCardHeight('commissions','table')?`height:${getCardHeight('commissions','table')}px;overflow:auto;`:''}${getCardWidth('commissions','table')?`max-width:${getCardWidth('commissions','table')}px;`:''}" id="commissionsTableCard">${renderCommissionsTableInner()}${cardResizeHandleHtml('commissions','table')}${cardWidthResizeHandleHtml('commissions','table')}</div>
   `;
 }
 function updateCommissionsTableOnly(){
@@ -6707,14 +6709,13 @@ function renderCommissionsTableInner(){
       return sortDir==='asc' ? av-bv : bv-av;
     });
     return `
+      <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur le nom d'une marque pour saisir le détail mois par mois.</div>
       <div id="commissionsTableWrap">${renderCustomizableTable('commissionsYear', [
         {key:'rang', label:'#', defaultWidth:50, cellStyle:'font-weight:700;color:var(--muted);', cell:(r)=>String(rows.indexOf(r)+1)},
         {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};cursor:pointer;" onclick="event.stopPropagation(); toggleCommissionDetail('${r.b.id}')" title="Cliquer pour saisir/masquer le détail par mois"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
         {key:'ca', label:`CA (${year})`, defaultWidth:150, cellClass:'num', cellStyle:'font-weight:600;', cell:r=>fmtMoney(r.ca)},
         {key:'commission', label:'Montant commission', defaultWidth:170, cellClass:'num', cellStyle:'font-weight:700;color:var(--success);', cell:r=>fmtMoney(r.commission)},
       ], rows, {
-        actionsWidth:150,
-        actionsCol: r=>`<button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); toggleCommissionDetail('${r.b.id}')">${ui.commissionsExpandedBrand===r.b.id?'Masquer':'Saisir par mois'}</button>`,
         afterRow: r=> ui.commissionsExpandedBrand===r.b.id ? `<tr><td colspan="99" style="padding:0 0 14px 20px;border-bottom:none;">${renderCommissionMonthlyDetail(r.b, year)}</td></tr>` : ''
       })}</div>
     `;
@@ -9249,6 +9250,40 @@ function cardResizeHandleHtml(kind, id){
 }
 function getCardHeight(kind, id){
   return (state.settings.cardHeights && state.settings.cardHeights[kind+':'+id]) || null;
+}
+let cardWidthResizeState = null;
+function startCardWidthResize(evt, kind, id){
+  evt.preventDefault(); evt.stopPropagation();
+  const card = evt.target.closest('.card');
+  if(!card) return;
+  cardWidthResizeState = { kind, id, startX: evt.clientX, startWidth: card.offsetWidth, card };
+  document.addEventListener('mousemove', onCardWidthResizeMove);
+  document.addEventListener('mouseup', onCardWidthResizeEnd);
+}
+function onCardWidthResizeMove(evt){
+  if(!cardWidthResizeState) return;
+  const dw = evt.clientX - cardWidthResizeState.startX;
+  const newWidth = Math.max(320, cardWidthResizeState.startWidth + dw);
+  cardWidthResizeState.card.style.maxWidth = newWidth+'px';
+  cardWidthResizeState.newWidth = newWidth;
+}
+function onCardWidthResizeEnd(){
+  if(!cardWidthResizeState) return;
+  document.removeEventListener('mousemove', onCardWidthResizeMove);
+  document.removeEventListener('mouseup', onCardWidthResizeEnd);
+  const { kind, id, newWidth } = cardWidthResizeState;
+  if(newWidth!=null){
+    state.settings.cardWidths = state.settings.cardWidths || {};
+    state.settings.cardWidths[kind+':'+id] = newWidth;
+    persist('settings');
+  }
+  cardWidthResizeState = null;
+}
+function cardWidthResizeHandleHtml(kind, id){
+  return `<span class="card-resize-handle-w" onmousedown="startCardWidthResize(event,'${kind}','${id}')" title="Glisser pour redimensionner la largeur"></span>`;
+}
+function getCardWidth(kind, id){
+  return (state.settings.cardWidths && state.settings.cardWidths[kind+':'+id]) || null;
 }
 
 /* ---- Rapport : cartes en grille, comme le Tableau de bord (glisser-déposer, largeur, hauteur) ---- */
