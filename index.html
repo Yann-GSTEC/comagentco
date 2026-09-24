@@ -2103,7 +2103,7 @@ function openBrandForm(id){
         <div class="section-title" style="margin-top:14px;">Départements représentés <span class="helper" style="display:inline;">— laissez tout décoché si vous représentez cette marque partout</span></div>
         <div class="helper" style="margin-bottom:8px;">Cochez uniquement les départements où vous représentez effectivement cette marque. Utilisé pour affiner le ciblage dans l'Emailing.</div>
         <div style="max-height:160px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 10px;">
-          ${Object.keys(FR_DEPARTEMENTS).sort((a,c)=>a.localeCompare(c,'fr',{numeric:true})).map(code=>`
+          ${['03','18','28','36','37','41','45','86'].map(code=>`
             <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;">
               <input type="checkbox" class="f_brandDept" value="${code}" style="width:auto;" ${b&&(b.departementsRepresentes||[]).includes(code)?'checked':''}>
               ${escapeHtml(code)} — ${escapeHtml(FR_DEPARTEMENTS[code])}
