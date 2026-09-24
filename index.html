@@ -588,6 +588,7 @@ let ui = {
   emailingStatusFilter:'actifs',
   emailingFamilleFilter:'all',
   emailingSousFamilleFilter:'all',
+  emailingBrandFilter:'all',
   emailingIncludeContacts:true,
   emailingSelected:{},
   rechercheQuery:'',
@@ -1736,6 +1737,7 @@ const UI_FILTER_DEFAULTS = {
   emailingStatusFilter:'actifs',
   emailingFamilleFilter:'all',
   emailingSousFamilleFilter:'all',
+  emailingBrandFilter:'all',
   rechercheQuery:'',
   devisFilterStatus:'all',
   devisFilterEtats: null,
@@ -1761,7 +1763,7 @@ const TAB_FILTER_KEYS = {
   tarifs:['tarifsBrandFilter','tarifsSearch'],
   listesprixnets:['pnBrandFilter','pnSearch'],
   clients:['clientsSearch','clientsStatusFilter','clientsFamilleFilter','clientsSousFamilleFilter','clientsDepartementFilter'],
-  emailing:['emailingSearch','emailingStatusFilter','emailingFamilleFilter','emailingSousFamilleFilter'],
+  emailing:['emailingSearch','emailingStatusFilter','emailingFamilleFilter','emailingSousFamilleFilter','emailingBrandFilter'],
   recherche:['rechercheQuery'],
   devis:['devisFilterStatus','devisFilterEtats','devisFilterBrand','devisFilterApporteur','devisSearch','devisDateFrom','devisDateTo'],
   dashboard:['dashboardYear','dashboardCommercial','dashboardBrand','dashboardClient'],
@@ -1776,6 +1778,9 @@ function resetTabFilters(tabId){
     ui_commerciauxSearch = '';
     ui_commerciauxStatusFilter = 'all';
     return;
+  }
+  if(tabId==='emailing'){
+    ui.emailingSelected = {};
   }
   keys.forEach(k=>{ ui[k] = UI_FILTER_DEFAULTS[k]; });
 }
@@ -2095,6 +2100,16 @@ function openBrandForm(id){
         </div>
         <div class="field"><label>Email copie devis <span class="helper" style="display:inline;">(reçoit une copie des devis envoyés pour cette marque)</span></label><input type="email" id="f_emailCopie" value="${b?escapeHtml(b.emailCopieDevis||''):''}"></div>
         <div class="field"><label>Email export devis</label><input type="email" id="f_emailExport" value="${b?escapeHtml(b.emailExportDevis||''):''}"></div>
+        <div class="section-title" style="margin-top:14px;">Départements représentés <span class="helper" style="display:inline;">— laissez tout décoché si vous représentez cette marque partout</span></div>
+        <div class="helper" style="margin-bottom:8px;">Cochez uniquement les départements où vous représentez effectivement cette marque. Utilisé pour affiner le ciblage dans l'Emailing.</div>
+        <div style="max-height:160px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 10px;">
+          ${Object.keys(FR_DEPARTEMENTS).sort((a,c)=>a.localeCompare(c,'fr',{numeric:true})).map(code=>`
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;">
+              <input type="checkbox" class="f_brandDept" value="${code}" style="width:auto;" ${b&&(b.departementsRepresentes||[]).includes(code)?'checked':''}>
+              ${escapeHtml(code)} — ${escapeHtml(FR_DEPARTEMENTS[code])}
+            </label>
+          `).join('')}
+        </div>
         <div class="field"><label>Commentaire <span class="helper" style="display:inline;">(note interne sur cette marque / ce fournisseur)</span></label><textarea id="f_commentaireId" rows="3" placeholder="Ex. conditions d'achat, contact privilégié, remarques internes…">${b?escapeHtml(b.commentaireIdentification||''):''}</textarea></div>
       </div>
 
@@ -2225,6 +2240,7 @@ function saveBrand(id){
     siteInternet: document.getElementById('f_site').value.trim(),
     emailCopieDevis: document.getElementById('f_emailCopie').value.trim(),
     emailExportDevis: document.getElementById('f_emailExport').value.trim(),
+    departementsRepresentes: Array.from(document.querySelectorAll('.f_brandDept:checked')).map(el=>el.value),
     commentaireIdentification: document.getElementById('f_commentaireId').value.trim(),
     commentaire: document.getElementById('f_commentaire').value.trim(),
     emailSignature: (document.getElementById('f_emailSignatureRich').innerText || '').trim().replace(/\n{2,}/g, '\n'),
@@ -2527,6 +2543,12 @@ function visibleEmailingList(){
     const target = ui.emailingSousFamilleFilter.trim().toLowerCase();
     list = list.filter(c=>(c.sousFamille||'').trim().toLowerCase()===target);
   }
+  if(ui.emailingBrandFilter && ui.emailingBrandFilter!=='all'){
+    const brand = state.brands.find(b=>b.id===ui.emailingBrandFilter);
+    const depts = brand ? (brand.departementsRepresentes||[]) : [];
+    // Si la marque n'a aucun département coché, elle est considérée comme représentée partout (pas de filtre).
+    if(depts.length>0) list = list.filter(c=>depts.includes(clientDepartement(c)));
+  }
   list.sort((a,b)=>(a.company||a.name).localeCompare(b.company||b.name) || a.name.localeCompare(b.name));
   return list;
 }
@@ -2603,6 +2625,12 @@ function renderEmailing(){
       <select onchange="ui.emailingSousFamilleFilter=this.value; render();">
         <option value="all">Toutes les sous-familles</option>
         ${sousFamillesForFamilleFilter(ui.emailingFamilleFilter).map(f=>`<option value="${escapeHtml(f.libelle)}" ${ui.emailingSousFamilleFilter===f.libelle?'selected':''}>${escapeHtml(f.libelle)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field" style="margin-bottom:0;max-width:220px;">
+      <select onchange="ui.emailingBrandFilter=this.value; render();" title="Ne montre que les clients situés dans un département où vous représentez cette marque">
+        <option value="all">Toutes les marques</option>
+        ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.emailingBrandFilter===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select>
     </div>
     <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);font-weight:600;">
