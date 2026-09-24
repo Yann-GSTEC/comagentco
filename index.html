@@ -6667,15 +6667,41 @@ function renderCommissions(){
     </div>
   </div>
   ${renderCommissionsTop5()}
-  <div id="commissionsWidthBtnsWrap">${cardWidthResizeBtnsHtml('commissions','table')}</div>
-  <div class="card" style="position:relative;${getCardHeight('commissions','table')?`height:${getCardHeight('commissions','table')}px;overflow:auto;`:''}${getCardWidth('commissions','table')?`max-width:${getCardWidth('commissions','table')}px;`:''}" id="commissionsTableCard">${renderCommissionsTableInner()}${cardResizeHandleHtml('commissions','table')}</div>
+  ${(() => {
+    const size = (state.settings.commissionsTableSize)||'lg';
+    const cols = DASH_SIZE_COLS[size];
+    return `<div class="dash-grid">
+      <div class="card" id="commissionsTableCard" style="position:relative;grid-column:span ${cols};${getCardHeight('commissions','table')?`height:${getCardHeight('commissions','table')}px;overflow:auto;`:''}">
+        ${commissionsSizeToolsHtml(size)}
+        ${renderCommissionsTableInner()}
+        ${cardResizeHandleHtml('commissions','table')}
+      </div>
+    </div>`;
+  })()}
   `;
+}
+function commissionsTableResize(delta){
+  const order = ['sm','md','lg'];
+  const current = state.settings.commissionsTableSize || 'lg';
+  let idx = order.indexOf(current);
+  idx = Math.max(0, Math.min(order.length-1, idx+delta));
+  state.settings.commissionsTableSize = order[idx];
+  persist('settings');
+  render();
+}
+function commissionsSizeToolsHtml(size){
+  return `<div class="dash-card-tools">
+    <span class="dash-drag-handle" style="visibility:hidden;" title="Un seul tableau ici — rien à réordonner">⠿</span>
+    <span class="dash-size-btns">
+      <button type="button" onclick="commissionsTableResize(-1);" title="Réduire" ${size==='sm'?'disabled':''}>−</button>
+      <button type="button" onclick="commissionsTableResize(1);" title="Agrandir" ${size==='lg'?'disabled':''}>+</button>
+    </span>
+  </div>`;
 }
 function updateCommissionsTableOnly(){
   const wrap = document.getElementById('commissionsTableCard');
-  if(wrap) wrap.innerHTML = renderCommissionsTableInner()+cardResizeHandleHtml('commissions','table');
-  const widthBtnsWrap = document.getElementById('commissionsWidthBtnsWrap');
-  if(widthBtnsWrap) widthBtnsWrap.innerHTML = cardWidthResizeBtnsHtml('commissions','table');
+  const size = state.settings.commissionsTableSize || 'lg';
+  if(wrap) wrap.innerHTML = commissionsSizeToolsHtml(size)+renderCommissionsTableInner()+cardResizeHandleHtml('commissions','table');
 }
 function renderCommissionsTableInner(){
   if(state.brands.length===0) return emptyState('%','Aucune marque','Ajoutez vos marques / fournisseurs pour saisir leurs commissions.');
@@ -9289,35 +9315,38 @@ function cardWidthResizeHandleHtml(kind, id){
 function getCardWidth(kind, id){
   return (state.settings.cardWidths && state.settings.cardWidths[kind+':'+id]) || null;
 }
-function cardWidthResizeBtnsHtml(kind, id){
+function cardWidthResizeBtnsHtml(kind, id, elementId){
   const w = getCardWidth(kind, id);
+  const eid = (elementId||(kind+'TableCard')).replace(/'/g,"\\'");
   return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
     <span class="helper" style="display:inline;">Largeur du tableau :</span>
     <span class="dash-size-btns">
-      <button type="button" onclick="adjustCardWidth('${kind}','${id}',-100)" title="Réduire la largeur">−</button>
-      <button type="button" onclick="adjustCardWidth('${kind}','${id}',100)" title="Agrandir la largeur">+</button>
+      <button type="button" onclick="adjustCardWidth('${kind}','${id}',-100,'${eid}')" title="Réduire la largeur">−</button>
+      <button type="button" onclick="adjustCardWidth('${kind}','${id}',100,'${eid}')" title="Agrandir la largeur">+</button>
     </span>
-    ${w?`<button type="button" class="btn btn-sm btn-ghost" onclick="resetCardWidth('${kind}','${id}')" title="Revenir à la largeur automatique">↺ Auto</button>`:''}
+    ${w?`<button type="button" class="btn btn-sm btn-ghost" onclick="resetCardWidth('${kind}','${id}','${eid}')" title="Revenir à la largeur automatique">↺ Auto</button>`:''}
   </div>`;
 }
-function adjustCardWidth(kind, id, delta){
+function adjustCardWidth(kind, id, delta, elementId){
   const key = kind+':'+id;
-  const card = document.getElementById(kind+'TableCard');
+  const card = document.getElementById(elementId||(kind+'TableCard'));
   const current = (state.settings.cardWidths && state.settings.cardWidths[key]) || (card?card.offsetWidth:800);
   const next = Math.max(320, current+delta);
   state.settings.cardWidths = state.settings.cardWidths || {};
   state.settings.cardWidths[key] = next;
   persist('settings');
   if(card) card.style.maxWidth = next+'px';
-  if(kind==='commissions') updateCommissionsTableOnly();
+  const btnsWrap = document.getElementById(kind+'WidthBtnsWrap');
+  if(btnsWrap) btnsWrap.innerHTML = cardWidthResizeBtnsHtml(kind, id, elementId);
 }
-function resetCardWidth(kind, id){
+function resetCardWidth(kind, id, elementId){
   const key = kind+':'+id;
   if(state.settings.cardWidths) delete state.settings.cardWidths[key];
   persist('settings');
-  const card = document.getElementById(kind+'TableCard');
+  const card = document.getElementById(elementId||(kind+'TableCard'));
   if(card) card.style.maxWidth = '';
-  if(kind==='commissions') updateCommissionsTableOnly();
+  const btnsWrap = document.getElementById(kind+'WidthBtnsWrap');
+  if(btnsWrap) btnsWrap.innerHTML = cardWidthResizeBtnsHtml(kind, id, elementId);
 }
 
 /* ---- Rapport : cartes en grille, comme le Tableau de bord (glisser-déposer, largeur, hauteur) ---- */
