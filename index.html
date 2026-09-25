@@ -2966,10 +2966,6 @@ function openClientForm(id){
         <div class="field"><label>Ville</label><input type="text" id="f_ville" value="${c?escapeHtml(c.ville||''):''}"></div>
         <div class="field"><label>Pays</label><input type="text" id="f_pays" value="${c?escapeHtml(c.pays||''):''}" placeholder="France"></div>
       </div>
-      <label style="display:flex;align-items:center;gap:8px;margin:-6px 0 14px;cursor:pointer;">
-        <input type="checkbox" id="f_acceptEmailing" style="width:auto;" ${(!c || c.acceptEmailing!==false)?'checked':''}>
-        <span>Ce client accepte de recevoir des emailings <span class="helper" style="display:inline;">— décochez pour l'exclure automatiquement des extractions dans l'onglet Emailing</span></span>
-      </label>
       <div class="field-row">
         <div class="field"><label>Famille</label><input type="text" id="f_famille" list="dl_famillesClients" value="${c?escapeHtml(c.famille||''):''}" oninput="refreshClientSousFamilleOptions()">${datalistHtml('dl_famillesClients','famillesClients')}</div>
         <div class="field"><label>Sous-famille</label><input type="text" id="f_sousFamille" list="dl_sousFamillesClients" value="${c?escapeHtml(c.sousFamille||''):''}">${sousFamillesClientsDatalistHtml(c?c.famille:'')}</div>
@@ -2993,6 +2989,10 @@ function openClientForm(id){
         <div class="field"><label>Téléphone principal</label><input type="tel" id="f_telephonePrincipal" value="${c?escapeHtml(c.telephonePrincipal||''):''}"></div>
         <div class="field"><label>Adresse mail principale</label><input type="email" id="f_emailPrincipal" value="${c?escapeHtml(c.emailPrincipal||''):''}"></div>
       </div>
+      <label style="display:flex;align-items:center;gap:8px;margin:-6px 0 14px;cursor:pointer;">
+        <input type="checkbox" id="f_acceptEmailing" style="width:auto;" ${(!c || c.acceptEmailing!==false)?'checked':''}>
+        <span>Ce client accepte de recevoir des emailings <span class="helper" style="display:inline;">— décochez pour l'exclure automatiquement des extractions dans l'onglet Emailing</span></span>
+      </label>
       <div class="field"><label>Commentaire</label><textarea id="f_notes" rows="3">${c?escapeHtml(c.notes||''):''}</textarea></div>
 
       <div class="section-title">Remise tarif par défaut <span class="helper" style="display:inline;">(appliquée automatiquement aux lignes de devis pour ce client, sauf si une liste de prix nets s'applique)</span></div>
