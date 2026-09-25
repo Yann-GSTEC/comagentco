@@ -2538,6 +2538,7 @@ function refreshClientSousFamilleOptions(){
 function visibleEmailingList(){
   const q = ui.emailingSearch.toLowerCase();
   let list = state.clients.filter(c=>clientMatchesSearch(c,q));
+  list = list.filter(c=>c.acceptEmailing!==false);
   if(ui.emailingStatusFilter==='actifs') list = list.filter(c=>c.actif!==false);
   if(ui.emailingStatusFilter==='inactifs') list = list.filter(c=>c.actif===false);
   if(ui.emailingFamilleFilter && ui.emailingFamilleFilter!=='all'){
@@ -2965,6 +2966,10 @@ function openClientForm(id){
         <div class="field"><label>Ville</label><input type="text" id="f_ville" value="${c?escapeHtml(c.ville||''):''}"></div>
         <div class="field"><label>Pays</label><input type="text" id="f_pays" value="${c?escapeHtml(c.pays||''):''}" placeholder="France"></div>
       </div>
+      <label style="display:flex;align-items:center;gap:8px;margin:-6px 0 14px;cursor:pointer;">
+        <input type="checkbox" id="f_acceptEmailing" style="width:auto;" ${(!c || c.acceptEmailing!==false)?'checked':''}>
+        <span>Ce client accepte de recevoir des emailings <span class="helper" style="display:inline;">— décochez pour l'exclure automatiquement des extractions dans l'onglet Emailing</span></span>
+      </label>
       <div class="field-row">
         <div class="field"><label>Famille</label><input type="text" id="f_famille" list="dl_famillesClients" value="${c?escapeHtml(c.famille||''):''}" oninput="refreshClientSousFamilleOptions()">${datalistHtml('dl_famillesClients','famillesClients')}</div>
         <div class="field"><label>Sous-famille</label><input type="text" id="f_sousFamille" list="dl_sousFamillesClients" value="${c?escapeHtml(c.sousFamille||''):''}">${sousFamillesClientsDatalistHtml(c?c.famille:'')}</div>
@@ -3198,6 +3203,7 @@ function saveClient(id){
     codePostal: document.getElementById('f_cp').value.trim(),
     ville: document.getElementById('f_ville').value.trim(),
     pays: document.getElementById('f_pays').value.trim(),
+    acceptEmailing: document.getElementById('f_acceptEmailing').checked,
     siteInternet: document.getElementById('f_site').value.trim(),
     telephonePrincipal: document.getElementById('f_telephonePrincipal').value.trim(),
     emailPrincipal: document.getElementById('f_emailPrincipal').value.trim(),
