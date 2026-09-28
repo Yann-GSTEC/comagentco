@@ -8989,7 +8989,7 @@ async function fetchOutlookCalendarEvents(startIso, endIso){
   const data = await resp.json();
   return data.value||[];
 }
-async function sendMailViaGraph(accessToken, {toEmails, subject, body, isHtml, attachmentName, attachmentBase64, extraAttachments}){
+async function sendMailViaGraph(accessToken, {toEmails, ccEmails, subject, body, isHtml, attachmentName, attachmentBase64, extraAttachments}){
   const attachments = [{
     '@odata.type':'#microsoft.graph.fileAttachment',
     name: attachmentName,
@@ -9009,6 +9009,7 @@ async function sendMailViaGraph(accessToken, {toEmails, subject, body, isHtml, a
       subject,
       body:{ contentType: isHtml?'HTML':'Text', content: body },
       toRecipients: toEmails.map(email=>({ emailAddress:{ address: email } })),
+      ccRecipients: (ccEmails||[]).map(email=>({ emailAddress:{ address: email } })),
       attachments
     },
     saveToSentItems: true
@@ -9056,6 +9057,7 @@ function openSendDevisModal(id){
   const signatureHtmlForPreview = hasCustomSignature ? soleBrand.emailSignatureHtml : '';
   const useTu = ui.sendDevisMailTu||false;
   const defaultBody = hasCustomSignature ? `${buildDevisEmailBody(d, useTu)}\n\n${signaturePlain}` : buildDevisEmailBody(d, useTu);
+  const defaultCc = involvedBrandIds.map(bid=>{ const b=state.brands.find(x=>x.id===bid); return b?(b.emailCopieDevis||'').trim():''; }).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(', ');
   const connected = !!state.settings.outlookAccountName;
   openModal(`
     <div class="modal-head"><h3>Envoyer le devis ${escapeHtml(d.number)} par email</h3><button class="close-x" onclick="closeModal()">✕</button></div>
@@ -9070,6 +9072,7 @@ function openSendDevisModal(id){
         </div>
       `}
       <div class="field"><label>Destinataire(s) *</label><input type="text" id="sendmail_to" value="${escapeHtml(clientEmail)}" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
+      <div class="field"><label>Copie (CC) <span class="helper" style="display:inline;">— reprise automatiquement du champ "Email copie devis" de la marque, modifiable ici au cas par cas</span></label><input type="text" id="sendmail_cc" value="${escapeHtml(defaultCc)}" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
       <div class="field"><label>Objet</label><input type="text" id="sendmail_subject" value="${escapeHtml(defaultSubject)}"></div>
       <div class="field-row" style="align-items:flex-end;">
         <div class="field" style="max-width:220px;">
@@ -9116,6 +9119,8 @@ async function confirmSendDevisMail(id, soleBrandId){
   const toRaw = document.getElementById('sendmail_to').value.trim();
   if(!toRaw){ showToast('Renseignez au moins un destinataire.'); return; }
   const toEmails = toRaw.split(/[,;]/).map(e=>e.trim()).filter(Boolean);
+  const ccRaw = (document.getElementById('sendmail_cc')||{}).value||'';
+  const ccEmails = ccRaw.split(/[,;]/).map(e=>e.trim()).filter(Boolean);
   const subject = document.getElementById('sendmail_subject').value.trim();
   const plainBody = document.getElementById('sendmail_body').value;
   const soleBrand = soleBrandId ? state.brands.find(b=>b.id===soleBrandId) : null;
@@ -9127,7 +9132,7 @@ async function confirmSendDevisMail(id, soleBrandId){
     const token = await getOutlookAccessToken();
     const pdf = await exportDevisPdf(id, 'base64');
     if(!pdf) throw new Error('Impossible de générer le PDF du devis.');
-    await sendMailViaGraph(token, { toEmails, subject, body: htmlBody, isHtml:true, attachmentName: pdf.filename, attachmentBase64: pdf.base64 });
+    await sendMailViaGraph(token, { toEmails, ccEmails, subject, body: htmlBody, isHtml:true, attachmentName: pdf.filename, attachmentBase64: pdf.base64 });
     markDevisSent(id);
     closeModal();
     render();
@@ -9140,13 +9145,14 @@ async function confirmSendDevisMail(id, soleBrandId){
 }
 async function confirmSendDevisMailFallback(id, signaturePlain){
   const toRaw = document.getElementById('sendmail_to').value.trim();
+  const ccRaw = (document.getElementById('sendmail_cc')||{}).value||'';
   const subject = document.getElementById('sendmail_subject').value.trim();
   const body = document.getElementById('sendmail_body').value + (signaturePlain ? '\n\n'+signaturePlain : '');
   const btn = document.getElementById('sendmail_btn');
   if(btn){ btn.disabled = true; btn.textContent = 'Préparation…'; }
   try{
     await exportDevisPdf(id); // téléchargement classique du PDF (aucune configuration requise)
-    const mailto = `mailto:${encodeURIComponent(toRaw)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const mailto = `mailto:${encodeURIComponent(toRaw)}?${ccRaw.trim()?`cc=${encodeURIComponent(ccRaw.trim())}&`:''}subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.location.href = mailto;
     markDevisSent(id);
     closeModal();
