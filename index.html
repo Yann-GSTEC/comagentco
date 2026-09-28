@@ -1527,6 +1527,8 @@ function persist(key){
 // garantie au moment précis de la fermeture de l'onglet.
 let backupDirHandle = null;
 let backupFolderNeedsPermission = false;
+let backupDirHandle2 = null;
+let backupFolderNeedsPermission2 = false;
 function fsAccessSupported(){ return typeof window.showDirectoryPicker === 'function'; }
 function idbOpen(){
   return new Promise((resolve,reject)=>{
@@ -1566,6 +1568,14 @@ async function initBackupFolder(){
       backupFolderNeedsPermission = (perm!=='granted');
     }
   }catch(e){ /* pas de dossier mémorisé */ }
+  try{
+    const handle2 = await idbGet('backupDir2');
+    if(handle2){
+      backupDirHandle2 = handle2;
+      const perm2 = await handle2.queryPermission({mode:'readwrite'});
+      backupFolderNeedsPermission2 = (perm2!=='granted');
+    }
+  }catch(e){ /* pas de second dossier mémorisé */ }
 }
 async function chooseBackupFolder(){
   if(!fsAccessSupported()){
@@ -1584,6 +1594,23 @@ async function chooseBackupFolder(){
     if(e && e.name!=='AbortError') showToast("Impossible d'accéder à ce dossier.");
   }
 }
+async function chooseBackupFolder2(){
+  if(!fsAccessSupported()){
+    showToast("Cette fonction nécessite Chrome ou Edge. Utilisez le bouton « Télécharger une sauvegarde » à la place.");
+    return;
+  }
+  try{
+    const handle = await window.showDirectoryPicker({mode:'readwrite'});
+    backupDirHandle2 = handle;
+    backupFolderNeedsPermission2 = false;
+    await idbSet('backupDir2', handle);
+    showToast('Second dossier de sauvegarde choisi : '+handle.name);
+    render();
+    await writeBackupNow();
+  }catch(e){
+    if(e && e.name!=='AbortError') showToast("Impossible d'accéder à ce dossier.");
+  }
+}
 async function reauthorizeBackupFolder(){
   if(!backupDirHandle) return;
   try{
@@ -1593,10 +1620,25 @@ async function reauthorizeBackupFolder(){
     if(perm==='granted'){ await writeBackupNow(); showToast('Accès au dossier confirmé.'); }
   }catch(e){ showToast("Impossible d'obtenir l'autorisation."); }
 }
+async function reauthorizeBackupFolder2(){
+  if(!backupDirHandle2) return;
+  try{
+    const perm = await backupDirHandle2.requestPermission({mode:'readwrite'});
+    backupFolderNeedsPermission2 = (perm!=='granted');
+    render();
+    if(perm==='granted'){ await writeBackupNow(); showToast('Accès au second dossier confirmé.'); }
+  }catch(e){ showToast("Impossible d'obtenir l'autorisation."); }
+}
 function forgetBackupFolder(){
   backupDirHandle = null;
   backupFolderNeedsPermission = false;
   idbSet('backupDir', null);
+  render();
+}
+function forgetBackupFolder2(){
+  backupDirHandle2 = null;
+  backupFolderNeedsPermission2 = false;
+  idbSet('backupDir2', null);
   render();
 }
 async function ensureBackupPermission(){
@@ -1608,9 +1650,18 @@ async function ensureBackupPermission(){
     return perm==='granted';
   }catch(e){ return false; }
 }
+async function ensureBackupPermission2(){
+  if(!backupDirHandle2) return false;
+  try{
+    let perm = await backupDirHandle2.queryPermission({mode:'readwrite'});
+    if(perm!=='granted'){ perm = await backupDirHandle2.requestPermission({mode:'readwrite'}); }
+    backupFolderNeedsPermission2 = (perm!=='granted');
+    return perm==='granted';
+  }catch(e){ return false; }
+}
 let backupTimer=null;
 function scheduleFolderBackup(){
-  if(!backupDirHandle) return;
+  if(!backupDirHandle && !backupDirHandle2) return;
   clearTimeout(backupTimer);
   backupTimer = setTimeout(()=>{ writeBackupNow(); }, 1500);
 }
@@ -1659,21 +1710,40 @@ async function readFolderBackupData(){
   }
 }
 async function writeBackupNow(){
-  if(!backupDirHandle) return false;
-  const ok = await ensureBackupPermission();
-  if(!ok){ render(); return false; }
-  try{
-    const fileHandle = await backupDirHandle.getFileHandle('ComAgentCo_sauvegarde.json', {create:true});
-    const writable = await fileHandle.createWritable();
-    await writable.write(fullBackupPayload());
-    await writable.close();
-    const el = document.getElementById('backupStatusLine');
-    if(el) el.textContent = 'Dernière sauvegarde dans le dossier : '+new Date().toLocaleTimeString('fr-FR');
-    return true;
-  }catch(e){
-    console.error('Erreur sauvegarde dossier', e);
-    return false;
+  if(!backupDirHandle && !backupDirHandle2) return false;
+  let ok1 = false, ok2 = false, needsRender = false;
+  if(backupDirHandle){
+    const perm = await ensureBackupPermission();
+    if(!perm){ needsRender = true; }
+    else{
+      try{
+        const fileHandle = await backupDirHandle.getFileHandle('ComAgentCo_sauvegarde.json', {create:true});
+        const writable = await fileHandle.createWritable();
+        await writable.write(fullBackupPayload());
+        await writable.close();
+        ok1 = true;
+      }catch(e){ console.error('Erreur sauvegarde dossier 1', e); }
+    }
   }
+  if(backupDirHandle2){
+    const perm2 = await ensureBackupPermission2();
+    if(!perm2){ needsRender = true; }
+    else{
+      try{
+        const fileHandle2 = await backupDirHandle2.getFileHandle('ComAgentCo_sauvegarde.json', {create:true});
+        const writable2 = await fileHandle2.createWritable();
+        await writable2.write(fullBackupPayload());
+        await writable2.close();
+        ok2 = true;
+      }catch(e){ console.error('Erreur sauvegarde dossier 2', e); }
+    }
+  }
+  if(needsRender) render();
+  const el = document.getElementById('backupStatusLine');
+  if(el && ok1) el.textContent = 'Dernière sauvegarde dans le dossier : '+new Date().toLocaleTimeString('fr-FR');
+  const el2 = document.getElementById('backupStatusLine2');
+  if(el2 && ok2) el2.textContent = 'Dernière sauvegarde dans le second dossier : '+new Date().toLocaleTimeString('fr-FR');
+  return ok1 || ok2;
 }
 function downloadBackupNow(){
   const blob = new Blob([fullBackupPayload()], {type:'application/json'});
@@ -5745,6 +5815,15 @@ function renderParametres(){
              <div class="helper" style="margin-top:6px;">Les Tarifs et la Liste de prix nets (catalogues volumineux) sont désormais enregistrés directement dans ce dossier, sans limite de taille — le stockage du navigateur n'est plus utilisé pour ces deux tables tant que ce dossier reste connecté.</div>`)
       : `<div class="helper">Aucun dossier choisi pour l'instant. Cliquez ci-dessous et sélectionnez votre dossier :<br><code>OneDrive - GSTEC\\GS-TEC\\Logiciel ComAgentCo</code></div>
          <div class="helper" style="margin-top:6px;color:var(--danger);">Recommandé si votre catalogue Tarifs dépasse quelques milliers de références : sans dossier connecté, la sauvegarde du navigateur peut échouer sur un très gros catalogue.</div>`;
+  const folderStatus2 = !fsAccessSupported()
+    ? ''
+    : backupDirHandle2
+      ? (backupFolderNeedsPermission2
+          ? `<div class="helper" style="color:var(--danger);">Dossier « ${escapeHtml(backupDirHandle2.name)} » mémorisé, mais l'autorisation d'écriture doit être confirmée.</div>
+             <button class="btn btn-sm" onclick="reauthorizeBackupFolder2()">Confirmer l'accès au dossier</button>`
+          : `<div class="helper">Second dossier actif : <strong>${escapeHtml(backupDirHandle2.name)}</strong> — reçoit lui aussi une copie à chaque modification.</div>
+             <div class="helper" id="backupStatusLine2">En attente de la première sauvegarde…</div>`)
+      : `<div class="helper">Aucun second dossier choisi — facultatif, utile pour garder une copie de sauvegarde à un autre endroit (ex. un second cloud, un disque externe).</div>`;
   const subTabs = [
     {key:'coordonnees', label:'Vos coordonnées'},
     {key:'sauvegarde', label:'Sauvegarde'},
@@ -5794,6 +5873,16 @@ function renderParametres(){
           ${backupDirHandle?`<button class="btn btn-ghost" onclick="writeBackupNow()">Sauvegarder maintenant</button>
           <button class="btn btn-ghost btn-danger" onclick="forgetBackupFolder()">Oublier ce dossier</button>`:''}
         </div>
+        <div class="divider"></div>
+        <div class="section-title">Second dossier de sauvegarde <span class="helper" style="display:inline;">(facultatif — pour sauvegarder à deux endroits différents en même temps)</span></div>
+        ${folderStatus2}
+        ${fsAccessSupported()?`
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+          <button class="btn" onclick="chooseBackupFolder2()">${backupDirHandle2?'Changer de second dossier':'Choisir un second dossier'}</button>
+          ${backupDirHandle2?`<button class="btn btn-ghost" onclick="writeBackupNow()">Sauvegarder maintenant</button>
+          <button class="btn btn-ghost btn-danger" onclick="forgetBackupFolder2()">Oublier ce second dossier</button>`:''}
+        </div>
+        `:''}
         <div class="divider"></div>
         <div class="section-title">Sauvegarde manuelle</div>
         <div class="helper" style="margin-bottom:10px;">À utiliser dans tous les cas en complément (ou sur Firefox/Safari) : télécharge un fichier que vous pouvez déposer vous-même dans votre dossier OneDrive.</div>
