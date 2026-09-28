@@ -11436,6 +11436,13 @@ document.addEventListener('click', (ev)=>{
   ui.commissionsExpandedBrand = null;
   updateCommissionsTableOnly();
 });
+document.addEventListener('click', (ev)=>{
+  // Referme tout filtre déroulant (ex. "État de l'affaire" dans Devis) dès qu'on clique en dehors de
+  // celui-ci ou sur un autre filtre — un <details> ne le fait pas tout seul par défaut.
+  document.querySelectorAll('details.filter-details[open]').forEach(det=>{
+    if(!det.contains(ev.target)) det.removeAttribute('open');
+  });
+});
 loadAll();
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
