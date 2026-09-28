@@ -5770,14 +5770,20 @@ function renderParametres(){
 
     <div style="${showIf('envoi')}">
       <div class="card card-pad">
-        <div class="section-title">Modèle de message d'envoi des devis</div>
+        <div class="section-title">Modèle de message — Vouvoiement</div>
         <div class="helper" style="margin-bottom:10px;">
-          Texte utilisé par défaut dans le message d'envoi d'un devis par email (modifiable au cas par cas à chaque envoi). Variables disponibles : <code>{greeting}</code> (la formule d'appel, avec le contact "À l'attention de" du devis si renseigné), <code>{type}</code> (devis/marché), <code>{numero}</code>, <code>{objet}</code> (ajoute automatiquement " concernant : ..." si l'objet est renseigné, sinon rien).
+          Texte utilisé par défaut dans le message d'envoi d'un devis par email (modifiable au cas par cas à chaque envoi, y compris le choix tutoiement/vouvoiement). Variables disponibles : <code>{greeting}</code> (la formule d'appel, avec le contact "À l'attention de" du devis si renseigné), <code>{type}</code> (devis/marché), <code>{numero}</code>, <code>{objet}</code> (ajoute automatiquement " concernant : ..." si l'objet est renseigné, sinon rien).
         </div>
         <textarea id="s_emailTemplate" rows="5" style="margin-bottom:8px;">${escapeHtml(s.emailMessageTemplate||DEFAULT_EMAIL_TEMPLATE)}</textarea>
-        <div style="display:flex;gap:8px;">
-          <button class="btn btn-sm btn-brass" onclick="saveEmailTemplate()">Enregistrer le modèle</button>
+        <div style="display:flex;gap:8px;margin-bottom:18px;">
           <button class="btn btn-sm btn-ghost" onclick="document.getElementById('s_emailTemplate').value=DEFAULT_EMAIL_TEMPLATE;">↺ Revenir au modèle par défaut</button>
+        </div>
+        <div class="divider"></div>
+        <div class="section-title">Modèle de message — Tutoiement</div>
+        <textarea id="s_emailTemplateTu" rows="5" style="margin-bottom:8px;">${escapeHtml(s.emailMessageTemplateTu||DEFAULT_EMAIL_TEMPLATE_TU)}</textarea>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm btn-brass" onclick="saveEmailTemplate()">Enregistrer les deux modèles</button>
+          <button class="btn btn-sm btn-ghost" onclick="document.getElementById('s_emailTemplateTu').value=DEFAULT_EMAIL_TEMPLATE_TU;">↺ Revenir au modèle par défaut</button>
         </div>
       </div>
     </div>
@@ -5955,8 +5961,15 @@ const DEFAULT_EMAIL_TEMPLATE = `{greeting}
 Veuillez trouver ci-joint notre {type} n° {numero}{objet}.
 
 N'hésitez pas à revenir vers nous pour toute question.`;
-function buildDevisEmailBody(d){
-  const template = state.settings.emailMessageTemplate || DEFAULT_EMAIL_TEMPLATE;
+const DEFAULT_EMAIL_TEMPLATE_TU = `{greeting}
+
+Tu trouveras ci-joint notre {type} n° {numero}{objet}.
+
+N'hésite pas à revenir vers nous pour toute question.`;
+function buildDevisEmailBody(d, useTu){
+  const template = useTu
+    ? (state.settings.emailMessageTemplateTu || DEFAULT_EMAIL_TEMPLATE_TU)
+    : (state.settings.emailMessageTemplate || DEFAULT_EMAIL_TEMPLATE);
   const greeting = 'Bonjour' + (d.attentionA ? ' '+d.attentionA : '') + ',';
   const objetPart = d.objet ? ' concernant : '+d.objet : '';
   return template
@@ -5965,9 +5978,22 @@ function buildDevisEmailBody(d){
     .replace(/\{numero\}/g, d.number)
     .replace(/\{objet\}/g, objetPart);
 }
+function refreshSendDevisMailBody(devisId){
+  const d = state.devis.find(x=>x.id===devisId) || (draft&&draft.id===devisId?draft:null);
+  const box = document.getElementById('sendmail_body');
+  if(!d || !box) return;
+  const involvedBrandIds = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean);
+  const soleBrand = involvedBrandIds.length===1 ? state.brands.find(b=>b.id===involvedBrandIds[0]) : null;
+  const hasCustomSignature = soleBrand && (soleBrand.emailSignatureHtml||'').trim();
+  const signaturePlain = hasCustomSignature ? (soleBrand.emailSignature||'').trim() : '';
+  const useTu = ui.sendDevisMailTu||false;
+  box.value = hasCustomSignature ? `${buildDevisEmailBody(d, useTu)}\n\n${signaturePlain}` : buildDevisEmailBody(d, useTu);
+}
 function saveEmailTemplate(){
   const val = document.getElementById('s_emailTemplate').value;
   state.settings.emailMessageTemplate = val;
+  const valTu = document.getElementById('s_emailTemplateTu');
+  if(valTu) state.settings.emailMessageTemplateTu = valTu.value;
   persist('settings');
   showToast('Modèle de message enregistré.');
 }
@@ -6815,7 +6841,7 @@ function renderCommissionMonthlyDetail(b, year){
 
 /* ============================= DEVIS : CONSTRUCTEUR ============================= */
 let draft = null;
-const DEFAULT_PDF_COLUMNS = { desig:true, qty:true, puht:true, remise1:false, remise2:false, remise3:false, totalht:true, pudistri:true, marge:false, puclient:false };
+const DEFAULT_PDF_COLUMNS = { desig:true, qty:true, puht:true, remise1:false, remise2:false, remise3:false, totalht:true, pudistri:true, marge:false, puclient:false, totalDevisBox:true };
 const PDF_COLUMN_LABELS = [
   {key:'desig', label:'Libellé'},
   {key:'qty', label:'Quantité'},
@@ -6826,7 +6852,8 @@ const PDF_COLUMN_LABELS = [
   {key:'pudistri', label:"Prix d'achat HT"},
   {key:'marge', label:'Marge'},
   {key:'puclient', label:'Prix de vente conseillé HT'},
-  {key:'totalht', label:'Total HT'},
+  {key:'totalht', label:'Total HT (ligne)'},
+  {key:'totalDevisBox', label:'Total HT (Devis)'},
 ];
 function endOfMonth(d){
   return new Date(d.getFullYear(), d.getMonth()+1, 0);
@@ -7759,11 +7786,11 @@ function devisLinesRowsHtml(){
       </td>
       <td><div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Désignation…" title="F3 historique prix (ce client) · F4 (département) · F5 (tous les clients) · F6 (famille / sous-famille)" oninput="draft.lines[${i}].designation=this.innerHTML;" onpaste="handleRichPaste(event)">${l.designation||''}</div>${l.complementInfo?`<div style="color:var(--brass);font-weight:600;font-size:11px;margin-top:2px;" title="Complément info du tarif — n'apparaît jamais sur le PDF">⚠ ${escapeHtml(l.complementInfo)}</div>`:''}</td>
       <td><input type="number" min="0" step="1" value="${l.qty}" style="font-weight:700;text-align:center;" onchange="devisLineSetQty(${i}, this.value)"></td>
-      <td><input type="number" min="0" step="0.01" value="${l.prixUnitaire}" onchange="draft.lines[${i}].prixUnitaire=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
-      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct1||0}" onchange="draft.lines[${i}].remisePct1=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
-      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct2||0}" onchange="draft.lines[${i}].remisePct2=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
-      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct3||0}" onchange="draft.lines[${i}].remisePct3=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
-      <td><input type="number" min="0" step="0.01" value="${(+lineDistribUnit(l)).toFixed(2)}" style="font-weight:600;${netOnDistri?'color:var(--info, #2F6FBD);font-weight:700;':(l.distribManuallySet?'color:var(--ink);font-weight:700;':'color:var(--ink-soft);')}" title="${netOnDistri?'Prix repris de la liste de prix nets du client (modifiable ici si besoin)':(l.distribManuallySet?'Prix d\'achat modifié manuellement — Remise 1 recalculée en conséquence':'Calculé à partir du PU Tarif et des remises — modifiable directement si besoin')}" onchange="devisLineSetDistrib(${i}, this.value)"></td>
+      <td><input type="number" min="0" step="0.01" value="${l.prixUnitaire?l.prixUnitaire:''}" placeholder="0" onchange="draft.lines[${i}].prixUnitaire=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
+      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct1?l.remisePct1:''}" placeholder="0" onchange="draft.lines[${i}].remisePct1=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
+      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct2?l.remisePct2:''}" placeholder="0" onchange="draft.lines[${i}].remisePct2=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
+      <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct3?l.remisePct3:''}" placeholder="0" onchange="draft.lines[${i}].remisePct3=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
+      <td><input type="number" min="0" step="0.01" value="${(+lineDistribUnit(l))?(+lineDistribUnit(l)).toFixed(2):''}" placeholder="0.00" style="font-weight:600;${netOnDistri?'color:var(--info, #2F6FBD);font-weight:700;':(l.distribManuallySet?'color:var(--ink);font-weight:700;':'color:var(--ink-soft);')}" title="${netOnDistri?'Prix repris de la liste de prix nets du client (modifiable ici si besoin)':(l.distribManuallySet?'Prix d\'achat modifié manuellement — Remise 1 recalculée en conséquence':'Calculé à partir du PU Tarif et des remises — modifiable directement si besoin')}" onchange="devisLineSetDistrib(${i}, this.value)"></td>
       <td><input type="number" step="0.01" value="${Math.abs(displayMarge)<0.005?'':(+displayMarge).toFixed(2)}" placeholder="0" title="${l.margeTarget!=null?'Marge cible demandée — peut différer de quelques centièmes du calcul réel après arrondi du Prix de vente conseillé HT à la centime.':''}" style="color:${displayMarge>=0?'var(--success)':'var(--danger)'};font-weight:800;font-size:12.5px;text-align:center;background:${displayMarge>=0?'rgba(63,138,123,.12)':'rgba(179,57,44,.1)'};border:1.5px solid ${displayMarge>=0?'var(--success)':'var(--danger)'};border-radius:6px;" onchange="devisLineSetMarge(${i}, this.value)"></td>
       <td><input type="number" min="0" step="0.01" value="${l.prixClient?l.prixClient:''}" placeholder="0" style="font-weight:600;${netOnClient?'color:var(--info, #2F6FBD);font-weight:700;':''}" title="${netOnClient?'Prix repris de la liste de prix nets du client':''}" onchange="devisLineSetClient(${i}, this.value)"></td>
       <td class="num" style="font-weight:700;">${fmtMoney(lineTotalHT(l, draft.destinataire))}</td>
@@ -8810,7 +8837,7 @@ async function exportDevisPdf(id, mode){
   const totalBoxH = 11;
   ensureRoom(totalBoxH + 4);
   const totalBoxY = finalY + 3;
-  const showTotalBox = d.type!=='Marché';
+  const showTotalBox = d.type!=='Marché' && cols.totalDevisBox!==false;
   if(showTotalBox){
     const totalBoxX = RIGHT - totalBoxW;
     doc.setFillColor(232,240,250); doc.setDrawColor(30,58,95); doc.setLineWidth(0.4);
@@ -9025,10 +9052,10 @@ function openSendDevisModal(id){
   const involvedBrandIds = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean);
   const soleBrand = involvedBrandIds.length===1 ? state.brands.find(b=>b.id===involvedBrandIds[0]) : null;
   const hasCustomSignature = soleBrand && (soleBrand.emailSignatureHtml||'').trim();
-  const fallbackSignatureText = `Cordialement,\n${state.settings.representantNom||state.settings.companyName||''}`;
-  const signaturePlain = hasCustomSignature ? (soleBrand.emailSignature||'').trim() : fallbackSignatureText;
-  const signatureHtmlForPreview = hasCustomSignature ? soleBrand.emailSignatureHtml : escapeHtmlBody(fallbackSignatureText);
-  const defaultBody = `${buildDevisEmailBody(d)}\n\n${signaturePlain}`;
+  const signaturePlain = hasCustomSignature ? (soleBrand.emailSignature||'').trim() : '';
+  const signatureHtmlForPreview = hasCustomSignature ? soleBrand.emailSignatureHtml : '';
+  const useTu = ui.sendDevisMailTu||false;
+  const defaultBody = hasCustomSignature ? `${buildDevisEmailBody(d, useTu)}\n\n${signaturePlain}` : buildDevisEmailBody(d, useTu);
   const connected = !!state.settings.outlookAccountName;
   openModal(`
     <div class="modal-head"><h3>Envoyer le devis ${escapeHtml(d.number)} par email</h3><button class="close-x" onclick="closeModal()">✕</button></div>
@@ -9044,12 +9071,25 @@ function openSendDevisModal(id){
       `}
       <div class="field"><label>Destinataire(s) *</label><input type="text" id="sendmail_to" value="${escapeHtml(clientEmail)}" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
       <div class="field"><label>Objet</label><input type="text" id="sendmail_subject" value="${escapeHtml(defaultSubject)}"></div>
-      <div class="field"><label>Message</label><textarea id="sendmail_body" rows="6">${escapeHtml(defaultBody)}</textarea></div>
-      <div class="field">
-        <label>Signature ${hasCustomSignature?`— ${escapeHtml(soleBrand.name)}`:'par défaut'} <span class="helper" style="display:inline;">${connected?'(jointe automatiquement, images comprises)':'(le texte sera ajouté ; les images ne peuvent pas s\'afficher en mode gratuit sans Outlook)'}</span></label>
-        <div class="signature-editor" style="background:var(--surface-2);">${signatureHtmlForPreview}</div>
-        ${hasCustomSignature?`<div class="helper" style="margin-top:6px;">Modifiable dans la fiche marque <strong>${escapeHtml(soleBrand.name)}</strong>, onglet "Signature de mail".</div>`:''}
+      <div class="field-row" style="align-items:flex-end;">
+        <div class="field" style="max-width:220px;">
+          <label>Formule</label>
+          <select onchange="ui.sendDevisMailTu=(this.value==='tu'); refreshSendDevisMailBody('${d.id}');">
+            <option value="vous" ${!useTu?'selected':''}>Vouvoiement</option>
+            <option value="tu" ${useTu?'selected':''}>Tutoiement</option>
+          </select>
+        </div>
       </div>
+      <div class="field"><label>Message</label><textarea id="sendmail_body" rows="6">${escapeHtml(defaultBody)}</textarea></div>
+      ${hasCustomSignature?`
+      <div class="field">
+        <label>Signature — ${escapeHtml(soleBrand.name)} <span class="helper" style="display:inline;">${connected?'(jointe automatiquement, images comprises)':'(le texte sera ajouté ; les images ne peuvent pas s\'afficher en mode gratuit sans Outlook)'}</span></label>
+        <div class="signature-editor" style="background:var(--surface-2);">${signatureHtmlForPreview}</div>
+        <div class="helper" style="margin-top:6px;">Modifiable dans la fiche marque <strong>${escapeHtml(soleBrand.name)}</strong>, onglet "Signature de mail".</div>
+      </div>
+      `:`
+      <div class="helper" style="margin-bottom:14px;">Aucune signature n'est ajoutée automatiquement — laissez ce champ tel quel pour que la signature configurée dans votre messagerie (Outlook) s'applique.</div>
+      `}
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal()">Annuler</button>
@@ -9080,10 +9120,7 @@ async function confirmSendDevisMail(id, soleBrandId){
   const plainBody = document.getElementById('sendmail_body').value;
   const soleBrand = soleBrandId ? state.brands.find(b=>b.id===soleBrandId) : null;
   const hasCustomSignature = soleBrand && (soleBrand.emailSignatureHtml||'').trim();
-  const signatureHtml = hasCustomSignature
-    ? soleBrand.emailSignatureHtml
-    : escapeHtmlBody(`Cordialement,\n${state.settings.representantNom||state.settings.companyName||''}`);
-  const htmlBody = escapeHtmlBody(plainBody) + '<br><br>' + signatureHtml;
+  const htmlBody = escapeHtmlBody(plainBody) + (hasCustomSignature ? '<br><br>'+soleBrand.emailSignatureHtml : '');
   const btn = document.getElementById('sendmail_btn');
   if(btn){ btn.disabled = true; btn.textContent = 'Envoi en cours…'; }
   try{
@@ -9104,7 +9141,7 @@ async function confirmSendDevisMail(id, soleBrandId){
 async function confirmSendDevisMailFallback(id, signaturePlain){
   const toRaw = document.getElementById('sendmail_to').value.trim();
   const subject = document.getElementById('sendmail_subject').value.trim();
-  const body = document.getElementById('sendmail_body').value + '\n\n' + (signaturePlain||'');
+  const body = document.getElementById('sendmail_body').value + (signaturePlain ? '\n\n'+signaturePlain : '');
   const btn = document.getElementById('sendmail_btn');
   if(btn){ btn.disabled = true; btn.textContent = 'Préparation…'; }
   try{
