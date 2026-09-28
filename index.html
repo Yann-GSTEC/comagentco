@@ -1901,7 +1901,6 @@ function renderSidebar(){
       `).join('')}
     </div>
     <div class="sidebar-foot">${state.brands.length} marques · ${state.clients.length} clients<br>${state.tarifs.length} références
-      <button class="layout-toggle" onclick="resetNavOrder()" title="Remet les onglets dans leur ordre d'origine">↺ Réinitialiser l'ordre des onglets</button>
       <button class="layout-toggle" onclick="openSecondWindow()" title="Ouvre une vraie deuxième fenêtre de navigateur, que vous pouvez glisser sur votre second écran — les deux fenêtres restent synchronisées">
         ⧉ Ouvrir une 2ᵉ fenêtre
       </button>
@@ -6175,18 +6174,20 @@ function renderDevis(){
   const showIf = (key)=> subTab===key ? '' : 'display:none;';
   return `
   <div class="topbar">
-    <div><h1>Devis / Marchés</h1><div class="sub">${state.devis.length} document(s) créé(s)</div></div>
-  </div>
-  <div style="display:flex;gap:20px;align-items:flex-start;">
-    <div class="param-subnav">
-      ${subTabs.map(t=>`<button class="${subTab===t.key?'active':''}" onclick="ui.devisSubTab='${t.key}'; render();">${escapeHtml(t.label)}</button>`).join('')}
+    <div>
+      <h1>Devis / Marchés</h1>
+      <div class="sub">${state.devis.length} document(s) créé(s)</div>
+      <div class="pill-select" style="margin-top:10px;">
+        ${subTabs.map(t=>`<button class="${subTab===t.key?'active':''}" onclick="ui.devisSubTab='${t.key}'; render();">${escapeHtml(t.label)}</button>`).join('')}
+      </div>
     </div>
-    <div style="flex:1;min-width:0;">
+  </div>
 
     <div style="${showIf('liste')}">
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px;">
         <button class="btn" onclick="runEtatAffaireMigration(true)" title="Vérifie et corrige les devis dont l'État de l'affaire (Gagnée/Perdue) ne se serait pas correctement enregistré">↺ Réparer les états d'affaire</button>
         <button class="btn" onclick="openImportModalDevis()">⇪ Importer (Excel / CSV)</button>
+
         <button class="btn" onclick="openImportDevisPdfPicker()" title="Recrée un devis à partir d'un de vos PDF déjà exportés par ComAgentCo">⇪ Importer un devis (PDF)</button>
         <button class="btn btn-primary" onclick="openDevisForm()">+ Nouveau devis</button>
       </div>
@@ -6244,9 +6245,6 @@ function renderDevis(){
     <div style="${showIf('modeles')}">
       ${renderDevisTemplates()}
     </div>
-
-    </div>
-  </div>
   `;
 }
 function updateDevisListOnly(){
@@ -7652,6 +7650,24 @@ function duplicateDraftDevis(){
   refreshDevisModal();
   showToast(`Dupliqué en nouveau ${((clone.type||'Devis').toLowerCase())} (n° ${clone.number}) — pensez à Enregistrer.`, 4000);
 }
+function duplicateDevisToTemplate(){
+  if(draft.lines.length===0){ showToast('Ajoutez au moins une ligne avant de créer un modèle.'); return; }
+  const suggestedName = draft.objet || draft.number || 'Nouveau modèle';
+  const name = prompt('Nom du modèle :', suggestedName);
+  if(name===null) return; // annulé
+  const tpl = {
+    id: uid(),
+    templateName: (name.trim()||suggestedName),
+    isTemplate: true,
+    notes: draft.notes||'',
+    lines: JSON.parse(JSON.stringify(draft.lines)).map(l=>({...l, id:uid()})),
+    pdfColumns: {...(draft.pdfColumns||DEFAULT_PDF_COLUMNS)},
+    createdAt: new Date().toISOString()
+  };
+  state.devisTemplates.push(tpl);
+  persist('devisTemplates');
+  showToast(`Modèle "${tpl.templateName}" créé — visible dans Devis → Modèles de devis.`, 4500);
+}
 function devisFormHtml(){
   const t = devisTotal(draft);
   if(draft.isTemplate){
@@ -7774,6 +7790,7 @@ function devisFormHtml(){
     <div class="modal-foot">
       ${!draft.isNew?`<button class="btn btn-danger" onclick="deleteDevis(draft.id); closeModal();" style="margin-right:auto;">Supprimer</button>`:''}
       ${!draft.isNew?`<button class="btn" onclick="duplicateDraftDevis()" title="Crée une copie modifiable de ce ${draft.type==='Marché'?'marché':'devis'} avec un nouveau numéro">⧉ Dupliquer</button>`:''}
+      <button class="btn" onclick="duplicateDevisToTemplate()" title="Enregistre les lignes et les notes de ce devis comme modèle réutilisable, dans le sous-onglet Modèles de devis">📐 Dupliquer en modèle de devis</button>
       <button class="btn" onclick="exportDevisPdf(draft.id);" title="Télécharge le PDF tel qu'affiché à l'écran, sans passer par l'étape d'enregistrement">⇩ Télécharger PDF</button>
       <button class="btn" onclick="saveDraftDevis((id)=>exportDevisPdf(id, 'preview'), true);">Aperçu du PDF</button>
       <button class="btn btn-brass" onclick="saveDraftAndOpenSend();" title="Envoyer le devis par email (mode gratuit sans configuration, ou automatique si Outlook est connecté dans Paramètres)">✉ Enregistrer et envoyer</button>
