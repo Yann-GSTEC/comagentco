@@ -547,6 +547,7 @@ let state = {
   listesPrixNets: [],
   prixNetListes: [],
   devis: [],
+  devisTemplates: [],
   commerciaux: [],
   devisAttachments: {},
   settings: {
@@ -594,6 +595,8 @@ let ui = {
   emailingIncludeContacts:true,
   emailingSelected:{},
   rechercheQuery:'',
+  rechercheClientQuery:'',
+  rechercheSubTab:'prix',
   devisFilterStatus:'all',
   devisFilterEtats: null,
   commissionsYear: new Date().getFullYear(),
@@ -1112,7 +1115,7 @@ async function loadAll(){
     try{ folderData = await readFolderBackupData(); }catch(e){ folderData = null; }
   }
   try{
-    const keys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
+    const keys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','devisTemplates','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
     for(const k of keys){
       if(folderData && folderData[k]!==undefined){
         state[k] = folderData[k];
@@ -1615,7 +1618,7 @@ function fullBackupPayload(){
   return JSON.stringify({
     app:'ComAgentCo', version:1, exportedAt:new Date().toISOString(),
     brands:state.brands, clients:state.clients, tarifs:state.tarifs, listesPrixNets:state.listesPrixNets,
-    prixNetListes:state.prixNetListes, devis:state.devis, commerciaux:state.commerciaux, devisAttachments:state.devisAttachments, settings:state.settings, paramLists:state.paramLists,
+    prixNetListes:state.prixNetListes, devis:state.devis, devisTemplates:state.devisTemplates, commerciaux:state.commerciaux, devisAttachments:state.devisAttachments, settings:state.settings, paramLists:state.paramLists,
     commissions:state.commissions, caVva:state.caVva, dashboardLayout:state.dashboardLayout, rapportLayout:state.rapportLayout,
   }, null, 2);
 }
@@ -1690,7 +1693,7 @@ function restoreBackupFile(evt){
     try{ data = JSON.parse(e.target.result); }
     catch(err){ showToast('Fichier de sauvegarde illisible.'); return; }
     if(!confirm('Restaurer cette sauvegarde va remplacer toutes les données actuelles. Continuer ?')) return;
-    const allKeys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
+    const allKeys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','devisTemplates','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
     allKeys.forEach(k=>{
       if(data[k]!==undefined) state[k]=data[k];
     });
@@ -1741,6 +1744,8 @@ const UI_FILTER_DEFAULTS = {
   emailingSousFamilleFilter:'all',
   emailingBrandFilter:'all',
   rechercheQuery:'',
+  rechercheClientQuery:'',
+  rechercheSubTab:'prix',
   devisFilterStatus:'all',
   devisFilterEtats: null,
   devisFilterBrand:'all',
@@ -1766,7 +1771,7 @@ const TAB_FILTER_KEYS = {
   listesprixnets:['pnBrandFilter','pnSearch'],
   clients:['clientsSearch','clientsStatusFilter','clientsFamilleFilter','clientsSousFamilleFilter','clientsDepartementFilter'],
   emailing:['emailingSearch','emailingStatusFilter','emailingFamilleFilter','emailingSousFamilleFilter','emailingBrandFilter'],
-  recherche:['rechercheQuery'],
+  recherche:['rechercheQuery','rechercheClientQuery','rechercheSubTab'],
   devis:['devisFilterStatus','devisFilterEtats','devisFilterBrand','devisFilterApporteur','devisSearch','devisDateFrom','devisDateTo'],
   dashboard:['dashboardYear','dashboardCommercial','dashboardBrand','dashboardClient'],
   commissions:['commissionsYear','commissionsMonth','commissionsBrand'],
@@ -2804,6 +2809,7 @@ function renderClients(){
       <button class="btn btn-sm btn-danger" onclick="deleteSelectedClients()">Supprimer la sélection (${selectedCount})</button>
     `:''}
   </div>
+  <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur une ligne pour voir la fiche du client, double-cliquez pour la modifier.</div>
   <div class="card" id="clientsTableWrap">${renderClientsTableInner()}</div>
   `;
 }
@@ -2903,7 +2909,7 @@ function renderClientsTableInner(){
     const nbContacts = g.clients.reduce((sum,c)=>sum+(c.contacts||[]).length,0);
     const inactive = g.clients.every(c=>c.actif===false);
     const groupChecked = ids.every(id=>ui.clientsSelected[id]);
-    return `<tr style="cursor:pointer;${inactive?'opacity:.55;':''}${groupChecked?'background:var(--surface-2);':''}" onclick="openClientDetail('${p.id}')">
+    return `<tr style="cursor:pointer;${inactive?'opacity:.55;':''}${groupChecked?'background:var(--surface-2);':''}" onclick="openClientDetail('${p.id}')" ondblclick="openClientForm('${p.id}')" title="Cliquer pour voir la fiche, double-cliquer pour la modifier">
       <td onclick="event.stopPropagation();"><input type="checkbox" ${groupChecked?'checked':''} onchange="toggleClientGroupSelect('${ids.join(',')}', this.checked)"></td>
       <td style="font-weight:600;">${escapeHtml(g.label)}${g.clients.length>1?` <span class="helper">(${g.clients.length} fiches)</span>`:''}${inactive?' <span class="status-pill status-Refusé" style="margin-left:4px;">Inactif</span>':''}</td>
       <td style="color:var(--ink-soft);">${nbContacts} contact${nbContacts>1?'s':''}</td>
@@ -5632,20 +5638,72 @@ function confirmImport(){
 
 /* ============================= RECHERCHE ============================= */
 function renderRecherche(){
+  const subTab = ui.rechercheSubTab || 'prix';
+  const subTabs = [
+    {key:'prix', label:'Recherche de prix'},
+    {key:'clients', label:'Recherche clients'},
+  ];
+  const showIf = (key)=> subTab===key ? '' : 'display:none;';
   const q = ui.rechercheQuery.trim().toLowerCase();
   let results = [];
-  if(q){
+  if(q && subTab==='prix'){
     results = state.tarifs.filter(t=>(t.reference+' '+(t.designation||'')).toLowerCase().includes(q)).slice(0,200);
   }
+  const qc = (ui.rechercheClientQuery||'').trim().toLowerCase();
   return `
-  <div class="topbar"><div><h1>Recherche de prix</h1><div class="sub">Recherchez une référence sur les ${state.brands.length} marques</div></div></div>
-  <div class="search-box" style="max-width:none;margin-bottom:18px;">
-    <span class="ic">⌕</span>
-    <input type="text" autofocus placeholder="Tapez une référence ou un mot de la désignation…" value="${escapeHtml(ui.rechercheQuery)}" oninput="ui.rechercheQuery=this.value; debouncedRenderRechercheResults();">
+  <div class="topbar"><div><h1>Recherche</h1><div class="sub">Prix, références ou clients</div></div></div>
+  <div style="display:flex;gap:20px;align-items:flex-start;">
+    <div class="param-subnav">
+      ${subTabs.map(t=>`<button class="${subTab===t.key?'active':''}" onclick="ui.rechercheSubTab='${t.key}'; render();">${escapeHtml(t.label)}</button>`).join('')}
+    </div>
+    <div style="flex:1;min-width:0;">
+
+    <div style="${showIf('prix')}">
+      <div class="search-box" style="max-width:none;margin-bottom:18px;">
+        <span class="ic">⌕</span>
+        <input type="text" ${subTab==='prix'?'autofocus':''} placeholder="Tapez une référence ou un mot de la désignation…" value="${escapeHtml(ui.rechercheQuery)}" oninput="ui.rechercheQuery=this.value; debouncedRenderRechercheResults();">
+      </div>
+      <div id="rechercheResults">${renderRechercheResultsInner(results,q)}</div>
+    </div>
+
+    <div style="${showIf('clients')}">
+      <div class="search-box" style="max-width:none;margin-bottom:18px;">
+        <span class="ic">⌕</span>
+        <input type="text" ${subTab==='clients'?'autofocus':''} placeholder="Tapez un nom de société, une ville, un contact…" value="${escapeHtml(ui.rechercheClientQuery||'')}" oninput="ui.rechercheClientQuery=this.value; debouncedRenderRechercheClientResults();">
+      </div>
+      <div id="rechercheClientResults">${renderRechercheClientResultsInner(qc)}</div>
+    </div>
+
+    </div>
   </div>
-  <div id="rechercheResults">${renderRechercheResultsInner(results,q)}</div>
   `;
 }
+function renderRechercheClientResultsInner(qc){
+  if(!qc) return `<div class="helper" style="text-align:center;padding:40px;">Commencez à taper pour rechercher parmi ${state.clients.length} clients.</div>`;
+  const results = state.clients.filter(c=>clientMatchesSearch(c,qc)).slice(0,200);
+  if(results.length===0) return emptyState('⌕','Aucun résultat','Aucun client ne correspond à cette recherche.');
+  return `
+    <div class="table-wrap card"><table>
+      <thead><tr><th>Société</th><th>Ville</th><th>Famille</th><th>Contacts</th></tr></thead>
+      <tbody>
+        ${results.map(c=>`
+          <tr style="cursor:pointer;" onclick="openClientDetail('${c.id}')">
+            <td style="font-weight:600;">${escapeHtml(clientDisplayName(c))}</td>
+            <td>${escapeHtml(c.ville||'—')}</td>
+            <td>${escapeHtml(c.famille||'—')}</td>
+            <td>${(c.contacts||[]).length}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table></div>
+    ${results.length===200?'<div class="helper" style="padding:10px;">200 premiers résultats affichés — affinez votre recherche.</div>':''}
+  `;
+}
+function renderRechercheClientResults(){
+  const box = document.getElementById('rechercheClientResults');
+  if(box) box.innerHTML = renderRechercheClientResultsInner((ui.rechercheClientQuery||'').trim().toLowerCase());
+}
+const debouncedRenderRechercheClientResults = debounce(renderRechercheClientResults, 150);
 function renderRechercheResultsInner(results,q){
   if(!q) return `<div class="helper" style="text-align:center;padding:40px;">Commencez à taper pour rechercher parmi ${state.tarifs.length} références.</div>`;
   if(results.length===0) return emptyState('⌕','Aucun résultat','Aucune référence ne correspond à cette recherche.');
@@ -6109,65 +6167,86 @@ function consumeNextDevisNumber(type){
 
 /* ============================= DEVIS : LISTE ============================= */
 function renderDevis(){
+  const subTab = ui.devisSubTab || 'liste';
+  const subTabs = [
+    {key:'liste', label:'Devis / Marchés'},
+    {key:'modeles', label:'Modèles de devis'},
+  ];
+  const showIf = (key)=> subTab===key ? '' : 'display:none;';
   return `
   <div class="topbar">
     <div><h1>Devis / Marchés</h1><div class="sub">${state.devis.length} document(s) créé(s)</div></div>
-    <div style="display:flex;gap:8px;">
-      <button class="btn" onclick="runEtatAffaireMigration(true)" title="Vérifie et corrige les devis dont l'État de l'affaire (Gagnée/Perdue) ne se serait pas correctement enregistré">↺ Réparer les états d'affaire</button>
-      <button class="btn" onclick="openImportModalDevis()">⇪ Importer (Excel / CSV)</button>
-      <button class="btn" onclick="openImportDevisPdfPicker()" title="Recrée un devis à partir d'un de vos PDF déjà exportés par ComAgentCo">⇪ Importer un devis (PDF)</button>
-      <button class="btn btn-primary" onclick="openDevisForm()">+ Nouveau devis</button>
-    </div>
   </div>
-  <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-    <div class="search-box" style="margin-bottom:0;">
-      <span class="ic">⌕</span>
-      <input type="text" placeholder="Rechercher un client, un objet, une référence…" value="${escapeHtml(ui.devisSearch||'')}" oninput="ui.devisSearch=this.value; updateDevisListOnly();">
+  <div style="display:flex;gap:20px;align-items:flex-start;">
+    <div class="param-subnav">
+      ${subTabs.map(t=>`<button class="${subTab===t.key?'active':''}" onclick="ui.devisSubTab='${t.key}'; render();">${escapeHtml(t.label)}</button>`).join('')}
     </div>
-    <div class="field-row" style="gap:8px;">
-      <div class="field" style="margin-bottom:0;"><input type="date" value="${ui.devisDateFrom||''}" onchange="ui.devisDateFrom=this.value; updateDevisListOnly();"></div>
-      <div class="field" style="margin-bottom:0;"><input type="date" value="${ui.devisDateTo||''}" onchange="ui.devisDateTo=this.value; updateDevisListOnly();"></div>
-    </div>
-    <div class="field" style="margin-bottom:0;max-width:200px;">
-      <select onchange="ui.devisFilterBrand=this.value; updateDevisListOnly();">
-        <option value="all" ${(!ui.devisFilterBrand||ui.devisFilterBrand==='all')?'selected':''}>Toutes les marques</option>
-        ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.devisFilterBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
-      </select>
-    </div>
-    <details class="filter-details">
-      <summary>État de l'affaire${(ui.devisFilterEtats && ui.devisFilterEtats.length<allDevisEtatFilterValues().length)?` (${ui.devisFilterEtats.length})`:''} ▾</summary>
-      <div class="filter-details-panel">
-        <div style="display:flex;gap:10px;margin-bottom:6px;">
-          <a href="#" onclick="event.preventDefault(); ui.devisFilterEtats=null; updateDevisListOnly();" style="font-size:11.5px;">Tout cocher</a>
-          <a href="#" onclick="event.preventDefault(); ui.devisFilterEtats=[]; updateDevisListOnly();" style="font-size:11.5px;">Tout décocher</a>
-        </div>
-        <label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12.5px;">
-          <input type="checkbox" style="width:auto;" ${(!ui.devisFilterEtats||ui.devisFilterEtats.includes('__empty__'))?'checked':''} onchange="toggleDevisEtatFilter('__empty__')"> <span class="helper" style="display:inline;">Non renseigné</span>
-        </label>
-        ${(state.paramLists.etatAffaires||[]).map(e=>`
-        <label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12.5px;">
-          <input type="checkbox" style="width:auto;" ${(!ui.devisFilterEtats||ui.devisFilterEtats.includes(e.libelle))?'checked':''} onchange="toggleDevisEtatFilter('${escapeHtml(e.libelle)}')"> ${escapeHtml(e.libelle)}
-        </label>`).join('')}
+    <div style="flex:1;min-width:0;">
+
+    <div style="${showIf('liste')}">
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px;">
+        <button class="btn" onclick="runEtatAffaireMigration(true)" title="Vérifie et corrige les devis dont l'État de l'affaire (Gagnée/Perdue) ne se serait pas correctement enregistré">↺ Réparer les états d'affaire</button>
+        <button class="btn" onclick="openImportModalDevis()">⇪ Importer (Excel / CSV)</button>
+        <button class="btn" onclick="openImportDevisPdfPicker()" title="Recrée un devis à partir d'un de vos PDF déjà exportés par ComAgentCo">⇪ Importer un devis (PDF)</button>
+        <button class="btn btn-primary" onclick="openDevisForm()">+ Nouveau devis</button>
       </div>
-    </details>
-    <div class="field" style="margin-bottom:0;max-width:200px;">
-      <select onchange="ui.devisFilterApporteur=this.value; updateDevisListOnly();">
-        <option value="all" ${(!ui.devisFilterApporteur||ui.devisFilterApporteur==='all')?'selected':''}>Apporteur de l'affaire</option>
-        <option value="Agent" ${ui.devisFilterApporteur==='Agent'?'selected':''}>Agent</option>
-        <option value="Distributeur" ${ui.devisFilterApporteur==='Distributeur'?'selected':''}>Distributeur</option>
-      </select>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+        <div class="search-box" style="margin-bottom:0;">
+          <span class="ic">⌕</span>
+          <input type="text" placeholder="Rechercher un client, un objet, une référence…" value="${escapeHtml(ui.devisSearch||'')}" oninput="ui.devisSearch=this.value; updateDevisListOnly();">
+        </div>
+        <div class="field-row" style="gap:8px;">
+          <div class="field" style="margin-bottom:0;"><input type="date" value="${ui.devisDateFrom||''}" onchange="ui.devisDateFrom=this.value; updateDevisListOnly();"></div>
+          <div class="field" style="margin-bottom:0;"><input type="date" value="${ui.devisDateTo||''}" onchange="ui.devisDateTo=this.value; updateDevisListOnly();"></div>
+        </div>
+        <div class="field" style="margin-bottom:0;max-width:200px;">
+          <select onchange="ui.devisFilterBrand=this.value; updateDevisListOnly();">
+            <option value="all" ${(!ui.devisFilterBrand||ui.devisFilterBrand==='all')?'selected':''}>Toutes les marques</option>
+            ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.devisFilterBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+          </select>
+        </div>
+        <details class="filter-details">
+          <summary>État de l'affaire${(ui.devisFilterEtats && ui.devisFilterEtats.length<allDevisEtatFilterValues().length)?` (${ui.devisFilterEtats.length})`:''} ▾</summary>
+          <div class="filter-details-panel">
+            <div style="display:flex;gap:10px;margin-bottom:6px;">
+              <a href="#" onclick="event.preventDefault(); ui.devisFilterEtats=null; updateDevisListOnly();" style="font-size:11.5px;">Tout cocher</a>
+              <a href="#" onclick="event.preventDefault(); ui.devisFilterEtats=[]; updateDevisListOnly();" style="font-size:11.5px;">Tout décocher</a>
+            </div>
+            <label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12.5px;">
+              <input type="checkbox" style="width:auto;" ${(!ui.devisFilterEtats||ui.devisFilterEtats.includes('__empty__'))?'checked':''} onchange="toggleDevisEtatFilter('__empty__')"> <span class="helper" style="display:inline;">Non renseigné</span>
+            </label>
+            ${(state.paramLists.etatAffaires||[]).map(e=>`
+            <label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12.5px;">
+              <input type="checkbox" style="width:auto;" ${(!ui.devisFilterEtats||ui.devisFilterEtats.includes(e.libelle))?'checked':''} onchange="toggleDevisEtatFilter('${escapeHtml(e.libelle)}')"> ${escapeHtml(e.libelle)}
+            </label>`).join('')}
+          </div>
+        </details>
+        <div class="field" style="margin-bottom:0;max-width:200px;">
+          <select onchange="ui.devisFilterApporteur=this.value; updateDevisListOnly();">
+            <option value="all" ${(!ui.devisFilterApporteur||ui.devisFilterApporteur==='all')?'selected':''}>Apporteur de l'affaire</option>
+            <option value="Agent" ${ui.devisFilterApporteur==='Agent'?'selected':''}>Agent</option>
+            <option value="Distributeur" ${ui.devisFilterApporteur==='Distributeur'?'selected':''}>Distributeur</option>
+          </select>
+        </div>
+        <div class="field" style="margin-bottom:0;max-width:200px;">
+          <select onchange="ui.devisSortBy=this.value; updateDevisListOnly();">
+            <option value="date" ${(!ui.devisSortBy||ui.devisSortBy==='date')?'selected':''}>Trier par date de création</option>
+            <option value="totalht" ${ui.devisSortBy==='totalht'?'selected':''}>Trier par Total HT</option>
+          </select>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick="ui.devisSortDir=(ui.devisSortDir==='asc'?'desc':'asc'); updateDevisListOnly();" title="Inverser l'ordre">
+          ${ui.devisSortDir==='asc'?'▲ Croissant':'▼ Décroissant'}
+        </button>
+      </div>
+      <div id="devisListWrap">${renderDevisListInner()}</div>
     </div>
-    <div class="field" style="margin-bottom:0;max-width:200px;">
-      <select onchange="ui.devisSortBy=this.value; updateDevisListOnly();">
-        <option value="date" ${(!ui.devisSortBy||ui.devisSortBy==='date')?'selected':''}>Trier par date de création</option>
-        <option value="totalht" ${ui.devisSortBy==='totalht'?'selected':''}>Trier par Total HT</option>
-      </select>
+
+    <div style="${showIf('modeles')}">
+      ${renderDevisTemplates()}
     </div>
-    <button class="btn btn-sm btn-ghost" onclick="ui.devisSortDir=(ui.devisSortDir==='asc'?'desc':'asc'); updateDevisListOnly();" title="Inverser l'ordre">
-      ${ui.devisSortDir==='asc'?'▲ Croissant':'▼ Décroissant'}
-    </button>
+
+    </div>
   </div>
-  <div id="devisListWrap">${renderDevisListInner()}</div>
   `;
 }
 function updateDevisListOnly(){
@@ -7326,6 +7405,114 @@ function viewDevisAttachment(){
   window.open(url, '_blank');
   setTimeout(()=>URL.revokeObjectURL(url), 60000);
 }
+function openDevisTemplateForm(id){
+  const existing = id ? state.devisTemplates.find(x=>x.id===id) : null;
+  draft = existing ? JSON.parse(JSON.stringify(existing)) : {
+    id: uid(),
+    number: '',
+    type: 'Devis',
+    objet: '',
+    reference: '',
+    clientId: '',
+    date: todayStr(),
+    validUntil: '',
+    validUntilAuto: false,
+    status: 'Brouillon',
+    etatAffaire: '',
+    destinataire: '',
+    apporteurAffaire: '',
+    attentionA: '',
+    tvaPct: 0,
+    notes: '',
+    lines: [],
+    pdfColumns: {...DEFAULT_PDF_COLUMNS},
+    isNew: true,
+    isTemplate: true,
+    templateName: '',
+    createdAt: new Date().toISOString()
+  };
+  draft.isTemplate = true;
+  if(draft.destinataire===undefined) draft.destinataire = '';
+  if(draft.apporteurAffaire===undefined) draft.apporteurAffaire = '';
+  if(draft.attentionA===undefined) draft.attentionA = '';
+  if(!draft.pdfColumns) draft.pdfColumns = {...DEFAULT_PDF_COLUMNS};
+  if(draft.filterBrandId===undefined){
+    const brandIds = [...new Set((draft.lines||[]).map(l=>l.brandId))].filter(Boolean);
+    draft.filterBrandId = brandIds.length===1 ? brandIds[0] : '';
+  }
+  openModal(devisFormHtml(), {full:true});
+  document.addEventListener('keydown', devisFormKeydownHandler);
+  draftSavedSnapshot = JSON.stringify(draft);
+}
+function deleteDevisTemplate(id){
+  if(!confirm('Supprimer ce modèle ?')) return;
+  state.devisTemplates = state.devisTemplates.filter(x=>x.id!==id);
+  persist('devisTemplates');
+  render();
+  showToast('Modèle supprimé.');
+}
+function duplicateTemplateToDevis(id){
+  const tpl = state.devisTemplates.find(x=>x.id===id);
+  if(!tpl) return;
+  if(state.clients.length===0){ showToast('Ajoutez d\'abord un client.'); return; }
+  draft = {
+    id: uid(),
+    number: previewNextDevisNumber('Devis'),
+    type: 'Devis',
+    objet: '',
+    reference: '',
+    clientId: '',
+    date: todayStr(),
+    validUntil: defaultValidUntil('Devis', todayStr()),
+    validUntilAuto: true,
+    status: 'Brouillon',
+    etatAffaire: '',
+    destinataire: '',
+    apporteurAffaire: '',
+    attentionA: '',
+    tvaPct: 0,
+    notes: tpl.notes||'',
+    lines: JSON.parse(JSON.stringify(tpl.lines||[])).map(l=>({...l, id:uid()})),
+    pdfColumns: {...DEFAULT_PDF_COLUMNS},
+    isNew: true,
+    createdAt: new Date().toISOString()
+  };
+  const brandIds = [...new Set((draft.lines||[]).map(l=>l.brandId))].filter(Boolean);
+  draft.filterBrandId = brandIds.length===1 ? brandIds[0] : '';
+  openModal(devisFormHtml(), {full:true});
+  document.addEventListener('keydown', devisFormKeydownHandler);
+  draftSavedSnapshot = JSON.stringify(draft);
+  showToast('Devis créé à partir du modèle — sélectionnez un client pour continuer.');
+}
+function renderDevisTemplates(){
+  return `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+    <div class="helper">Créez un modèle une fois, puis dupliquez-le en vrai devis autant de fois que nécessaire — les lignes et notes sont reprises, il ne restera qu'à choisir le client.</div>
+    <button class="btn btn-primary" onclick="openDevisTemplateForm()" style="white-space:nowrap;">+ Nouveau modèle</button>
+  </div>
+  ${state.devisTemplates.length===0?emptyState('📐','Aucun modèle','Créez votre premier modèle de devis pour gagner du temps sur vos prochains devis récurrents.'):`
+  <div class="table-wrap card"><table>
+    <thead><tr><th>Nom du modèle</th><th>Marque(s)</th><th>Lignes</th><th></th></tr></thead>
+    <tbody>
+      ${state.devisTemplates.slice().sort((a,b)=>(a.templateName||'').localeCompare(b.templateName||'')).map(tpl=>{
+        const brandIds = [...new Set((tpl.lines||[]).map(l=>l.brandId))].filter(Boolean);
+        return `
+        <tr>
+          <td style="font-weight:600;cursor:pointer;" onclick="openDevisTemplateForm('${tpl.id}')">📐 ${escapeHtml(tpl.templateName||'(sans nom)')}</td>
+          <td>${brandIds.map(bid=>`<span class="chip" style="background:${brandColor(bid)};font-size:10px;margin-right:3px;">${escapeHtml(brandName(bid))}</span>`).join('')||'—'}</td>
+          <td>${(tpl.lines||[]).length}</td>
+          <td class="table-actions">
+            <button class="btn btn-sm btn-brass" onclick="duplicateTemplateToDevis('${tpl.id}')" title="Crée un nouveau devis à partir de ce modèle">⧉ Dupliquer en devis</button>
+            <button class="btn btn-sm btn-ghost" onclick="openDevisTemplateForm('${tpl.id}')">Modifier</button>
+            <button class="btn btn-sm btn-ghost btn-danger" onclick="deleteDevisTemplate('${tpl.id}')">✕</button>
+          </td>
+        </tr>
+      `;}).join('')}
+    </tbody>
+  </table></div>
+  `}
+  `;
+}
 function openDevisForm(id, presetClientId){
   if(state.clients.length===0){ showToast('Ajoutez d\'abord un client.'); return; }
   const existing = id ? state.devis.find(x=>x.id===id) : null;
@@ -7467,6 +7654,29 @@ function duplicateDraftDevis(){
 }
 function devisFormHtml(){
   const t = devisTotal(draft);
+  if(draft.isTemplate){
+    return `
+    <div class="modal-head">
+      <h3 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        📐 Modèle —
+        <input type="text" value="${escapeHtml(draft.templateName||'')}" onchange="draft.templateName=this.value.trim(); refreshDevisModal();" placeholder="Nom du modèle…" style="font-size:15px;font-weight:700;font-family:'Space Grotesk';width:260px;padding:4px 8px;height:auto;">
+      </h3>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="close-x" onclick="closeDevisFormWithCheck()">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="helper" style="margin-bottom:14px;">Ce modèle n'est pas un devis à part entière — il n'a ni numéro, ni client, ni statut. Construisez ses lignes ci-dessous, vous pourrez ensuite le dupliquer en un vrai devis depuis l'onglet "Modèles de devis".</div>
+      ${devisLinesEditorHtml()}
+      <div class="field" style="margin-top:16px;"><label>Notes / conditions <span class="helper" style="display:inline;">— reprises telles quelles dans chaque devis créé depuis ce modèle</span></label><textarea id="d_notes" rows="2" onchange="draft.notes=this.value;">${escapeHtml(draft.notes||'')}</textarea></div>
+    </div>
+    <div class="modal-foot">
+      ${!draft.isNew?`<button class="btn btn-danger" onclick="deleteDevisTemplate(draft.id); closeModal();" style="margin-right:auto;">Supprimer</button>`:''}
+      <button class="btn" onclick="closeDevisFormWithCheck()">Fermer</button>
+      <button class="btn btn-primary" onclick="saveDraftDevis(null, true)">Enregistrer le modèle</button>
+    </div>
+    `;
+  }
   return `
     <div class="modal-head">
       <h3 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -7529,6 +7739,50 @@ function devisFormHtml(){
         </div>
       </div>
 
+      ${devisLinesEditorHtml()}
+
+      ${draft.type!=='Marché'?`
+      <div class="totals-box">
+        <div class="totals-row total"><span>Total HT (Prix d'achat HT)</span><span class="num">${fmtMoney(t.ht)}</span></div>
+      </div>
+      `:''}
+
+      <div class="field" style="margin-top:16px;"><label>Notes / conditions</label><textarea id="d_notes" rows="2" onchange="draft.notes=this.value;">${escapeHtml(draft.notes||'')}</textarea></div>
+      <div class="field" style="margin-top:16px;">
+        <label>Pièce jointe (PDF) <span class="helper" style="display:inline;">— ex. CCTP, plan… consultable ici, non incluse automatiquement à l'envoi par email</span></label>
+        ${draft.attachmentPdfName?`
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="chip" style="background:var(--surface-2);color:var(--ink);">📎 ${escapeHtml(draft.attachmentPdfName)}</span>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="viewDevisAttachment()">👁 Voir</button>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="downloadDevisAttachment()">Télécharger</button>
+            <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="draft.attachmentPdfName=null; delete state.devisAttachments[draft.id]; persist('devisAttachments'); refreshDevisModal();">Retirer</button>
+          </div>
+        `:`
+          <button type="button" class="btn btn-sm btn-ghost" onclick="pickDevisAttachment()">⇪ Joindre un PDF</button>
+        `}
+      </div>
+
+      <div class="section-title">Colonnes visibles à l'impression PDF <span class="helper" style="display:inline;">(les infos d'achat et de marge sont décochées par défaut — usage interne)</span></div>
+      <div class="pill-select">
+        ${PDF_COLUMN_LABELS.map(c=>`
+          <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);padding:5px 12px;border-radius:20px;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;">
+            <input type="checkbox" style="width:auto;" ${draft.pdfColumns[c.key]?'checked':''} onchange="draft.pdfColumns['${c.key}']=this.checked;">${c.label}
+          </label>
+        `).join('')}
+      </div>
+    </div>
+    <div class="modal-foot">
+      ${!draft.isNew?`<button class="btn btn-danger" onclick="deleteDevis(draft.id); closeModal();" style="margin-right:auto;">Supprimer</button>`:''}
+      ${!draft.isNew?`<button class="btn" onclick="duplicateDraftDevis()" title="Crée une copie modifiable de ce ${draft.type==='Marché'?'marché':'devis'} avec un nouveau numéro">⧉ Dupliquer</button>`:''}
+      <button class="btn" onclick="exportDevisPdf(draft.id);" title="Télécharge le PDF tel qu'affiché à l'écran, sans passer par l'étape d'enregistrement">⇩ Télécharger PDF</button>
+      <button class="btn" onclick="saveDraftDevis((id)=>exportDevisPdf(id, 'preview'), true);">Aperçu du PDF</button>
+      <button class="btn btn-brass" onclick="saveDraftAndOpenSend();" title="Envoyer le devis par email (mode gratuit sans configuration, ou automatique si Outlook est connecté dans Paramètres)">✉ Enregistrer et envoyer</button>
+      <button class="btn btn-primary" onclick="saveDraftDevis(null, true)">Enregistrer</button>
+    </div>
+  `;
+}
+function devisLinesEditorHtml(){
+  return `
       <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
         <span>Lignes du devis</span>
         <button type="button" class="btn btn-sm" onclick="refreshDevisLinePrices()" title="Recalcule chaque ligne avec le tarif actuel et la liste de prix nets en vigueur à la date du devis">↻ Réactualiser les prix</button>
@@ -7588,45 +7842,6 @@ function devisFormHtml(){
           <button type="button" class="btn btn-sm" onclick="applyUniformMarge()">Appliquer à toutes les lignes</button>
         </div>
       </div>
-
-      ${draft.type!=='Marché'?`
-      <div class="totals-box">
-        <div class="totals-row total"><span>Total HT (Prix d'achat HT)</span><span class="num">${fmtMoney(t.ht)}</span></div>
-      </div>
-      `:''}
-
-      <div class="field" style="margin-top:16px;"><label>Notes / conditions</label><textarea id="d_notes" rows="2" onchange="draft.notes=this.value;">${escapeHtml(draft.notes||'')}</textarea></div>
-      <div class="field" style="margin-top:16px;">
-        <label>Pièce jointe (PDF) <span class="helper" style="display:inline;">— ex. CCTP, plan… consultable ici, non incluse automatiquement à l'envoi par email</span></label>
-        ${draft.attachmentPdfName?`
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span class="chip" style="background:var(--surface-2);color:var(--ink);">📎 ${escapeHtml(draft.attachmentPdfName)}</span>
-            <button type="button" class="btn btn-sm btn-ghost" onclick="viewDevisAttachment()">👁 Voir</button>
-            <button type="button" class="btn btn-sm btn-ghost" onclick="downloadDevisAttachment()">Télécharger</button>
-            <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="draft.attachmentPdfName=null; delete state.devisAttachments[draft.id]; persist('devisAttachments'); refreshDevisModal();">Retirer</button>
-          </div>
-        `:`
-          <button type="button" class="btn btn-sm btn-ghost" onclick="pickDevisAttachment()">⇪ Joindre un PDF</button>
-        `}
-      </div>
-
-      <div class="section-title">Colonnes visibles à l'impression PDF <span class="helper" style="display:inline;">(les infos d'achat et de marge sont décochées par défaut — usage interne)</span></div>
-      <div class="pill-select">
-        ${PDF_COLUMN_LABELS.map(c=>`
-          <label style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);padding:5px 12px;border-radius:20px;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;">
-            <input type="checkbox" style="width:auto;" ${draft.pdfColumns[c.key]?'checked':''} onchange="draft.pdfColumns['${c.key}']=this.checked;">${c.label}
-          </label>
-        `).join('')}
-      </div>
-    </div>
-    <div class="modal-foot">
-      ${!draft.isNew?`<button class="btn btn-danger" onclick="deleteDevis(draft.id); closeModal();" style="margin-right:auto;">Supprimer</button>`:''}
-      ${!draft.isNew?`<button class="btn" onclick="duplicateDraftDevis()" title="Crée une copie modifiable de ce ${draft.type==='Marché'?'marché':'devis'} avec un nouveau numéro">⧉ Dupliquer</button>`:''}
-      <button class="btn" onclick="exportDevisPdf(draft.id);" title="Télécharge le PDF tel qu'affiché à l'écran, sans passer par l'étape d'enregistrement">⇩ Télécharger PDF</button>
-      <button class="btn" onclick="saveDraftDevis((id)=>exportDevisPdf(id, 'preview'), true);">Aperçu du PDF</button>
-      <button class="btn btn-brass" onclick="saveDraftAndOpenSend();" title="Envoyer le devis par email (mode gratuit sans configuration, ou automatique si Outlook est connecté dans Paramètres)">✉ Enregistrer et envoyer</button>
-      <button class="btn btn-primary" onclick="saveDraftDevis(null, true)">Enregistrer</button>
-    </div>
   `;
 }
 function refreshDevisLinePrices(){
@@ -8231,7 +8446,22 @@ function closeDevisFormWithCheck(){
     </div>
   `);
 }
+function saveDraftDevisTemplate(){
+  if(draft.lines.length===0){ showToast('Ajoutez au moins une ligne au modèle.'); return; }
+  if(!draft.templateName || !draft.templateName.trim()){ showToast('Donnez un nom à ce modèle.'); return; }
+  const toSave = {...draft};
+  delete toSave.isNew;
+  const idx = state.devisTemplates.findIndex(x=>x.id===toSave.id);
+  if(idx>=0) state.devisTemplates[idx] = toSave; else state.devisTemplates.push(toSave);
+  persist('devisTemplates');
+  draft.isNew = false;
+  draftSavedSnapshot = JSON.stringify(draft);
+  closeModal();
+  render();
+  showToast('Modèle enregistré.');
+}
 function saveDraftDevis(thenAction, keepOpen){
+  if(draft.isTemplate){ saveDraftDevisTemplate(); return; }
   if(!draft.clientId){ showToast('Sélectionnez un client.'); return; }
   if(draft.lines.length===0){ showToast('Ajoutez au moins une ligne au devis.'); return; }
   // Si rien n'a changé depuis le dernier enregistrement, inutile de ressauvegarder (et donc inutile de
@@ -11156,7 +11386,7 @@ window.addEventListener('storage', (e)=>{
   if(!e.key || !e.key.startsWith('comagentco_')) return;
   const rest = e.key.slice('comagentco_'.length);
   if(rest.indexOf('__c')>=0) return; // morceau de données : on ne réagit qu'au sommaire principal
-  const known = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
+  const known = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','devisTemplates','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
   if(known.indexOf(rest)===-1) return;
   syncKeyFromLocalStorage(rest);
 });
