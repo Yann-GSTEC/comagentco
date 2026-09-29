@@ -548,6 +548,7 @@ let state = {
   prixNetListes: [],
   devis: [],
   devisTemplates: [],
+  trash: [],
   commerciaux: [],
   devisAttachments: {},
   settings: {
@@ -1115,7 +1116,7 @@ async function loadAll(){
     try{ folderData = await readFolderBackupData(); }catch(e){ folderData = null; }
   }
   try{
-    const keys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','devisTemplates','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
+    const keys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','devisTemplates','commerciaux','devisAttachments','trash','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
     for(const k of keys){
       if(folderData && folderData[k]!==undefined){
         state[k] = folderData[k];
@@ -1669,7 +1670,7 @@ function fullBackupPayload(){
   return JSON.stringify({
     app:'ComAgentCo', version:1, exportedAt:new Date().toISOString(),
     brands:state.brands, clients:state.clients, tarifs:state.tarifs, listesPrixNets:state.listesPrixNets,
-    prixNetListes:state.prixNetListes, devis:state.devis, devisTemplates:state.devisTemplates, commerciaux:state.commerciaux, devisAttachments:state.devisAttachments, settings:state.settings, paramLists:state.paramLists,
+    prixNetListes:state.prixNetListes, devis:state.devis, devisTemplates:state.devisTemplates, commerciaux:state.commerciaux, devisAttachments:state.devisAttachments, trash:state.trash, settings:state.settings, paramLists:state.paramLists,
     commissions:state.commissions, caVva:state.caVva, dashboardLayout:state.dashboardLayout, rapportLayout:state.rapportLayout,
   }, null, 2);
 }
@@ -1763,7 +1764,7 @@ function restoreBackupFile(evt){
     try{ data = JSON.parse(e.target.result); }
     catch(err){ showToast('Fichier de sauvegarde illisible.'); return; }
     if(!confirm('Restaurer cette sauvegarde va remplacer toutes les données actuelles. Continuer ?')) return;
-    const allKeys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','devisTemplates','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
+    const allKeys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','devisTemplates','commerciaux','devisAttachments','trash','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
     allKeys.forEach(k=>{
       if(data[k]!==undefined) state[k]=data[k];
     });
@@ -1909,6 +1910,8 @@ const NAV_ITEMS_DEFAULT = [
   {id:'suivirelances', label:'Suivi et relances', ic:'🔔'},
   {id:'commissions', label:'Commissions', ic:'%'},
   {id:'recherche', label:'Recherche', ic:'⌕'},
+  {id:'budgetCommercial', label:'Budget commercial', ic:'💰'},
+  {id:'trash', label:'Corbeille', ic:'🗑'},
   {id:'parametres', label:'Paramètres', ic:'⚙'},
 ];
 function getOrderedNavItems(){
@@ -2001,6 +2004,8 @@ function renderMain(){
     case 'suivirelances': return renderSuiviRelances();
     case 'commissions': return renderCommissions();
     case 'recherche': return renderRecherche();
+    case 'budgetCommercial': return renderBudgetCommercial();
+    case 'trash': return renderTrash();
     case 'parametres': return renderParametres();
     default: return '';
   }
@@ -2337,14 +2342,178 @@ function saveBrand(id){
   render();
   showToast('Marque enregistrée.');
 }
+const TRASH_TYPE_LABELS = {
+  client:'Client', devis:'Devis', marche:'Marché', devisTemplate:'Modèle de devis',
+  tarif:'Référence tarif', brand:'Marque', commercial:'Commercial',
+  historyNote:'Note de suivi', prixNetListe:'Liste de prix nets', prixNet:'Référence liste de prix nets',
+  paramItem:'Élément de liste', brandHistory:'RDV marque', tarifsBulk:'Tarifs (bloc)', prixNetBulk:'Liste de prix nets (bloc)',
+};
+function moveToTrash(type, label, data){
+  state.trash = state.trash || [];
+  state.trash.unshift({ id:uid(), type, label, data, deletedAt:new Date().toISOString() });
+  persist('trash');
+}
+function restoreFromTrash(trashId){
+  const entry = (state.trash||[]).find(x=>x.id===trashId);
+  if(!entry) return;
+  switch(entry.type){
+    case 'client': state.clients.push(entry.data); persist('clients'); break;
+    case 'devis': case 'marche': state.devis.push(entry.data); persist('devis'); break;
+    case 'devisTemplate': state.devisTemplates.push(entry.data); persist('devisTemplates'); break;
+    case 'tarif': state.tarifs.push(entry.data); persist('tarifs'); break;
+    case 'tarifsBulk': state.tarifs = state.tarifs.concat(entry.data); persist('tarifs'); break;
+    case 'brand': state.brands.push(entry.data); persist('brands'); break;
+    case 'commercial': state.commerciaux.push(entry.data); persist('commerciaux'); break;
+    case 'historyNote': {
+      const c = state.clients.find(x=>x.id===entry.data.clientId);
+      if(!c){ showToast('La fiche client correspondante n\'existe plus.'); return; }
+      c.history = c.history || [];
+      c.history.push(entry.data.note);
+      persist('clients');
+      break;
+    }
+    case 'prixNetListe':
+      state.prixNetListes.push(entry.data.liste);
+      state.listesPrixNets = state.listesPrixNets.concat(entry.data.items||[]);
+      persist('prixNetListes'); persist('listesPrixNets');
+      break;
+    case 'prixNet': state.listesPrixNets.push(entry.data); persist('listesPrixNets'); break;
+    case 'prixNetBulk': state.listesPrixNets = state.listesPrixNets.concat(entry.data); persist('listesPrixNets'); break;
+    case 'paramItem':
+      state.paramLists[entry.data.listKey] = state.paramLists[entry.data.listKey] || [];
+      state.paramLists[entry.data.listKey].push(entry.data.item);
+      persist('paramLists');
+      break;
+    case 'brandHistory': {
+      const b = state.brands.find(x=>x.id===entry.data.brandId);
+      if(!b){ showToast('La marque correspondante n\'existe plus.'); return; }
+      b.history = b.history || [];
+      b.history.push(entry.data.entry);
+      persist('brands');
+      break;
+    }
+    default: showToast("Type d'élément inconnu — restauration impossible."); return;
+  }
+  state.trash = state.trash.filter(x=>x.id!==trashId);
+  persist('trash');
+  render();
+  showToast(`${TRASH_TYPE_LABELS[entry.type]||'Élément'} restauré.`);
+}
+function permanentlyDeleteFromTrash(trashId){
+  if(!confirm('Supprimer définitivement cet élément ? Cette action est irréversible.')) return;
+  state.trash = (state.trash||[]).filter(x=>x.id!==trashId);
+  persist('trash');
+  render();
+  showToast('Élément supprimé définitivement.');
+}
+function emptyTrash(){
+  if((state.trash||[]).length===0) return;
+  if(!confirm(`Vider la corbeille ? Les ${state.trash.length} élément(s) seront supprimés définitivement et ne pourront plus être récupérés.`)) return;
+  state.trash = [];
+  persist('trash');
+  render();
+  showToast('Corbeille vidée.');
+}
+function renderBudgetCommercial(){
+  const years = availableYears();
+  if(!ui.budgetCommercialYear || !years.includes(ui.budgetCommercialYear)) ui.budgetCommercialYear = years[0] || new Date().getFullYear();
+  const year = ui.budgetCommercialYear;
+
+  const rows = [];
+  state.clients.forEach(c=>{
+    const perBrand = {}; // brandId -> total budget
+    let anyEntry = false;
+    (c.history||[]).forEach(h=>{
+      if(yearOf(h.date)!==year) return;
+      const taches = historyTasks(h);
+      if(!taches.some(t=>t.name==='Animation commerciale')) return;
+      anyEntry = true;
+      const budgets = h.animationBudgets || {};
+      Object.keys(budgets).forEach(bid=>{
+        perBrand[bid] = (perBrand[bid]||0) + (budgets[bid]||0);
+      });
+    });
+    if(!anyEntry) return;
+    const totalBudget = Object.values(perBrand).reduce((s,v)=>s+v,0);
+    const ca = caForClient(c.id, year, null);
+    const ratio = ca>0 ? (totalBudget/ca*100) : null;
+    rows.push({ client:c, perBrand, totalBudget, ca, ratio });
+  });
+  rows.sort((a,b)=>b.totalBudget-a.totalBudget);
+
+  const totalBudgetAll = rows.reduce((s,r)=>s+r.totalBudget,0);
+  const totalCaAll = rows.reduce((s,r)=>s+r.ca,0);
+
+  return `
+  <div class="topbar">
+    <div><h1>Budget commercial</h1><div class="sub">Animations commerciales par client, comparées au CA réalisé — Année ${year}</div></div>
+    <div class="field" style="margin-bottom:0;max-width:160px;">
+      <select onchange="ui.budgetCommercialYear=parseInt(this.value,10); render();">
+        ${years.map(y=>`<option value="${y}" ${year===y?'selected':''}>${y}</option>`).join('')}
+      </select>
+    </div>
+  </div>
+  <div class="grid grid-4" style="margin-bottom:20px;">
+    <div class="card kpi"><div class="label">Budget total animations</div><div class="value num">${fmtMoney(totalBudgetAll)}</div></div>
+    <div class="card kpi"><div class="label">CA total (clients concernés)</div><div class="value num" style="color:var(--success);">${fmtMoney(totalCaAll)}</div></div>
+    <div class="card kpi"><div class="label">Ratio global</div><div class="value num">${totalCaAll>0?(totalBudgetAll/totalCaAll*100).toFixed(1)+' %':'—'}</div></div>
+  </div>
+  ${rows.length===0?emptyState('💰',"Aucune animation commerciale sur cette année","Cochez la tâche \"Animation commerciale\" (avec un budget par marque) sur une note de suivi client pour la voir apparaître ici."):`
+  <div class="helper" style="margin-bottom:10px;">Le ratio compare le budget d'animation investi chez ce client à son CA (devis gagnés) sur la même année — un ratio élevé peut signaler une participation disproportionnée par rapport au chiffre d'affaires réalisé.</div>
+  <div class="table-wrap card"><table>
+    <thead><tr><th>Client</th><th>Marques (budget)</th><th class="num">Budget total</th><th class="num">CA annuel ${year}</th><th class="num">Ratio</th></tr></thead>
+    <tbody>
+      ${rows.map(r=>`
+        <tr style="cursor:pointer;" onclick="openClientDetail('${r.client.id}')">
+          <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
+          <td>${Object.keys(r.perBrand).map(bid=>`<span class="chip" style="background:${brandColor(bid)};font-size:10px;margin:1px 3px 1px 0;">${escapeHtml(brandName(bid))} — ${fmtMoney(r.perBrand[bid])}</span>`).join('')}</td>
+          <td class="num" style="font-weight:700;">${fmtMoney(r.totalBudget)}</td>
+          <td class="num">${fmtMoney(r.ca)}</td>
+          <td class="num" style="font-weight:700;color:${r.ratio==null?'var(--muted)':(r.ratio>15?'var(--danger)':(r.ratio>7?'#D9782D':'var(--success)'))};">${r.ratio==null?'—':r.ratio.toFixed(1)+' %'}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table></div>
+  `}
+  `;
+}
+function renderTrash(){
+  const items = state.trash||[];
+  return `
+  <div class="topbar">
+    <div><h1>Corbeille</h1><div class="sub">${items.length} élément(s) supprimé(s)</div></div>
+    ${items.length>0?`<button class="btn btn-danger" onclick="emptyTrash()">🗑 Vider la corbeille</button>`:''}
+  </div>
+  ${items.length===0?emptyState('🗑','Corbeille vide','Les clients, devis, modèles, tarifs, marques et commerciaux supprimés apparaîtront ici, le temps que vous les récupériez si besoin.'):`
+  <div class="table-wrap card"><table>
+    <thead><tr><th>Type</th><th>Élément</th><th>Supprimé le</th><th></th></tr></thead>
+    <tbody>
+      ${items.map(entry=>`
+        <tr>
+          <td><span class="chip" style="background:var(--surface-2);color:var(--ink);">${escapeHtml(TRASH_TYPE_LABELS[entry.type]||entry.type)}</span></td>
+          <td style="font-weight:600;">${escapeHtml(entry.label||'—')}</td>
+          <td>${new Date(entry.deletedAt).toLocaleString('fr-FR')}</td>
+          <td class="table-actions">
+            <button class="btn btn-sm btn-brass" onclick="restoreFromTrash('${entry.id}')">↺ Restaurer</button>
+            <button class="btn btn-sm btn-ghost btn-danger" onclick="permanentlyDeleteFromTrash('${entry.id}')">Supprimer définitivement</button>
+          </td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table></div>
+  `}
+  `;
+}
 function deleteBrand(id){
-  if(!confirm('Supprimer cette marque ? Les tarifs associés seront aussi supprimés.')) return;
+  if(!confirm('Supprimer cette marque ? Les tarifs associés seront aussi supprimés. Retrouvable dans la Corbeille (les tarifs associés, eux, sont supprimés définitivement).')) return;
+  const b = state.brands.find(x=>x.id===id);
+  if(b) moveToTrash('brand', b.name||'(sans nom)', b);
   state.brands = state.brands.filter(b=>b.id!==id);
   state.tarifs = state.tarifs.filter(t=>t.brandId!==id);
   persist('brands'); persist('tarifs');
   closeModal();
   render();
-  showToast('Marque supprimée.');
+  showToast('Marque déplacée dans la Corbeille.');
 }
 
 /* ============================= CLIENTS (CRM) ============================= */
@@ -2921,12 +3090,13 @@ function toggleClientSelectAll(checked){
 function deleteSelectedClients(){
   const ids = Object.keys(ui.clientsSelected||{}).filter(id=>ui.clientsSelected[id]);
   if(ids.length===0) return;
-  if(!confirm(`Supprimer ${ids.length} client(s) sélectionné(s) et leur historique ? Cette action est irréversible.`)) return;
+  if(!confirm(`Supprimer ${ids.length} client(s) sélectionné(s) et leur historique ? Retrouvables dans la Corbeille.`)) return;
+  state.clients.filter(c=>ids.includes(c.id)).forEach(c=>moveToTrash('client', clientDisplayName(c)||'(sans nom)', c));
   state.clients = state.clients.filter(c=>!ids.includes(c.id));
   ui.clientsSelected = {};
   persist('clients');
   render();
-  showToast('Client(s) supprimé(s).');
+  showToast('Client(s) déplacé(s) dans la Corbeille.');
 }
 function toggleClientGroupSelect(idsStr, checked){
   ui.clientsSelected = ui.clientsSelected || {};
@@ -3063,7 +3233,9 @@ function openClientForm(id){
         <input type="checkbox" id="f_acceptEmailing" style="width:auto;" ${(!c || c.acceptEmailing!==false)?'checked':''}>
         <span>Ce client accepte de recevoir des emailings <span class="helper" style="display:inline;">— décochez pour l'exclure automatiquement des extractions dans l'onglet Emailing</span></span>
       </label>
-      <div class="field"><label>Commentaire</label><textarea id="f_notes" rows="3">${c?escapeHtml(c.notes||''):''}</textarea></div>
+      <div class="field"><label>Commentaire</label>
+        <div class="rich-editable" contenteditable="true" id="f_notes" data-placeholder="Notes internes sur ce client…" onpaste="handleRichPaste(event)" style="border:1px solid var(--line);border-radius:7px;min-height:70px;padding:9px 11px;background:#fff;">${c?escapeHtml(c.notes||''):''}</div>
+      </div>
 
       <div class="section-title">Remise tarif par défaut <span class="helper" style="display:inline;">(appliquée automatiquement aux lignes de devis pour ce client, sauf si une liste de prix nets s'applique)</span></div>
       <div class="table-wrap lines-table">
@@ -3283,7 +3455,7 @@ function saveClient(id){
     typeClient: document.getElementById('f_typeClient').value.trim(),
     canalDistribution: document.getElementById('f_canalDistribution').value.trim(),
     commercialId: document.getElementById('f_commercialId').value,
-    notes: document.getElementById('f_notes').value.trim(),
+    notes: document.getElementById('f_notes').innerHTML.trim(),
     remisesTarif: clientDraftRemises.filter(r=>r.remise1||r.remise2||r.remise3||r.brandId||r.familleArticle),
     actif: !document.getElementById('f_inactif').checked,
     contacts: clientDraftContacts,
@@ -3303,12 +3475,14 @@ function saveClient(id){
   showToast('Client enregistré.');
 }
 function deleteClient(id){
-  if(!confirm('Supprimer ce client et son historique ?')) return;
+  if(!confirm('Supprimer ce client et son historique ? Retrouvable dans la Corbeille.')) return;
+  const c = state.clients.find(x=>x.id===id);
+  if(c) moveToTrash('client', clientDisplayName(c)||'(sans nom)', c);
   state.clients = state.clients.filter(c=>c.id!==id);
   persist('clients');
   closeModal();
   render();
-  showToast('Client supprimé.');
+  showToast('Client déplacé dans la Corbeille.');
 }
 let historyNoteSelectedBrands = [];
 let suiviOnlyModalClientId = null;
@@ -3384,7 +3558,7 @@ function openClientDetail(id, scrollToSuivi){
           return escapeHtml(scope+' : '+(pct||'0%'));
         }).join(' · ')}</div>`:''}
       </div>
-      ${c.notes?`<div class="helper" style="margin-bottom:10px;">${escapeHtml(c.notes)}</div>`:''}
+      ${c.notes?`<div class="helper" style="margin-bottom:10px;">${c.notes}</div>`:''}
 
       ${contacts.length>0?`
       <div class="section-title">Personnes à contacter</div>
@@ -3444,7 +3618,37 @@ function toggleHistoryBrandChip(el, brandId){
   const idx = historyNoteSelectedBrands.indexOf(brandId);
   if(idx>=0){ historyNoteSelectedBrands.splice(idx,1); el.style.opacity='.5'; el.style.borderColor='transparent'; }
   else { historyNoteSelectedBrands.push(brandId); el.style.opacity='1'; el.style.borderColor='#1a1a1a'; }
+  refreshHistoryBudgetSection('add');
 }
+let historyNoteBudgets = {};
+let historyEditBudgets = {};
+function renderHistoryBudgetSection(tasks, brandIds, budgets, onchangeFn){
+  if(!Object.prototype.hasOwnProperty.call(tasks||{}, 'Animation commerciale')) return '';
+  if(!brandIds || brandIds.length===0) return '<div class="helper" style="margin-top:8px;">Sélectionnez au moins une marque pour saisir le budget de cette animation commerciale.</div>';
+  return `
+  <div class="field" style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);">
+    <label style="margin-bottom:8px;">💰 Budget animation commerciale <span class="helper" style="display:inline;">— par marque, visible dans l'onglet Budget commercial</span></label>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;">
+      ${brandIds.map(bid=>`
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="chip" style="background:${brandColor(bid)};font-size:10px;">${escapeHtml(brandName(bid))}</span>
+          <input type="number" min="0" step="10" value="${budgets[bid]!=null?budgets[bid]:''}" placeholder="0 €" style="width:90px;" onchange="${onchangeFn}('${bid}', this.value)">
+        </div>
+      `).join('')}
+    </div>
+  </div>`;
+}
+function refreshHistoryBudgetSection(which){
+  if(which==='add'){
+    const holder = document.getElementById('historyBudgetSection_add');
+    if(holder) holder.innerHTML = renderHistoryBudgetSection(historyNoteSelectedTasks, historyNoteSelectedBrands, historyNoteBudgets, 'setHistoryNoteBudget');
+  } else {
+    const holder = document.getElementById('historyBudgetSection_edit');
+    if(holder) holder.innerHTML = renderHistoryBudgetSection(historyEditSelectedTasks, historyEditSelectedBrands, historyEditBudgets, 'setHistoryEditBudget');
+  }
+}
+function setHistoryNoteBudget(brandId, val){ historyNoteBudgets[brandId] = parseFloat(val)||0; }
+function setHistoryEditBudget(brandId, val){ historyEditBudgets[brandId] = parseFloat(val)||0; }
 let historyNoteSelectedTasks = {};
 let historyNoteSelectedPersonnes = [];
 function renderHistoryPersonneChips(clientId, selected, toggleFn){
@@ -3492,6 +3696,7 @@ function toggleHistoryNoteTaskChip(el, taskName){
   }
   const holder = document.getElementById('historyTaskChips');
   if(holder) holder.innerHTML = renderHistoryTaskChips(historyNoteSelectedTasks,'toggleHistoryNoteTaskChip','commentHistoryNoteTaskChip');
+  refreshHistoryBudgetSection('add');
 }
 function commentHistoryNoteTaskChip(el, taskName){
   const current = historyNoteSelectedTasks[taskName] || '';
@@ -3505,6 +3710,7 @@ function openAddHistoryNoteModal(clientId){
   historyNoteSelectedBrands = [];
   historyNoteSelectedTasks = {};
   historyNoteSelectedPersonnes = [];
+  historyNoteBudgets = {};
   openModal(`
     <div class="modal-head"><h3>Ajouter un rendez-vous</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
@@ -3530,6 +3736,7 @@ function openAddHistoryNoteModal(clientId){
           <button type="button" class="btn btn-sm btn-ghost" style="padding:2px 9px;" onclick="addCustomVisitTask(historyNoteSelectedTasks,'historyTaskChips','toggleHistoryNoteTaskChip','commentHistoryNoteTaskChip')">+ Ajouter une tâche</button>
         </label>
         <div id="historyTaskChips" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">${renderHistoryTaskChips(historyNoteSelectedTasks,'toggleHistoryNoteTaskChip','commentHistoryNoteTaskChip')}</div>
+        <div id="historyBudgetSection_add">${renderHistoryBudgetSection(historyNoteSelectedTasks, historyNoteSelectedBrands, historyNoteBudgets, 'setHistoryNoteBudget')}</div>
       </div>
     </div>
     <div class="modal-foot">
@@ -3551,13 +3758,15 @@ function addHistoryNote(clientId){
   const duree = dureeEl ? (parseInt(dureeEl.value,10)||0) : 0;
   const brandIds = historyNoteSelectedBrands.slice();
   const taches = Object.keys(historyNoteSelectedTasks).map(name=>({name, comment: historyNoteSelectedTasks[name]||''}));
+  const animationBudgets = taches.some(t=>t.name==='Animation commerciale') ? {...historyNoteBudgets} : {};
   const c = state.clients.find(x=>x.id===clientId);
   c.history = c.history || [];
-  c.history.push({id:uid(), date, text, brandIds, typeVisite: typeVisite||'', duree, taches, personnesVues: historyNoteSelectedPersonnes.slice()});
+  c.history.push({id:uid(), date, text, brandIds, typeVisite: typeVisite||'', duree, taches, personnesVues: historyNoteSelectedPersonnes.slice(), animationBudgets});
   persist('clients');
   historyNoteSelectedBrands = [];
   historyNoteSelectedTasks = {};
   historyNoteSelectedPersonnes = [];
+  historyNoteBudgets = {};
   closeModal();
   refreshClientDetailOrSuivi(clientId);
 }
@@ -3572,6 +3781,7 @@ function toggleHistoryEditBrandChip(el, brandId){
   const idx = historyEditSelectedBrands.indexOf(brandId);
   if(idx>=0){ historyEditSelectedBrands.splice(idx,1); el.style.opacity='.5'; el.style.borderColor='transparent'; }
   else { historyEditSelectedBrands.push(brandId); el.style.opacity='1'; el.style.borderColor='#1a1a1a'; }
+  refreshHistoryBudgetSection('edit');
 }
 let historyEditSelectedTasks = {};
 function toggleHistoryEditTaskChip(el, taskName){
@@ -3582,6 +3792,7 @@ function toggleHistoryEditTaskChip(el, taskName){
   }
   const holder = document.getElementById('historyEditTaskChips');
   if(holder) holder.innerHTML = renderHistoryTaskChips(historyEditSelectedTasks,'toggleHistoryEditTaskChip','commentHistoryEditTaskChip');
+  refreshHistoryBudgetSection('edit');
 }
 function commentHistoryEditTaskChip(el, taskName){
   const current = historyEditSelectedTasks[taskName] || '';
@@ -3600,6 +3811,7 @@ function openEditHistoryNoteModal(clientId, noteId){
   historyEditSelectedTasks = {};
   historyEditSelectedPersonnes = (h.personnesVues||[]).slice();
   historyTasks(h).forEach(t=>{ historyEditSelectedTasks[t.name] = t.comment||''; });
+  historyEditBudgets = {...(h.animationBudgets||{})};
   openModal(`
     <div class="modal-head"><h3>Modifier la note de suivi</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
@@ -3625,6 +3837,7 @@ function openEditHistoryNoteModal(clientId, noteId){
           <button type="button" class="btn btn-sm btn-ghost" style="padding:2px 9px;" onclick="addCustomVisitTask(historyEditSelectedTasks,'historyEditTaskChips','toggleHistoryEditTaskChip','commentHistoryEditTaskChip')">+ Ajouter une tâche</button>
         </label>
         <div id="historyEditTaskChips" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">${renderHistoryTaskChips(historyEditSelectedTasks,'toggleHistoryEditTaskChip','commentHistoryEditTaskChip')}</div>
+        <div id="historyBudgetSection_edit">${renderHistoryBudgetSection(historyEditSelectedTasks, historyEditSelectedBrands, historyEditBudgets, 'setHistoryEditBudget')}</div>
       </div>
     </div>
     <div class="modal-foot">
@@ -3648,6 +3861,7 @@ function saveEditedHistoryNote(clientId, noteId){
   h.duree = dureeEl ? (parseInt(dureeEl.value,10)||0) : (h.duree||0);
   h.brandIds = historyEditSelectedBrands.slice();
   h.taches = Object.keys(historyEditSelectedTasks).map(name=>({name, comment: historyEditSelectedTasks[name]||''}));
+  h.animationBudgets = h.taches.some(t=>t.name==='Animation commerciale') ? {...historyEditBudgets} : {};
   h.personnesVues = historyEditSelectedPersonnes.slice();
   delete h.brandId; // ancien format éventuel, remplacé par brandIds
   persist('clients');
@@ -3674,7 +3888,9 @@ function toggleHistorySelectAll(clientId, checked){
 function deleteHistoryNote(clientId, noteId){
   const c = state.clients.find(x=>x.id===clientId);
   if(!c) return;
-  if(!confirm('Supprimer cette note de suivi ?')) return;
+  if(!confirm('Supprimer cette note de suivi ? Retrouvable dans la Corbeille.')) return;
+  const note = (c.history||[]).find(h=>h.id===noteId);
+  if(note) moveToTrash('historyNote', `${clientDisplayName(c)} — ${note.date||''}`, {clientId, note});
   c.history = (c.history||[]).filter(h=>h.id!==noteId);
   delete ui.historySelected[noteId];
   persist('clients');
@@ -3685,7 +3901,8 @@ function deleteSelectedHistory(clientId){
   if(!c) return;
   const ids = Object.keys(ui.historySelected||{}).filter(id=>ui.historySelected[id] && (c.history||[]).some(h=>h.id===id));
   if(ids.length===0) return;
-  if(!confirm(`Supprimer ${ids.length} note(s) de suivi sélectionnée(s) ?`)) return;
+  if(!confirm(`Supprimer ${ids.length} note(s) de suivi sélectionnée(s) ? Retrouvables dans la Corbeille.`)) return;
+  (c.history||[]).filter(h=>ids.includes(h.id)).forEach(note=>moveToTrash('historyNote', `${clientDisplayName(c)} — ${note.date||''}`, {clientId, note}));
   c.history = (c.history||[]).filter(h=>!ids.includes(h.id));
   ids.forEach(id=>delete ui.historySelected[id]);
   persist('clients');
@@ -3902,7 +4119,7 @@ function showClientImportReport(totalRows, added, updated, skippedRows, mergedRo
 function exportClientsExcel(){
   if(state.clients.length===0){ showToast('Aucun client à exporter.'); return; }
   const headers = CLIENT_IMPORT_FIELDS.map(f=>f.label.replace(' *',''));
-  const rows = state.clients.map(c=> CLIENT_IMPORT_FIELDS.map(f=> c[f.key]!==undefined ? c[f.key] : ''));
+  const rows = state.clients.map(c=> CLIENT_IMPORT_FIELDS.map(f=> f.key==='notes' ? stripHtml(c.notes||'') : (c[f.key]!==undefined ? c[f.key] : '')));
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Clients');
@@ -4307,7 +4524,7 @@ function confirmMergeContacts(){
         primary.contacts.push({
           id: uid(), civilite: c.civilite||'', nom: personName, prenom: c.prenom||'',
           fonction:'', telephone: c.telephone||'', portable: c.portable||'', email: c.email||'',
-          commentaire: c.notes||'',
+          commentaire: stripHtml(c.notes||''),
         });
         if(emailKey) existingEmails.add(emailKey);
       }
@@ -4472,14 +4689,16 @@ function saveCommercial(id){
   showToast('Commercial enregistré.');
 }
 function deleteCommercial(id){
-  if(!confirm('Supprimer ce commercial ? Les clients qui lui sont rattachés ne seront plus assignés.')) return;
+  if(!confirm('Supprimer ce commercial ? Les clients qui lui sont rattachés ne seront plus assignés. Retrouvable dans la Corbeille.')) return;
+  const cm = state.commerciaux.find(x=>x.id===id);
+  if(cm) moveToTrash('commercial', commercialDisplayName(cm), cm);
   state.commerciaux = state.commerciaux.filter(cm=>cm.id!==id);
   state.clients.forEach(c=>{ if(c.commercialId===id) c.commercialId = ''; });
   persist('commerciaux');
   persist('clients');
   closeModal();
   render();
-  showToast('Commercial supprimé.');
+  showToast('Commercial déplacé dans la Corbeille.');
 }
 </script>
 <script>
@@ -4928,13 +5147,14 @@ function renamePrixNetListe(listeId){
 function deletePrixNetListe(listeId){
   const l = state.prixNetListes.find(x=>x.id===listeId);
   if(!l) return false;
-  const nbRefs = state.listesPrixNets.filter(t=>t.listeId===listeId).length;
-  if(!confirm(`Supprimer la liste "${l.nom}" ? ${nbRefs} référence(s) associée(s) seront supprimées, et les clients rattachés perdront ce tarif préférentiel. Cette action est irréversible.`)) return false;
+  const items = state.listesPrixNets.filter(t=>t.listeId===listeId);
+  if(!confirm(`Supprimer la liste "${l.nom}" ? ${items.length} référence(s) associée(s) seront aussi déplacées avec elle. Les clients rattachés perdront ce tarif préférentiel. Retrouvable dans la Corbeille.`)) return false;
+  moveToTrash('prixNetListe', l.nom||'(sans nom)', {liste:l, items});
   state.prixNetListes = state.prixNetListes.filter(x=>x.id!==listeId);
   state.listesPrixNets = state.listesPrixNets.filter(t=>t.listeId!==listeId);
   state.clients.forEach(c=>{ if(c.netPriceListeIds) c.netPriceListeIds = c.netPriceListeIds.filter(id=>id!==listeId); });
   persist('prixNetListes'); persist('listesPrixNets'); persist('clients');
-  showToast('Liste supprimée.');
+  showToast('Liste déplacée dans la Corbeille.');
   return true;
 }
 function deletePrixNetListeFromDetail(listeId){
@@ -4947,11 +5167,14 @@ function deletePrixNetListeFromDetail(listeId){
 }
 function clearListePrixNets(listeId){
   const l = state.prixNetListes.find(x=>x.id===listeId);
-  if(!confirm(`Vider la liste "${l?l.nom:''}" ? Cette action est irréversible.`)) return;
+  const items = state.listesPrixNets.filter(t=>t.listeId===listeId);
+  if(items.length===0){ showToast('Cette liste est déjà vide.'); return; }
+  if(!confirm(`Vider la liste "${l?l.nom:''}" ? ${items.length} référence(s) retrouvable(s) dans la Corbeille (en un seul bloc).`)) return;
+  moveToTrash('prixNetBulk', `${items.length} référence(s) — ${l?l.nom:''}`, items);
   state.listesPrixNets = state.listesPrixNets.filter(t=>t.listeId!==listeId);
   persist('listesPrixNets');
   render();
-  showToast('Liste de prix nets vidée.');
+  showToast('Liste de prix nets déplacée dans la Corbeille.');
 }
 let pnClientAssignSearch = '';
 let pnCurrentGroups = [];
@@ -5208,12 +5431,14 @@ function savePrixNet(id){
   showToast('Référence enregistrée.');
 }
 function deletePrixNet(id){
-  if(!confirm('Supprimer cette référence de la liste de prix nets ?')) return;
+  if(!confirm('Supprimer cette référence de la liste de prix nets ? Retrouvable dans la Corbeille.')) return;
+  const t = state.listesPrixNets.find(x=>x.id===id);
+  if(t) moveToTrash('prixNet', `${t.reference||''} — ${t.designation||''}`.trim(), t);
   state.listesPrixNets = state.listesPrixNets.filter(t=>t.id!==id);
   persist('listesPrixNets');
   closeModal();
   render();
-  showToast('Référence supprimée.');
+  showToast('Référence déplacée dans la Corbeille.');
 }
 
 /* ---- Import Excel / CSV (Liste de prix nets — indépendant de l'import Tarifs) ---- */
@@ -5495,21 +5720,24 @@ function saveTarif(id){
   showToast('Référence enregistrée.');
 }
 function deleteTarif(id){
-  if(!confirm('Supprimer cette référence ?')) return;
+  if(!confirm('Supprimer cette référence ? Retrouvable dans la Corbeille.')) return;
+  const t = state.tarifs.find(x=>x.id===id);
+  if(t) moveToTrash('tarif', `${t.reference||''} — ${t.designation||''}`.trim(), t);
   state.tarifs = state.tarifs.filter(t=>t.id!==id);
   persist('tarifs');
   closeModal();
   render();
-  showToast('Référence supprimée.');
+  showToast('Référence déplacée dans la Corbeille.');
 }
 function clearBrandTarifs(brandId){
-  const n = state.tarifs.filter(t=>t.brandId===brandId).length;
-  if(n===0){ showToast('Aucun tarif à supprimer pour cette marque.'); return; }
-  if(!confirm(`Supprimer les ${n} référence(s) tarifaire(s) de ${brandName(brandId)} ? Cette action est irréversible.`)) return;
+  const items = state.tarifs.filter(t=>t.brandId===brandId);
+  if(items.length===0){ showToast('Aucun tarif à supprimer pour cette marque.'); return; }
+  if(!confirm(`Supprimer les ${items.length} référence(s) tarifaire(s) de ${brandName(brandId)} ? Retrouvables dans la Corbeille (en un seul bloc).`)) return;
+  moveToTrash('tarifsBulk', `${items.length} référence(s) — ${brandName(brandId)}`, items);
   state.tarifs = state.tarifs.filter(t=>t.brandId!==brandId);
   persist('tarifs');
   render();
-  showToast('Tarifs supprimés.');
+  showToast('Tarifs déplacés dans la Corbeille.');
 }
 
 /* ---- Import Excel / CSV ---- */
@@ -6090,12 +6318,15 @@ function saveParamItem(listKey, id){
   showToast('Élément enregistré.');
 }
 function deleteParamItem(listKey, id){
-  if(!confirm('Supprimer cet élément de la liste ?')) return;
+  if(!confirm('Supprimer cet élément de la liste ? Retrouvable dans la Corbeille.')) return;
+  const item = (state.paramLists[listKey]||[]).find(x=>x.id===id);
+  const def = PARAM_LIST_DEFS.find(d=>d.key===listKey);
+  if(item) moveToTrash('paramItem', `${def?def.label:listKey} — ${item.libelle||''}`, {listKey, item});
   state.paramLists[listKey] = (state.paramLists[listKey]||[]).filter(x=>x.id!==id);
   persist('paramLists');
   closeModal();
   updateParamListOnly();
-  showToast('Élément supprimé.');
+  showToast('Élément déplacé dans la Corbeille.');
 }
 const DEFAULT_EMAIL_TEMPLATE = `{greeting}
 
@@ -6681,7 +6912,7 @@ function changeDevisStatus(id, status){
   showToast('Statut mis à jour.');
 }
 function deleteDevis(id){
-  if(!confirm('Supprimer ce devis ?')) return;
+  if(!confirm('Supprimer ce devis ? Retrouvable dans la Corbeille.')) return;
   const deleted = state.devis.find(d=>d.id===id);
   if(deleted && deleted.duplicatedFromId){
     const orig = state.devis.find(d=>d.id===deleted.duplicatedFromId);
@@ -6691,11 +6922,15 @@ function deleteDevis(id){
       orig.history.push({ ts: new Date().toISOString(), type:'duplicate_deleted', detail:deleted.number, clientLabel });
     }
   }
+  if(deleted){
+    const clientLabel = deleted.clientId ? clientDisplayName(state.clients.find(c=>c.id===deleted.clientId)||{}) : '—';
+    moveToTrash(deleted.type==='Marché'?'marche':'devis', `${deleted.number||''} — ${clientLabel}`, deleted);
+  }
   state.devis = state.devis.filter(d=>d.id!==id);
   persist('devis');
   if(state.devisAttachments[id]){ delete state.devisAttachments[id]; persist('devisAttachments'); }
   render();
-  showToast('Devis supprimé.');
+  showToast('Devis déplacé dans la Corbeille.');
 }
 
 /* ============================= COMMISSIONS (saisie manuelle) ============================= */
@@ -7527,11 +7762,13 @@ function openDevisTemplateForm(id){
   draftSavedSnapshot = JSON.stringify(draft);
 }
 function deleteDevisTemplate(id){
-  if(!confirm('Supprimer ce modèle ?')) return;
+  if(!confirm('Supprimer ce modèle ? Retrouvable dans la Corbeille.')) return;
+  const tpl = state.devisTemplates.find(x=>x.id===id);
+  if(tpl) moveToTrash('devisTemplate', tpl.templateName||'(sans nom)', tpl);
   state.devisTemplates = state.devisTemplates.filter(x=>x.id!==id);
   persist('devisTemplates');
   render();
-  showToast('Modèle supprimé.');
+  showToast('Modèle déplacé dans la Corbeille.');
 }
 function duplicateTemplateToDevis(id){
   const tpl = state.devisTemplates.find(x=>x.id===id);
@@ -10551,6 +10788,8 @@ function updateBrandHistoryField(brandId, historyId, field, value){
 function deleteBrandHistoryEntry(brandId, historyId){
   const b = state.brands.find(x=>x.id===brandId);
   if(!b) return;
+  const entry = (b.history||[]).find(h=>h.id===historyId);
+  if(entry) moveToTrash('brandHistory', `${b.name||''} — ${entry.date||''}`, {brandId, entry});
   b.history = (b.history||[]).filter(h=>h.id!==historyId);
   persist('brands');
   const wrap = document.getElementById('brandHistoryWrap');
@@ -11487,7 +11726,7 @@ window.addEventListener('storage', (e)=>{
   if(!e.key || !e.key.startsWith('comagentco_')) return;
   const rest = e.key.slice('comagentco_'.length);
   if(rest.indexOf('__c')>=0) return; // morceau de données : on ne réagit qu'au sommaire principal
-  const known = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','devisTemplates','commerciaux','devisAttachments','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
+  const known = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','devisTemplates','commerciaux','devisAttachments','trash','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
   if(known.indexOf(rest)===-1) return;
   syncKeyFromLocalStorage(rest);
 });
