@@ -2444,6 +2444,17 @@ function renderBudgetCommercial(){
   const totalBudgetAll = rows.reduce((s,r)=>s+r.totalBudget,0);
   const totalCaAll = rows.reduce((s,r)=>s+r.ca,0);
 
+  // Vue par marque : total du budget d'animation alloué, tous clients confondus, pour l'année sélectionnée.
+  const budgetByBrand = {};
+  rows.forEach(r=>{
+    Object.keys(r.perBrand).forEach(bid=>{
+      budgetByBrand[bid] = (budgetByBrand[bid]||0) + r.perBrand[bid];
+    });
+  });
+  const brandRows = Object.keys(budgetByBrand)
+    .map(bid=>({ brandId:bid, total:budgetByBrand[bid], nbClients: rows.filter(r=>r.perBrand[bid]).length }))
+    .sort((a,b)=>b.total-a.total);
+
   return `
   <div class="topbar">
     <div><h1>Budget commercial</h1><div class="sub">Animations commerciales par client, comparées au CA réalisé — Année ${year}</div></div>
@@ -2459,12 +2470,33 @@ function renderBudgetCommercial(){
     <div class="card kpi"><div class="label">Ratio global</div><div class="value num">${totalCaAll>0?(totalBudgetAll/totalCaAll*100).toFixed(1)+' %':'—'}</div></div>
   </div>
   ${rows.length===0?emptyState('💰',"Aucune animation commerciale sur cette année","Cochez la tâche \"Animation commerciale\" (avec un budget par marque) sur une note de suivi client pour la voir apparaître ici."):`
+  <div class="section-title">Budget annuel par marque ${year}</div>
+  <div class="helper" style="margin-bottom:10px;">Total alloué aux animations commerciales, toutes marques confondues sur l'année, tous clients cumulés.</div>
+  <div class="table-wrap card" style="margin-bottom:24px;"><table>
+    <thead><tr><th>Marque</th><th class="num">Nb clients concernés</th><th class="num">Budget total ${year}</th></tr></thead>
+    <tbody>
+      ${brandRows.map(br=>`
+        <tr>
+          <td style="font-weight:600;"><span class="chip" style="background:${brandColor(br.brandId)};"><span class="sq"></span>${escapeHtml(brandName(br.brandId))}</span></td>
+          <td class="num">${br.nbClients}</td>
+          <td class="num" style="font-weight:700;">${fmtMoney(br.total)}</td>
+        </tr>
+      `).join('')}
+      <tr style="font-weight:700;border-top:2px solid var(--line);">
+        <td>Total</td>
+        <td class="num">—</td>
+        <td class="num">${fmtMoney(totalBudgetAll)}</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <div class="section-title">Détail par client</div>
   <div class="helper" style="margin-bottom:10px;">Le ratio compare le budget d'animation investi chez ce client à son CA (devis gagnés) sur la même année — un ratio élevé peut signaler une participation disproportionnée par rapport au chiffre d'affaires réalisé.</div>
   <div class="table-wrap card"><table>
     <thead><tr><th>Client</th><th>Marques (budget)</th><th class="num">Budget total</th><th class="num">CA annuel ${year}</th><th class="num">Ratio</th></tr></thead>
     <tbody>
       ${rows.map(r=>`
-        <tr style="cursor:pointer;" onclick="openClientDetail('${r.client.id}')">
+        <tr style="cursor:pointer;" onclick="openClientSuiviOnlyModal('${r.client.id}')" title="Cliquer pour ouvrir le suivi commercial de ce client">
           <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
           <td>${Object.keys(r.perBrand).map(bid=>`<span class="chip" style="background:${brandColor(bid)};font-size:10px;margin:1px 3px 1px 0;">${escapeHtml(brandName(bid))} — ${fmtMoney(r.perBrand[bid])}</span>`).join('')}</td>
           <td class="num" style="font-weight:700;">${fmtMoney(r.totalBudget)}</td>
