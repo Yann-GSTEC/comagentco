@@ -2982,9 +2982,6 @@ function renderClientsTableInner(){
       <td style="font-weight:600;">${escapeHtml(g.label)}${g.clients.length>1?` <span class="helper">(${g.clients.length} fiches)</span>`:''}${inactive?' <span class="status-pill status-Refusé" style="margin-left:4px;">Inactif</span>':''}</td>
       <td style="color:var(--ink-soft);">${nbContacts} contact${nbContacts>1?'s':''}</td>
       ${cols.map(col=>`<td${col.key==='ca'?' class="num" style="font-weight:600;"':''}>${clientColumnCell(col.key,p,ca,nbDevis)}</td>`).join('')}
-      <td class="table-actions" onclick="event.stopPropagation();">
-        <button class="btn btn-sm btn-ghost" onclick="openClientForm('${p.id}')">Modifier</button>
-      </td>
     </tr>`;
   }).join('');
 
@@ -2995,7 +2992,6 @@ function renderClientsTableInner(){
         <th>Société</th>
         <th>Contacts</th>
         ${cols.map(c=>`<th>${escapeHtml(c.label)}</th>`).join('')}
-        <th></th>
       </tr></thead>
       <tbody>${rowsHtml}</tbody>
     </table></div>
