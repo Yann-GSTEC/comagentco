@@ -2878,7 +2878,6 @@ function renderClients(){
       <button class="btn btn-sm btn-danger" onclick="deleteSelectedClients()">Supprimer la sélection (${selectedCount})</button>
     `:''}
   </div>
-  <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur une ligne pour voir la fiche du client, double-cliquez pour la modifier.</div>
   <div class="card" id="clientsTableWrap">${renderClientsTableInner()}</div>
   `;
 }
@@ -2978,7 +2977,7 @@ function renderClientsTableInner(){
     const nbContacts = g.clients.reduce((sum,c)=>sum+(c.contacts||[]).length,0);
     const inactive = g.clients.every(c=>c.actif===false);
     const groupChecked = ids.every(id=>ui.clientsSelected[id]);
-    return `<tr style="cursor:pointer;${inactive?'opacity:.55;':''}${groupChecked?'background:var(--surface-2);':''}" onclick="openClientDetail('${p.id}')" ondblclick="openClientForm('${p.id}')" title="Cliquer pour voir la fiche, double-cliquer pour la modifier">
+    return `<tr style="cursor:pointer;${inactive?'opacity:.55;':''}${groupChecked?'background:var(--surface-2);':''}" onclick="openClientForm('${p.id}')" oncontextmenu="event.preventDefault(); openClientDetail('${p.id}');" title="Clic gauche : modifier la fiche — clic droit : voir la synthèse">
       <td onclick="event.stopPropagation();"><input type="checkbox" ${groupChecked?'checked':''} onchange="toggleClientGroupSelect('${ids.join(',')}', this.checked)"></td>
       <td style="font-weight:600;">${escapeHtml(g.label)}${g.clients.length>1?` <span class="helper">(${g.clients.length} fiches)</span>`:''}${inactive?' <span class="status-pill status-Refusé" style="margin-left:4px;">Inactif</span>':''}</td>
       <td style="color:var(--ink-soft);">${nbContacts} contact${nbContacts>1?'s':''}</td>
