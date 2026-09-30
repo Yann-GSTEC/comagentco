@@ -6574,7 +6574,10 @@ function caForClient(clientId, year, commercialId){
 }
 function availableYears(){
   const ys = new Set(state.devis.map(d=>yearOf(d.date)).filter(Boolean));
-  ys.add(new Date().getFullYear());
+  const current = new Date().getFullYear();
+  // Toujours proposer l'année en cours et les 3 précédentes, même sans devis dessus — indispensable pour
+  // saisir un CA (VVA) manuel sur une année passée (ex. pour analyser l'évolution d'un client).
+  for(let y=current-3; y<=current; y++) ys.add(y);
   return Array.from(ys).sort((a,b)=>b-a);
 }
 function previewNextDevisNumber(type){
