@@ -816,9 +816,9 @@ function drawRichCellText(doc, linesOut, x, y, lineHeight, baseFontSize, baseCol
   doc.setTextColor(baseColorRgb[0], baseColorRgb[1], baseColorRgb[2]);
 }
 function computeLineButtonsHeight(line){
-  if(!line) return 0;
-  const hasAny = !!(line.ficheTechniqueUrl || line.noticeUrl || line.photoUrl);
-  return hasAny ? 7 : 0;
+  // Boutons de liens (fiche technique/notice/photo) désactivés à l'export PDF sur demande — les liens
+  // restent enregistrés sur les tarifs, mais ne s'affichent plus sur le devis imprimé.
+  return 0;
 }
 function drawDevisLineLinkButtons(doc, cellX, cellWidth, y, line){
   const buttons = [];
@@ -11478,8 +11478,13 @@ function renderDashboard(){
 
   // Top clients par famille (Grossiste/Distributeur vs Installateur), sur le CA des devis acceptés
   // dans le périmètre filtré (année, commercial, marque, client).
+  const caSource = ui.dashboardCaSource||'devis';
   const clientCaMap = {};
-  accepted.forEach(d=>{ clientCaMap[d.clientId] = (clientCaMap[d.clientId]||0) + devisTotal(d).ht; });
+  if(caSource==='vva'){
+    state.clients.forEach(c=>{ const v = caVvaTotal(y, brandFilter, c.id); if(v>0) clientCaMap[c.id]=v; });
+  } else {
+    accepted.forEach(d=>{ clientCaMap[d.clientId] = (clientCaMap[d.clientId]||0) + devisTotal(d).ht; });
+  }
   const clientFamType = c=>{
     const fam = ((c && c.famille)||'').trim().toLowerCase();
     if(fam==='grossiste' || fam==='distributeur') return 'distributeur';
@@ -11491,7 +11496,7 @@ function renderDashboard(){
   const topInstall = state.clients.filter(c=>clientFamType(c)==='installateur' && clientCaMap[c.id]>0)
     .map(c=>({client:c, ca:clientCaMap[c.id]})).sort((a,b)=>b.ca-a.ca).slice(0,8);
   const topListHtml = (rows) => rows.length===0
-    ? '<div class="helper">Aucun devis gagné sur cette période pour ce périmètre.</div>'
+    ? `<div class="helper">Aucun CA (${caSource==='vva'?'VVA':'devis gagnés'}) sur cette période pour ce périmètre.</div>`
     : `<div class="table-wrap"><table>
         <thead><tr><th style="width:36px;">#</th><th>Client</th><th class="num">CA HT</th></tr></thead>
         <tbody>
@@ -11509,10 +11514,10 @@ function renderDashboard(){
     'kpi-ca': `<div class="label">CA ${y} (devis gagnés)</div><div class="value num">${fmtMoney(caTotal)}</div>`,
     'kpi-encours': `<div class="label">Devis en cours</div><div class="value num">${nbDevisEnCours}</div>`,
     'kpi-panier': `<div class="label">Panier moyen</div><div class="value num">${fmtMoney(panierMoyen)}</div>`,
-    'chart-brand': `<h3 style="margin:0 0 14px 0;font-size:15px;">CA par marque</h3><div class="chart-wrap"><canvas id="chartBrand"></canvas></div>`,
-    'chart-client': `<h3 style="margin:0 0 14px 0;font-size:15px;">Top clients</h3><div class="chart-wrap"><canvas id="chartClient"></canvas></div>`,
-    'top-distrib': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients distributeurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (devis gagnés), société de famille Grossiste/Distributeur.</div>${topListHtml(topDistrib)}`,
-    'top-install': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients installateurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (devis gagnés), société de famille Installateur.</div>${topListHtml(topInstall)}`,
+    'chart-brand': `<h3 style="margin:0 0 14px 0;font-size:15px;">CA par marque <span class="helper" style="display:inline;">(${caSource==='vva'?'VVA':'devis gagnés'})</span></h3><div class="chart-wrap"><canvas id="chartBrand"></canvas></div>`,
+    'chart-client': `<h3 style="margin:0 0 14px 0;font-size:15px;">Top clients <span class="helper" style="display:inline;">(${caSource==='vva'?'VVA':'devis gagnés'})</span></h3><div class="chart-wrap"><canvas id="chartClient"></canvas></div>`,
+    'top-distrib': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients distributeurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (${caSource==='vva'?'VVA':'devis gagnés'}), société de famille Grossiste/Distributeur.</div>${topListHtml(topDistrib)}`,
+    'top-install': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients installateurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (${caSource==='vva'?'VVA':'devis gagnés'}), société de famille Installateur.</div>${topListHtml(topInstall)}`,
     'chart-correlation': `<h3 style="margin:0 0 4px 0;font-size:15px;">Corrélation devis réalisés / CA généré</h3><div class="helper" style="margin-bottom:12px;">Par mois sur ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}. Barres : nombre de devis/marchés créés (tous statuts). Ligne : CA généré (devis gagnés).</div><div class="chart-wrap"><canvas id="chartCorrelation"></canvas></div>`,
     'table-apporteur': `<h3 style="margin:0 0 4px 0;font-size:15px;">Nombre de devis/marchés par marque et par apporteur d'affaire</h3><div class="helper" style="margin-bottom:12px;">Année ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}, tous statuts confondus. Cliquez sur un nombre pour voir le détail.</div>${brandApporteurRows.length===0?'<div class="helper">Aucun devis/marché sur cette période pour ce périmètre.</div>':`<div class="table-wrap"><table><thead><tr><th>Marque</th><th class="num">Agent</th><th class="num">Distributeur</th><th class="num">Non précisé</th><th class="num">Total</th></tr></thead><tbody>${brandApporteurRows.map(r=>`<tr><td style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)"><span class="chip" style="background:${brandColor(r.brand.id)}"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Agent')">${r.agent}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Distributeur')">${r.distrib}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'nonPrecise')">${r.nonPrecise}</td><td class="num" style="font-weight:700;cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)">${r.total}</td></tr>`).join('')}</tbody></table></div>`}`,
   };
@@ -11559,6 +11564,14 @@ function renderDashboard(){
   <div class="topbar">
     <div><h1>Tableau de bord</h1><div class="sub">Chiffre d'affaires par marque et par client${cmId!=='all'?` — ${escapeHtml(commercialDisplayName(state.commerciaux.find(x=>x.id===cmId)||{}))}`:''}</div></div>
     <div class="pill-select">${years.map(yr=>`<button class="${yr===y?'active':''}" onclick="ui.dashboardYear=${yr}; render();">${yr}</button>`).join('')}</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+    <span class="helper" style="font-weight:600;">Basé sur :</span>
+    <div class="pill-select">
+      <button class="${(ui.dashboardCaSource||'devis')==='devis'?'active':''}" onclick="ui.dashboardCaSource='devis'; render();">CA (devis gagnés)</button>
+      <button class="${ui.dashboardCaSource==='vva'?'active':''}" onclick="ui.dashboardCaSource='vva'; render();">CA (VVA)</button>
+    </div>
+    <span class="helper">— s'applique aux graphiques "CA par marque", "Top clients", et aux tops distributeurs/installateurs ci-dessous.</span>
   </div>
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
     <span class="helper" style="font-weight:600;">Affichage :</span>
@@ -11738,22 +11751,28 @@ function initDashboardCharts(){
   if(!brandCanvas || !clientCanvas) return;
 
   const acceptedYear = state.devis.filter(d=>isDevisWon(d) && yearOf(d.date)===y && inDashboardScope(d));
+  const caSource = ui.dashboardCaSource||'devis';
 
   const brandData = state.brands.filter(b=>brandFilter==='all'||b.id===brandFilter).map(b=>{
-    let total = 0;
-    acceptedYear.forEach(d=>{ (d.lines||[]).forEach(l=>{ if(l.brandId===b.id) total += lineTotalHT(l, d.destinataire); }); });
+    let total;
+    if(caSource==='vva'){
+      total = caVvaTotal(y, b.id, clientFilter);
+    } else {
+      total = 0;
+      acceptedYear.forEach(d=>{ (d.lines||[]).forEach(l=>{ if(l.brandId===b.id) total += lineTotalHT(l, d.destinataire); }); });
+    }
     return {label:b.name, value:total, color:brandColor(b.id)};
   }).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
 
   const clientsInScope = (cmId==='all' ? state.clients : state.clients.filter(c=>c.commercialId===cmId))
     .filter(c=>clientFilter==='all'||c.id===clientFilter);
   const clientData = clientsInScope.map(c=>{
-    const total = acceptedYear.filter(d=>d.clientId===c.id).reduce((s,d)=>s+devisTotal(d).ht,0);
+    const total = caSource==='vva' ? caVvaTotal(y, brandFilter, c.id) : acceptedYear.filter(d=>d.clientId===c.id).reduce((s,d)=>s+devisTotal(d).ht,0);
     return {label:c.name, value:total};
   }).filter(x=>x.value>0).sort((a,b)=>b.value-a.value).slice(0,8);
 
   if(brandData.length===0){
-    brandCanvas.parentElement.innerHTML = '<div class="helper" style="padding:40px 0;text-align:center;">Aucun devis gagné pour cette année.</div>';
+    brandCanvas.parentElement.innerHTML = `<div class="helper" style="padding:40px 0;text-align:center;">Aucun CA (${caSource==='vva'?'VVA':'devis gagnés'}) pour cette année.</div>`;
   } else {
     chartBrandInstance = new Chart(brandCanvas, {
       type:'bar',
@@ -11771,7 +11790,7 @@ function initDashboardCharts(){
     });
   }
   if(clientData.length===0){
-    clientCanvas.parentElement.innerHTML = '<div class="helper" style="padding:40px 0;text-align:center;">Aucun devis gagné pour cette année.</div>';
+    clientCanvas.parentElement.innerHTML = `<div class="helper" style="padding:40px 0;text-align:center;">Aucun CA (${caSource==='vva'?'VVA':'devis gagnés'}) pour cette année.</div>`;
   } else {
     chartClientInstance = new Chart(clientCanvas, {
       type:'bar',
