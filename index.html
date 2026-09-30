@@ -11350,10 +11350,76 @@ function caVvaModalHtml(year, brandId, clientId){
         </tbody>
         <tfoot><tr><td style="font-weight:700;">Total ${year}</td><td class="num" style="font-weight:700;" id="caVvaModalTotal">${fmtMoney(total)}</td></tr></tfoot>
       </table></div>
+      ${(bk!=='all' && ck==='all') ? caVvaClientBreakdownHtml(year, bk, total) : ''}
+      ${(bk==='all' && ck!=='all') ? caVvaBrandBreakdownHtml(year, ck, total) : ''}
     </div>
     <div class="modal-foot">
       <button class="btn btn-primary" onclick="closeModal(); render();">Fermer</button>
     </div>
+  `;
+}
+function caVvaBrandBreakdownHtml(year, clientId, clientTotal){
+  const brandRows = state.brands
+    .map(b=>({brand:b, total: caVvaTotal(year, b.id, clientId)}))
+    .filter(r=>r.total>0)
+    .sort((a,b)=>b.total-a.total);
+  const sumBrands = brandRows.reduce((s,r)=>s+r.total,0);
+  const nonVentile = clientTotal - sumBrands;
+  return `
+    <div class="divider"></div>
+    <div class="section-title">Détail par marque — ${escapeHtml(clientSocieteLabel(clientId))}</div>
+    <div class="helper" style="margin-bottom:10px;">Répartition, marque par marque, du CA (VVA) de ce client — pour une analyse plus fine, en gardant le total ci-dessus (${fmtMoney(clientTotal)}) comme référence.</div>
+    ${brandRows.length===0?`<div class="helper">Aucune saisie détaillée par marque pour ce client.</div>`:`
+    <div class="table-wrap"><table>
+      <thead><tr><th>Marque</th><th class="num">CA (VVA) ${year}</th></tr></thead>
+      <tbody>
+        ${brandRows.map(r=>`
+          <tr style="cursor:pointer;" onclick="openCaVvaModal(${year}, '${r.brand.id}', '${clientId}')" title="Voir/modifier le détail mensuel de cette marque">
+            <td><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
+            <td class="num" style="font-weight:700;">${fmtMoney(r.total)}</td>
+          </tr>
+        `).join('')}
+        ${nonVentile>0.5?`
+          <tr>
+            <td class="helper" style="font-style:italic;">Reste non ventilé</td>
+            <td class="num" style="font-style:italic;color:var(--ink-soft);">${fmtMoney(nonVentile)}</td>
+          </tr>
+        `:''}
+      </tbody>
+    </table></div>
+    `}
+  `;
+}
+function caVvaClientBreakdownHtml(year, brandId, brandTotal){
+  const clientRows = state.clients
+    .map(c=>({client:c, total: caVvaTotal(year, brandId, c.id)}))
+    .filter(r=>r.total>0)
+    .sort((a,b)=>b.total-a.total);
+  const sumClients = clientRows.reduce((s,r)=>s+r.total,0);
+  const nonVentile = brandTotal - sumClients;
+  return `
+    <div class="divider"></div>
+    <div class="section-title">Détail par client — ${escapeHtml(brandName(brandId))}</div>
+    <div class="helper" style="margin-bottom:10px;">Répartition, client par client, du CA (VVA) de cette marque — pour une analyse plus fine, en gardant le total ci-dessus (${fmtMoney(brandTotal)}, issu des saisies manuelles ou automatiquement des Commissions) comme référence.</div>
+    ${clientRows.length===0?`<div class="helper">Aucune saisie détaillée par client pour cette marque — le total ci-dessus provient uniquement du CA saisi dans l'onglet Commissions, sans détail client disponible.</div>`:`
+    <div class="table-wrap"><table>
+      <thead><tr><th>Client</th><th class="num">CA (VVA) ${year}</th></tr></thead>
+      <tbody>
+        ${clientRows.map(r=>`
+          <tr style="cursor:pointer;" onclick="openCaVvaModal(${year}, '${brandId}', '${r.client.id}')" title="Voir/modifier le détail mensuel de ce client">
+            <td>${escapeHtml(clientSocieteLabel(r.client.id))}</td>
+            <td class="num" style="font-weight:700;">${fmtMoney(r.total)}</td>
+          </tr>
+        `).join('')}
+        ${nonVentile>0.5?`
+          <tr>
+            <td class="helper" style="font-style:italic;">Reste non ventilé <span style="display:inline;">(issu des Commissions, sans détail client)</span></td>
+            <td class="num" style="font-style:italic;color:var(--ink-soft);">${fmtMoney(nonVentile)}</td>
+          </tr>
+        `:''}
+      </tbody>
+    </table></div>
+    `}
   `;
 }
 function openCaVvaModal(year, brandId, clientId){
