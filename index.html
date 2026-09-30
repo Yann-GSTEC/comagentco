@@ -2535,8 +2535,10 @@ function openEditAnimationModal(clientId, historyId){
       </div>
       <div class="field">
         <label>Agences groupées avec ${escapeHtml(clientDisplayName(c))} <span class="helper" style="display:inline;">— leur CA sera additionné pour le calcul du ratio ; le budget, lui, reste uniquement celui saisi ici, sur ${escapeHtml(clientDisplayName(c))}</span></label>
-        <input type="text" id="anim_clientSearch" placeholder="Rechercher une société à ajouter…" autocomplete="off" oninput="animClientSearchRun(this.value,'${clientId}')">
-        <div id="anim_clientResults" style="margin-top:6px;"></div>
+        <div class="autocomplete">
+          <input type="text" id="anim_clientSearch" placeholder="Rechercher une société à ajouter…" autocomplete="off" oninput="animClientSearchRun(this.value,'${clientId}')">
+          <div id="anim_clientResults"></div>
+        </div>
       </div>
       <div id="anim_linkedList" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">
         ${renderAnimLinkedChips(linkedIds)}
