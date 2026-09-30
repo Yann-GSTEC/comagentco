@@ -2527,18 +2527,36 @@ function renderPerfClient(){
     <div class="chart-wrap"><canvas id="perfClientMonthlyChart"></canvas></div>
   </div>
   ${rows.length===0?'':(()=>{
-    const top10 = rows.filter(r=>r.evolAbs>0.5).slice().sort((a,b)=>b.evolAbs-a.evolAbs).slice(0,10);
-    const flop10 = rows.filter(r=>r.evolAbs<-0.5).slice().sort((a,b)=>a.evolAbs-b.evolAbs).slice(0,10);
+    const basis = ui.perfClientTopFlopBasis||'abs';
+    const sortFn = basis==='pct'
+      ? (a,b)=>(b.evolPct==null?-Infinity:b.evolPct)-(a.evolPct==null?-Infinity:a.evolPct)
+      : (a,b)=>b.evolAbs-a.evolAbs;
+    const sortFnAsc = basis==='pct'
+      ? (a,b)=>(a.evolPct==null?Infinity:a.evolPct)-(b.evolPct==null?Infinity:b.evolPct)
+      : (a,b)=>a.evolAbs-b.evolAbs;
+    // En % , un "Nouveau" client (pas de CA en année A) n'a pas de pourcentage calculable : on l'exclut
+    // de ce classement-là (il reste comptabilisé dans le classement en €).
+    const progressionPool = basis==='pct' ? rows.filter(r=>r.evolPct!=null && r.evolPct>0.5) : rows.filter(r=>r.evolAbs>0.5);
+    const regressionPool = basis==='pct' ? rows.filter(r=>r.evolPct!=null && r.evolPct<-0.5) : rows.filter(r=>r.evolAbs<-0.5);
+    const top10 = progressionPool.slice().sort(sortFn).slice(0,10);
+    const flop10 = regressionPool.slice().sort(sortFnAsc).slice(0,10);
     const miniList = (list, colorVar) => list.length===0
       ? '<div class="helper">Aucun client dans ce cas sur la période.</div>'
       : `<div class="table-wrap"><table><tbody>
           ${list.map(r=>`<tr style="cursor:pointer;" onclick="${source==='vva'?`openCaVvaModal(${yearB}, 'all', '${r.client.id}')`:`openClientDetail('${r.client.id}')`}">
             <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
-            <td class="num" style="font-weight:700;color:var(${colorVar});">${r.evolAbs>0?'+':''}${fmtMoney(r.evolAbs)}</td>
-            <td class="num helper">${r.evolPct==null?'Nouveau':(r.evolPct>0?'+':'')+r.evolPct.toFixed(1)+' %'}</td>
+            <td class="num" style="${basis==='abs'?'font-weight:700;':''}color:var(${colorVar});">${r.evolAbs>0?'+':''}${fmtMoney(r.evolAbs)}</td>
+            <td class="num helper" style="${basis==='pct'?`font-weight:700;color:var(${colorVar});`:''}">${r.evolPct==null?'Nouveau':(r.evolPct>0?'+':'')+r.evolPct.toFixed(1)+' %'}</td>
           </tr>`).join('')}
         </tbody></table></div>`;
     return `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <span class="helper" style="font-weight:600;">Classer par :</span>
+      <div class="pill-select">
+        <button class="${basis==='abs'?'active':''}" onclick="ui.perfClientTopFlopBasis='abs'; render();">Évolution en €</button>
+        <button class="${basis==='pct'?'active':''}" onclick="ui.perfClientTopFlopBasis='pct'; render();">Évolution en %</button>
+      </div>
+    </div>
     <div class="settings-top-grid" style="margin-bottom:20px;">
       <div class="card card-pad">
         <h3 style="margin:0 0 4px 0;font-size:15px;">🏆 Top 10 progressions</h3>
