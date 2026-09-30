@@ -2481,7 +2481,11 @@ function renderPerfClient(){
   const totalB = rows.reduce((s,r)=>s+r.caB,0);
   const evolGlobalPct = totalA>0 ? ((totalB-totalA)/totalA*100) : null;
 
-  rows.sort((a,b)=>{
+  const filterMode = ui.perfClientFilterMode||null;
+  const displayRows = filterMode==='progression' ? rows.filter(r=>r.evolAbs>0.5)
+    : filterMode==='regression' ? rows.filter(r=>r.evolAbs<-0.5)
+    : rows;
+  displayRows.sort((a,b)=>{
     let cmp;
     if(sortBy==='caB') cmp = a.caB-b.caB;
     else if(sortBy==='evolAbs') cmp = a.evolAbs-b.evolAbs;
@@ -2509,8 +2513,12 @@ function renderPerfClient(){
     </div>
   </div>
   <div class="grid grid-4" style="margin-bottom:20px;">
-    <div class="card kpi"><div class="label">Clients en progression</div><div class="value num" style="color:var(--success);">▲ ${nbProgression}</div></div>
-    <div class="card kpi"><div class="label">Clients en régression</div><div class="value num" style="color:var(--danger);">▼ ${nbRegression}</div></div>
+    <div class="card kpi" id="perfClientCardProgression" style="cursor:pointer;${ui.perfClientFilterMode==='progression'?'box-shadow:0 0 0 2px var(--success) inset;':''}" onclick="ui.perfClientFilterMode=(ui.perfClientFilterMode==='progression'?null:'progression'); render();" title="Cliquer pour n'afficher que les clients en progression">
+      <div class="label">Clients en progression</div><div class="value num" style="color:var(--success);">▲ ${nbProgression}</div>
+    </div>
+    <div class="card kpi" id="perfClientCardRegression" style="cursor:pointer;${ui.perfClientFilterMode==='regression'?'box-shadow:0 0 0 2px var(--danger) inset;':''}" onclick="ui.perfClientFilterMode=(ui.perfClientFilterMode==='regression'?null:'regression'); render();" title="Cliquer pour n'afficher que les clients en régression">
+      <div class="label">Clients en régression</div><div class="value num" style="color:var(--danger);">▼ ${nbRegression}</div>
+    </div>
     <div class="card kpi"><div class="label">Clients stables</div><div class="value num">${nbStable}</div></div>
     <div class="card kpi"><div class="label">Évolution CA globale</div><div class="value num" style="color:${evolGlobalPct==null?'var(--muted)':(evolGlobalPct>=0?'var(--success)':'var(--danger)')};">${evolGlobalPct==null?'—':(evolGlobalPct>=0?'+':'')+evolGlobalPct.toFixed(1)+' %'}</div></div>
   </div>
@@ -2518,9 +2526,9 @@ function renderPerfClient(){
     <h3 style="margin:0 0 14px 0;font-size:15px;">CA mensuel — ${yearA} vs ${yearB}</h3>
     <div class="chart-wrap"><canvas id="perfClientMonthlyChart"></canvas></div>
   </div>
-  ${rows.length===0?emptyState('📈',"Aucune donnée pour ces deux années","Choisissez deux années différentes, ou changez la source de CA ci-dessus."):`
-  <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur un en-tête pour trier. "Nouveau" = aucun CA en ${yearA}, ne permet pas de calculer un pourcentage d'évolution.</div>
-  <div class="table-wrap card"><table>
+  ${displayRows.length===0?emptyState('📈',filterMode?"Aucun client ne correspond à ce filtre":"Aucune donnée pour ces deux années",filterMode?"Cliquez à nouveau sur la carte, ou en dehors, pour revenir au tableau général.":"Choisissez deux années différentes, ou changez la source de CA ci-dessus."):`
+  <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur un en-tête pour trier. "Nouveau" = aucun CA en ${yearA}, ne permet pas de calculer un pourcentage d'évolution.${filterMode?` — filtré sur les clients en ${filterMode==='progression'?'progression':'régression'} (cliquez en dehors du tableau pour revenir à la vue générale).`:''}</div>
+  <div class="table-wrap card" id="perfClientTableWrap"><table>
     <thead><tr>
       <th>Client</th>
       <th class="num" style="cursor:pointer;" onclick="ui.perfClientSortBy='caB'; ui.perfClientSortDir=(ui.perfClientSortBy==='caB'&&ui.perfClientSortDir==='desc')?'asc':'desc'; render();">CA ${yearA}</th>
@@ -2530,7 +2538,7 @@ function renderPerfClient(){
       <th></th>
     </tr></thead>
     <tbody>
-      ${rows.map(r=>{
+      ${displayRows.map(r=>{
         const isNew = r.evolPct==null;
         const up = r.evolAbs>0.5, down = r.evolAbs<-0.5;
         const color = up?'var(--success)':(down?'var(--danger)':'var(--muted)');
@@ -12106,6 +12114,17 @@ document.addEventListener('click', (ev)=>{
   document.querySelectorAll('details.filter-details[open]').forEach(det=>{
     if(!det.contains(ev.target)) det.removeAttribute('open');
   });
+});
+document.addEventListener('click', (ev)=>{
+  // Revient au tableau général de "Performance client" dès qu'on clique en dehors des cartes
+  // progression/régression ou du tableau lui-même.
+  if(ui.tab!=='perfClient' || !ui.perfClientFilterMode) return;
+  const cardP = document.getElementById('perfClientCardProgression');
+  const cardR = document.getElementById('perfClientCardRegression');
+  const table = document.getElementById('perfClientTableWrap');
+  if((cardP && cardP.contains(ev.target)) || (cardR && cardR.contains(ev.target)) || (table && table.contains(ev.target))) return;
+  ui.perfClientFilterMode = null;
+  render();
 });
 loadAll();
 if('serviceWorker' in navigator){
