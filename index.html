@@ -1910,6 +1910,7 @@ const NAV_ITEMS_DEFAULT = [
   {id:'suivirelances', label:'Suivi et relances', ic:'🔔'},
   {id:'commissions', label:'Commissions', ic:'%'},
   {id:'recherche', label:'Recherche', ic:'⌕'},
+  {id:'perfClient', label:'Performance client', ic:'📈'},
   {id:'budgetCommercial', label:'Budget commercial', ic:'💰'},
   {id:'trash', label:'Corbeille', ic:'🗑'},
   {id:'parametres', label:'Paramètres', ic:'⚙'},
@@ -2004,6 +2005,7 @@ function renderMain(){
     case 'suivirelances': return renderSuiviRelances();
     case 'commissions': return renderCommissions();
     case 'recherche': return renderRecherche();
+    case 'perfClient': return renderPerfClient();
     case 'budgetCommercial': return renderBudgetCommercial();
     case 'trash': return renderTrash();
     case 'parametres': return renderParametres();
@@ -2018,6 +2020,7 @@ function attachGlobalHandlers(){
 }
 function afterRenderHook(){
   if(ui.tab==='dashboard') initDashboardCharts();
+  if(ui.tab==='perfClient') initPerfClientChart();
 }
 </script>
 <script>
@@ -2413,6 +2416,138 @@ function emptyTrash(){
   persist('trash');
   render();
   showToast('Corbeille vidée.');
+}
+function perfClientMonthlyCa(year, source){
+  const totals = Array(12).fill(0);
+  if(source==='vva'){
+    state.brands.forEach(b=>{
+      for(let m=1;m<=12;m++) totals[m-1] += caVvaEffectiveMonth(year, b.id, 'all', m).value;
+    });
+  } else {
+    state.devis.filter(d=>isDevisWon(d) && yearOf(d.date)===year).forEach(d=>{
+      const m = parseInt((d.date||'').slice(5,7),10);
+      if(m>=1 && m<=12) totals[m-1] += devisTotal(d).ht;
+    });
+  }
+  return totals;
+}
+function perfClientCaFor(clientId, year, source){
+  return source==='vva' ? caVvaTotal(year, 'all', clientId) : caForClient(clientId, year, null);
+}
+function initPerfClientChart(){
+  const canvas = document.getElementById('perfClientMonthlyChart');
+  if(!canvas) return;
+  if(perfClientChartInstance){ perfClientChartInstance.destroy(); perfClientChartInstance=null; }
+  const source = ui.perfClientCaSource||'devis';
+  const yearA = ui.perfClientYearA, yearB = ui.perfClientYearB;
+  const monthNames = ['Janv','Févr','Mars','Avr','Mai','Juin','Juil','Août','Sept','Oct','Nov','Déc'];
+  const dataA = perfClientMonthlyCa(yearA, source);
+  const dataB = perfClientMonthlyCa(yearB, source);
+  perfClientChartInstance = new Chart(canvas, {
+    type:'line',
+    data:{ labels:monthNames, datasets:[
+      {label:String(yearA), data:dataA, borderColor:'#B8863B', backgroundColor:'transparent', borderDash:[5,4], tension:.25},
+      {label:String(yearB), data:dataB, borderColor:'#2F5D50', backgroundColor:'transparent', tension:.25},
+    ]},
+    options:{responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:true, position:'top'}, tooltip:{callbacks:{label:(ctx)=>ctx.dataset.label+' : '+fmtMoney(ctx.parsed.y)}}},
+      scales:{y:{ticks:{callback:(v)=>v+' €'}, grid:{color:'#EEEBE0'}}, x:{grid:{display:false}}}
+    }
+  });
+}
+let perfClientChartInstance = null;
+function renderPerfClient(){
+  const years = availableYears();
+  if(!ui.perfClientYearB || !years.includes(ui.perfClientYearB)) ui.perfClientYearB = years[0];
+  if(!ui.perfClientYearA || !years.includes(ui.perfClientYearA)) ui.perfClientYearA = years.includes(ui.perfClientYearB-1) ? ui.perfClientYearB-1 : years[Math.min(1,years.length-1)];
+  const yearA = ui.perfClientYearA, yearB = ui.perfClientYearB;
+  const source = ui.perfClientCaSource||'devis';
+  const sortBy = ui.perfClientSortBy||'evolPct';
+  const sortDir = ui.perfClientSortDir||'desc';
+
+  const rows = [];
+  state.clients.forEach(c=>{
+    const caA = perfClientCaFor(c.id, yearA, source);
+    const caB = perfClientCaFor(c.id, yearB, source);
+    if(caA<=0 && caB<=0) return;
+    const evolAbs = caB - caA;
+    const evolPct = caA>0 ? (evolAbs/caA*100) : null; // null = nouveau client (pas de CA en année A)
+    rows.push({client:c, caA, caB, evolAbs, evolPct});
+  });
+  const nbProgression = rows.filter(r=>r.evolAbs>0.5).length;
+  const nbRegression = rows.filter(r=>r.evolAbs<-0.5).length;
+  const nbStable = rows.length - nbProgression - nbRegression;
+  const totalA = rows.reduce((s,r)=>s+r.caA,0);
+  const totalB = rows.reduce((s,r)=>s+r.caB,0);
+  const evolGlobalPct = totalA>0 ? ((totalB-totalA)/totalA*100) : null;
+
+  rows.sort((a,b)=>{
+    let cmp;
+    if(sortBy==='caB') cmp = a.caB-b.caB;
+    else if(sortBy==='evolAbs') cmp = a.evolAbs-b.evolAbs;
+    else cmp = (a.evolPct==null?-Infinity:a.evolPct) - (b.evolPct==null?-Infinity:b.evolPct);
+    return sortDir==='asc' ? cmp : -cmp;
+  });
+
+  return `
+  <div class="topbar">
+    <div><h1>Performance client</h1><div class="sub">Comparaison du CA par client, ${yearA} vs ${yearB}</div></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+    <span class="helper" style="font-weight:600;">Comparer :</span>
+    <select onchange="ui.perfClientYearA=parseInt(this.value,10); render();" style="width:auto;max-width:110px;">
+      ${years.map(y=>`<option value="${y}" ${yearA===y?'selected':''}>${y}</option>`).join('')}
+    </select>
+    <span class="helper">à</span>
+    <select onchange="ui.perfClientYearB=parseInt(this.value,10); render();" style="width:auto;max-width:110px;">
+      ${years.map(y=>`<option value="${y}" ${yearB===y?'selected':''}>${y}</option>`).join('')}
+    </select>
+    <span class="helper" style="font-weight:600;margin-left:14px;">Basé sur :</span>
+    <div class="pill-select">
+      <button class="${source==='devis'?'active':''}" onclick="ui.perfClientCaSource='devis'; render();">CA (devis gagnés)</button>
+      <button class="${source==='vva'?'active':''}" onclick="ui.perfClientCaSource='vva'; render();">CA (VVA)</button>
+    </div>
+  </div>
+  <div class="grid grid-4" style="margin-bottom:20px;">
+    <div class="card kpi"><div class="label">Clients en progression</div><div class="value num" style="color:var(--success);">▲ ${nbProgression}</div></div>
+    <div class="card kpi"><div class="label">Clients en régression</div><div class="value num" style="color:var(--danger);">▼ ${nbRegression}</div></div>
+    <div class="card kpi"><div class="label">Clients stables</div><div class="value num">${nbStable}</div></div>
+    <div class="card kpi"><div class="label">Évolution CA globale</div><div class="value num" style="color:${evolGlobalPct==null?'var(--muted)':(evolGlobalPct>=0?'var(--success)':'var(--danger)')};">${evolGlobalPct==null?'—':(evolGlobalPct>=0?'+':'')+evolGlobalPct.toFixed(1)+' %'}</div></div>
+  </div>
+  <div class="card card-pad" style="margin-bottom:20px;">
+    <h3 style="margin:0 0 14px 0;font-size:15px;">CA mensuel — ${yearA} vs ${yearB}</h3>
+    <div class="chart-wrap"><canvas id="perfClientMonthlyChart"></canvas></div>
+  </div>
+  ${rows.length===0?emptyState('📈',"Aucune donnée pour ces deux années","Choisissez deux années différentes, ou changez la source de CA ci-dessus."):`
+  <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur un en-tête pour trier. "Nouveau" = aucun CA en ${yearA}, ne permet pas de calculer un pourcentage d'évolution.</div>
+  <div class="table-wrap card"><table>
+    <thead><tr>
+      <th>Client</th>
+      <th class="num" style="cursor:pointer;" onclick="ui.perfClientSortBy='caB'; ui.perfClientSortDir=(ui.perfClientSortBy==='caB'&&ui.perfClientSortDir==='desc')?'asc':'desc'; render();">CA ${yearA}</th>
+      <th class="num" style="cursor:pointer;" onclick="ui.perfClientSortBy='caB'; ui.perfClientSortDir=(ui.perfClientSortBy==='caB'&&ui.perfClientSortDir==='desc')?'asc':'desc'; render();">CA ${yearB}</th>
+      <th class="num" style="cursor:pointer;" onclick="ui.perfClientSortBy='evolAbs'; ui.perfClientSortDir=(ui.perfClientSortBy==='evolAbs'&&ui.perfClientSortDir==='desc')?'asc':'desc'; render();">Évolution</th>
+      <th class="num" style="cursor:pointer;" onclick="ui.perfClientSortBy='evolPct'; ui.perfClientSortDir=(ui.perfClientSortBy==='evolPct'&&ui.perfClientSortDir==='desc')?'asc':'desc'; render();">Évolution %</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+      ${rows.map(r=>{
+        const isNew = r.evolPct==null;
+        const up = r.evolAbs>0.5, down = r.evolAbs<-0.5;
+        const color = up?'var(--success)':(down?'var(--danger)':'var(--muted)');
+        return `
+        <tr style="cursor:pointer;" onclick="${source==='vva'?`openCaVvaModal(${yearB}, 'all', '${r.client.id}')`:`openClientDetail('${r.client.id}')`}">
+          <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
+          <td class="num">${fmtMoney(r.caA)}</td>
+          <td class="num">${fmtMoney(r.caB)}</td>
+          <td class="num" style="font-weight:700;color:${color};">${up?'+':''}${fmtMoney(r.evolAbs)}</td>
+          <td class="num" style="font-weight:700;color:${color};">${isNew?'<span class="chip" style="background:var(--accent);">Nouveau</span>':(up?'+':'')+r.evolPct.toFixed(1)+' %'}</td>
+          <td>${up?'<span style="color:var(--success);">▲</span>':(down?'<span style="color:var(--danger);">▼</span>':'<span style="color:var(--muted);">—</span>')}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table></div>
+  `}
+  `;
 }
 function renderBudgetCommercial(){
   const years = availableYears();
