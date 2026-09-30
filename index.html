@@ -2419,9 +2419,12 @@ function renderBudgetCommercial(){
   if(!ui.budgetCommercialYear || !years.includes(ui.budgetCommercialYear)) ui.budgetCommercialYear = years[0] || new Date().getFullYear();
   const year = ui.budgetCommercialYear;
 
+  // Vue d'ensemble par client (un client = une ligne, pas de doublon de CA même s'il a plusieurs animations).
   const rows = [];
+  // Détail par animation individuelle (une note de suivi = une ligne, modifiable : titre + agences groupées).
+  const animRows = [];
   state.clients.forEach(c=>{
-    const perBrand = {}; // brandId -> total budget
+    const perBrand = {};
     let anyEntry = false;
     (c.history||[]).forEach(h=>{
       if(yearOf(h.date)!==year) return;
@@ -2432,6 +2435,12 @@ function renderBudgetCommercial(){
       Object.keys(budgets).forEach(bid=>{
         perBrand[bid] = (perBrand[bid]||0) + (budgets[bid]||0);
       });
+      const totalBudgetAnim = Object.values(budgets).reduce((s,v)=>s+v,0);
+      const linkedIds = (h.animationClientIds||[]).filter(id=>id!==c.id);
+      const linkedClients = linkedIds.map(id=>state.clients.find(x=>x.id===id)).filter(Boolean);
+      const caGroup = caForClient(c.id, year, null) + linkedClients.reduce((s,lc)=>s+caForClient(lc.id, year, null), 0);
+      const ratioAnim = caGroup>0 ? (totalBudgetAnim/caGroup*100) : null;
+      animRows.push({ client:c, historyId:h.id, titre: h.animationTitre||'', date: h.date, budgets, totalBudget:totalBudgetAnim, linkedClients, ca:caGroup, ratio:ratioAnim });
     });
     if(!anyEntry) return;
     const totalBudget = Object.values(perBrand).reduce((s,v)=>s+v,0);
@@ -2440,6 +2449,7 @@ function renderBudgetCommercial(){
     rows.push({ client:c, perBrand, totalBudget, ca, ratio });
   });
   rows.sort((a,b)=>b.totalBudget-a.totalBudget);
+  animRows.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
 
   const totalBudgetAll = rows.reduce((s,r)=>s+r.totalBudget,0);
   const totalCaAll = rows.reduce((s,r)=>s+r.ca,0);
@@ -2490,24 +2500,94 @@ function renderBudgetCommercial(){
     </tbody>
   </table></div>
 
-  <div class="section-title">Détail par client</div>
-  <div class="helper" style="margin-bottom:10px;">Le ratio compare le budget d'animation investi chez ce client à son CA (devis gagnés) sur la même année — un ratio élevé peut signaler une participation disproportionnée par rapport au chiffre d'affaires réalisé.</div>
+  <div class="section-title">Détail par animation</div>
+  <div class="helper" style="margin-bottom:10px;">Une ligne par animation commerciale. Certaines animations regroupent plusieurs agences d'une même enseigne : cliquez sur ✎ pour donner un titre à l'animation et ajouter les agences concernées — leur CA sera alors additionné pour le ratio, mais le budget reste celui saisi sur l'agence principale.</div>
   <div class="table-wrap card"><table>
-    <thead><tr><th>Client</th><th>Marques (budget)</th><th class="num">Budget total</th><th class="num">CA annuel ${year}</th><th class="num">Ratio</th></tr></thead>
+    <thead><tr><th>Animation</th><th>Client principal</th><th>Agences groupées</th><th>Marques (budget)</th><th class="num">Budget</th><th class="num">CA cumulé ${year}</th><th class="num">Ratio</th><th></th></tr></thead>
     <tbody>
-      ${rows.map(r=>`
-        <tr style="cursor:pointer;" onclick="openClientSuiviOnlyModal('${r.client.id}')" title="Cliquer pour ouvrir le suivi commercial de ce client">
-          <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
-          <td>${Object.keys(r.perBrand).map(bid=>`<span class="chip" style="background:${brandColor(bid)};font-size:10px;margin:1px 3px 1px 0;">${escapeHtml(brandName(bid))} — ${fmtMoney(r.perBrand[bid])}</span>`).join('')}</td>
+      ${animRows.map(r=>`
+        <tr>
+          <td style="font-weight:600;">${r.titre?escapeHtml(r.titre):`<span class="helper" style="display:inline;">Animation du ${fmtDate(r.date)}</span>`}</td>
+          <td style="cursor:pointer;" onclick="openClientSuiviOnlyModal('${r.client.id}')" title="Ouvrir le suivi commercial">${escapeHtml(clientDisplayName(r.client))}</td>
+          <td>${r.linkedClients.length===0?'—':r.linkedClients.map(lc=>escapeHtml(clientDisplayName(lc))).join(', ')}</td>
+          <td>${Object.keys(r.budgets).map(bid=>`<span class="chip" style="background:${brandColor(bid)};font-size:10px;margin:1px 3px 1px 0;">${escapeHtml(brandName(bid))} — ${fmtMoney(r.budgets[bid])}</span>`).join('')}</td>
           <td class="num" style="font-weight:700;">${fmtMoney(r.totalBudget)}</td>
           <td class="num">${fmtMoney(r.ca)}</td>
           <td class="num" style="font-weight:700;color:${r.ratio==null?'var(--muted)':(r.ratio>15?'var(--danger)':(r.ratio>7?'#D9782D':'var(--success)'))};">${r.ratio==null?'—':r.ratio.toFixed(1)+' %'}</td>
+          <td><button class="btn btn-sm btn-ghost" onclick="openEditAnimationModal('${r.client.id}','${r.historyId}')" title="Donner un titre à cette animation et grouper d'autres agences">✎</button></td>
         </tr>
       `).join('')}
     </tbody>
   </table></div>
   `}
   `;
+}
+function openEditAnimationModal(clientId, historyId){
+  const c = state.clients.find(x=>x.id===clientId);
+  const h = c ? (c.history||[]).find(x=>x.id===historyId) : null;
+  if(!c || !h) return;
+  const linkedIds = h.animationClientIds || [];
+  openModal(`
+    <div class="modal-head"><h3>Modifier l'animation — ${escapeHtml(clientDisplayName(c))}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Titre de l'animation <span class="helper" style="display:inline;">— facultatif, pour identifier facilement une animation regroupant plusieurs agences</span></label>
+        <input type="text" id="anim_titre" value="${escapeHtml(h.animationTitre||'')}" placeholder="Ex. Animation Rexel Centre — Printemps 2026">
+      </div>
+      <div class="field">
+        <label>Agences groupées avec ${escapeHtml(clientDisplayName(c))} <span class="helper" style="display:inline;">— leur CA sera additionné pour le calcul du ratio ; le budget, lui, reste uniquement celui saisi ici, sur ${escapeHtml(clientDisplayName(c))}</span></label>
+        <input type="text" id="anim_clientSearch" placeholder="Rechercher une société à ajouter…" autocomplete="off" oninput="animClientSearchRun(this.value,'${clientId}')">
+        <div id="anim_clientResults" style="margin-top:6px;"></div>
+      </div>
+      <div id="anim_linkedList" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">
+        ${renderAnimLinkedChips(linkedIds)}
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="saveAnimationEdit('${clientId}','${historyId}')">Enregistrer</button>
+    </div>
+  `);
+  window._animEditLinkedIds = linkedIds.slice();
+}
+function renderAnimLinkedChips(ids){
+  if(ids.length===0) return '<div class="helper">Aucune agence supplémentaire ajoutée pour l\'instant.</div>';
+  return ids.map(id=>{
+    const lc = state.clients.find(x=>x.id===id);
+    if(!lc) return '';
+    return `<span class="chip" style="background:var(--surface-2);color:var(--ink);">${escapeHtml(clientDisplayName(lc))} <a href="#" onclick="event.preventDefault(); removeAnimLinkedClient('${id}');" style="margin-left:6px;color:var(--danger);">✕</a></span>`;
+  }).join('');
+}
+function animClientSearchRun(q, principalId){
+  const box = document.getElementById('anim_clientResults');
+  if(!box) return;
+  q = q.trim().toLowerCase();
+  if(!q){ box.innerHTML=''; return; }
+  const results = state.clients.filter(c=>c.id!==principalId && !window._animEditLinkedIds.includes(c.id) && (clientDisplayName(c)||'').toLowerCase().includes(q)).slice(0,10);
+  if(results.length===0){ box.innerHTML = '<div class="helper">Aucune société trouvée.</div>'; return; }
+  box.innerHTML = `<div class="autocomplete-list">${results.map(c=>`
+    <div class="autocomplete-item" onmousedown="event.preventDefault(); addAnimLinkedClient('${c.id}');">${escapeHtml(clientDisplayName(c))}${c.ville?` — <span class="helper" style="display:inline;">${escapeHtml(c.ville)}</span>`:''}</div>
+  `).join('')}</div>`;
+}
+function addAnimLinkedClient(id){
+  if(!window._animEditLinkedIds.includes(id)) window._animEditLinkedIds.push(id);
+  document.getElementById('anim_linkedList').innerHTML = renderAnimLinkedChips(window._animEditLinkedIds);
+  document.getElementById('anim_clientSearch').value = '';
+  document.getElementById('anim_clientResults').innerHTML = '';
+}
+function removeAnimLinkedClient(id){
+  window._animEditLinkedIds = window._animEditLinkedIds.filter(x=>x!==id);
+  document.getElementById('anim_linkedList').innerHTML = renderAnimLinkedChips(window._animEditLinkedIds);
+}
+function saveAnimationEdit(clientId, historyId){
+  const c = state.clients.find(x=>x.id===clientId);
+  const h = c ? (c.history||[]).find(x=>x.id===historyId) : null;
+  if(!c || !h) return;
+  h.animationTitre = document.getElementById('anim_titre').value.trim();
+  h.animationClientIds = (window._animEditLinkedIds||[]).slice();
+  persist('clients');
+  closeModal();
+  render();
+  showToast('Animation mise à jour.');
 }
 function renderTrash(){
   const items = state.trash||[];
