@@ -11500,7 +11500,7 @@ function renderDashboard(){
     : `<div class="table-wrap"><table>
         <thead><tr><th style="width:36px;">#</th><th>Client</th><th class="num">CA HT</th></tr></thead>
         <tbody>
-          ${rows.map((r,i)=>`<tr style="cursor:pointer;" onclick="drillDownClient(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.client.id}')" title="Voir le détail des devis gagnés de ce client">
+          ${rows.map((r,i)=>`<tr style="cursor:pointer;" onclick="${caSource==='vva'?`openCaVvaModal(${y}, '${brandFilter}', '${r.client.id}')`:`drillDownClient(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.client.id}')`}" title="${caSource==='vva'?'Voir le CA (VVA) mensuel de ce client':'Voir le détail des devis gagnés de ce client'}">
             <td>${i+1}</td>
             <td>${escapeHtml(clientSocieteLabel(r.client.id))}</td>
             <td class="num" style="font-weight:700;">${fmtMoney(r.ca)}</td>
@@ -11781,7 +11781,9 @@ function initDashboardCharts(){
         onClick:(evt, elements)=>{
           if(!elements.length) return;
           const targetBrand = state.brands.find(b=>b.name===brandData[elements[0].index].label);
-          if(targetBrand) drillDownBrand(y, cmId, brandFilter, clientFilter, targetBrand.id);
+          if(!targetBrand) return;
+          if(caSource==='vva') openCaVvaModal(y, targetBrand.id, clientFilter);
+          else drillDownBrand(y, cmId, brandFilter, clientFilter, targetBrand.id);
         },
         onHover:(evt, elements)=>{ evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
         plugins:{legend:{display:false}, tooltip:{callbacks:{label:(ctx)=>fmtMoney(ctx.parsed.x)}}},
@@ -11799,7 +11801,9 @@ function initDashboardCharts(){
         onClick:(evt, elements)=>{
           if(!elements.length) return;
           const targetClient = clientsInScope.find(c=>c.name===clientData[elements[0].index].label);
-          if(targetClient) drillDownClient(y, cmId, brandFilter, clientFilter, targetClient.id);
+          if(!targetClient) return;
+          if(caSource==='vva') openCaVvaModal(y, brandFilter, targetClient.id);
+          else drillDownClient(y, cmId, brandFilter, clientFilter, targetClient.id);
         },
         onHover:(evt, elements)=>{ evt.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
         plugins:{legend:{display:false}, tooltip:{callbacks:{label:(ctx)=>fmtMoney(ctx.parsed.x)}}},
