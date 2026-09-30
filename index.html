@@ -2513,10 +2513,10 @@ function renderPerfClient(){
     </div>
   </div>
   <div class="grid grid-4" style="margin-bottom:20px;">
-    <div class="card kpi" id="perfClientCardProgression" style="cursor:pointer;${ui.perfClientFilterMode==='progression'?'box-shadow:0 0 0 2px var(--success) inset;':''}" onclick="ui.perfClientFilterMode=(ui.perfClientFilterMode==='progression'?null:'progression'); render();" title="Cliquer pour n'afficher que les clients en progression">
+    <div class="card kpi" id="perfClientCardProgression" style="cursor:pointer;${ui.perfClientFilterMode==='progression'?'box-shadow:0 0 0 2px var(--success) inset;':''}" onclick="event.stopPropagation(); ui.perfClientFilterMode=(ui.perfClientFilterMode==='progression'?null:'progression'); render();" title="Cliquer pour n'afficher que les clients en progression">
       <div class="label">Clients en progression</div><div class="value num" style="color:var(--success);">▲ ${nbProgression}</div>
     </div>
-    <div class="card kpi" id="perfClientCardRegression" style="cursor:pointer;${ui.perfClientFilterMode==='regression'?'box-shadow:0 0 0 2px var(--danger) inset;':''}" onclick="ui.perfClientFilterMode=(ui.perfClientFilterMode==='regression'?null:'regression'); render();" title="Cliquer pour n'afficher que les clients en régression">
+    <div class="card kpi" id="perfClientCardRegression" style="cursor:pointer;${ui.perfClientFilterMode==='regression'?'box-shadow:0 0 0 2px var(--danger) inset;':''}" onclick="event.stopPropagation(); ui.perfClientFilterMode=(ui.perfClientFilterMode==='regression'?null:'regression'); render();" title="Cliquer pour n'afficher que les clients en régression">
       <div class="label">Clients en régression</div><div class="value num" style="color:var(--danger);">▼ ${nbRegression}</div>
     </div>
     <div class="card kpi"><div class="label">Clients stables</div><div class="value num">${nbStable}</div></div>
@@ -2526,6 +2526,32 @@ function renderPerfClient(){
     <h3 style="margin:0 0 14px 0;font-size:15px;">CA mensuel — ${yearA} vs ${yearB}</h3>
     <div class="chart-wrap"><canvas id="perfClientMonthlyChart"></canvas></div>
   </div>
+  ${rows.length===0?'':(()=>{
+    const top10 = rows.filter(r=>r.evolAbs>0.5).slice().sort((a,b)=>b.evolAbs-a.evolAbs).slice(0,10);
+    const flop10 = rows.filter(r=>r.evolAbs<-0.5).slice().sort((a,b)=>a.evolAbs-b.evolAbs).slice(0,10);
+    const miniList = (list, colorVar) => list.length===0
+      ? '<div class="helper">Aucun client dans ce cas sur la période.</div>'
+      : `<div class="table-wrap"><table><tbody>
+          ${list.map(r=>`<tr style="cursor:pointer;" onclick="${source==='vva'?`openCaVvaModal(${yearB}, 'all', '${r.client.id}')`:`openClientDetail('${r.client.id}')`}">
+            <td style="font-weight:600;">${escapeHtml(clientDisplayName(r.client))}</td>
+            <td class="num" style="font-weight:700;color:var(${colorVar});">${r.evolAbs>0?'+':''}${fmtMoney(r.evolAbs)}</td>
+            <td class="num helper">${r.evolPct==null?'Nouveau':(r.evolPct>0?'+':'')+r.evolPct.toFixed(1)+' %'}</td>
+          </tr>`).join('')}
+        </tbody></table></div>`;
+    return `
+    <div class="settings-top-grid" style="margin-bottom:20px;">
+      <div class="card card-pad">
+        <h3 style="margin:0 0 4px 0;font-size:15px;">🏆 Top 10 progressions</h3>
+        <div class="helper" style="margin-bottom:10px;">${yearA} → ${yearB}</div>
+        ${miniList(top10, '--success')}
+      </div>
+      <div class="card card-pad">
+        <h3 style="margin:0 0 4px 0;font-size:15px;">📉 Flop 10 régressions</h3>
+        <div class="helper" style="margin-bottom:10px;">${yearA} → ${yearB}</div>
+        ${miniList(flop10, '--danger')}
+      </div>
+    </div>`;
+  })()}
   ${displayRows.length===0?emptyState('📈',filterMode?"Aucun client ne correspond à ce filtre":"Aucune donnée pour ces deux années",filterMode?"Cliquez à nouveau sur la carte, ou en dehors, pour revenir au tableau général.":"Choisissez deux années différentes, ou changez la source de CA ci-dessus."):`
   <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur un en-tête pour trier. "Nouveau" = aucun CA en ${yearA}, ne permet pas de calculer un pourcentage d'évolution.${filterMode?` — filtré sur les clients en ${filterMode==='progression'?'progression':'régression'} (cliquez en dehors du tableau pour revenir à la vue générale).`:''}</div>
   <div class="table-wrap card" id="perfClientTableWrap"><table>
