@@ -7389,12 +7389,6 @@ function renderCommissions(){
         ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.commissionsBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select>
     </div>
-    <div class="field" style="margin-bottom:0;max-width:200px;"><label style="margin-bottom:4px;">Trier par</label>
-      <select onchange="ui.commissionsSortBy=this.value; updateCommissionsTableOnly();">
-        <option value="ca" ${ui.commissionsSortBy==='ca'?'selected':''}>CA</option>
-        <option value="commission" ${ui.commissionsSortBy==='commission'?'selected':''}>Montant commission</option>
-      </select>
-    </div>
     <div class="field" style="margin-bottom:0;">
       <label style="margin-bottom:4px;">&nbsp;</label>
       <button class="btn" style="white-space:nowrap;" onclick="ui.commissionsSortDir=ui.commissionsSortDir==='asc'?'desc':'asc'; updateCommissionsTableOnly();">
@@ -7403,6 +7397,7 @@ function renderCommissions(){
     </div>
   </div>
   ${renderCommissionsTop5()}
+  <div id="commissionsSortPills" style="display:flex;align-items:center;gap:10px;margin:16px 0 10px;flex-wrap:wrap;">${commissionsSortPillsHtml()}</div>
   ${(() => {
     const size = (state.settings.commissionsTableSize)||'lg';
     const cols = DASH_SIZE_COLS[size];
@@ -7440,6 +7435,17 @@ function updateCommissionsTableOnly(){
   const wrap = document.getElementById('commissionsTableCard');
   const size = state.settings.commissionsTableSize || 'lg';
   if(wrap) wrap.innerHTML = commissionsSizeToolsHtml(size,'table')+renderCommissionsTableInner()+cardResizeHandleHtml('commissions','table');
+  const pills = document.getElementById('commissionsSortPills');
+  if(pills) pills.innerHTML = commissionsSortPillsHtml();
+}
+function commissionsSortPillsHtml(){
+  return `
+    <span class="helper" style="font-weight:600;">Trier le tableau par :</span>
+    <div class="pill-select">
+      <button class="${(ui.commissionsSortBy||'ca')==='ca'?'active':''}" onclick="ui.commissionsSortBy='ca'; updateCommissionsTableOnly();">CA</button>
+      <button class="${ui.commissionsSortBy==='commission'?'active':''}" onclick="ui.commissionsSortBy='commission'; updateCommissionsTableOnly();">Montant commission</button>
+    </div>
+  `;
 }
 function renderCommissionsTableInner(){
   if(state.brands.length===0) return emptyState('%','Aucune marque','Ajoutez vos marques / fournisseurs pour saisir leurs commissions.');
