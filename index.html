@@ -3648,8 +3648,10 @@ function openMoveContactModal(contactIndex){
     <div class="modal-body">
       <div class="helper" style="margin-bottom:10px;">Utile par exemple si un même interlocuteur suit plusieurs agences d'un même groupe (chacune étant une fiche société séparée) : "Dupliquer" garde ce contact ici et l'ajoute aussi ailleurs ; "Déplacer" le retire d'ici pour l'ajouter là-bas.</div>
       <div class="field"><label>Société de destination</label>
-        <input type="text" id="moveContactSearch" placeholder="Rechercher une société…" autocomplete="off" oninput="moveContactSearchRun(this.value, ${contactIndex})">
-        <div id="moveContactResults" style="margin-top:8px;"></div>
+        <div class="autocomplete">
+          <input type="text" id="moveContactSearch" placeholder="Rechercher une société…" autocomplete="off" oninput="moveContactSearchRun(this.value, ${contactIndex})">
+          <div id="moveContactResults"></div>
+        </div>
       </div>
     </div>
     <div class="modal-foot">
