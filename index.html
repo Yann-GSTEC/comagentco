@@ -395,7 +395,7 @@ label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-
 <div id="app"></div>
 <script>
 /* ============================= DONNEES & ETAT ============================= */
-const BRAND_COLORS = ['#2F5D50','#B8863B','#3E6FA6','#AF4B3D','#7A5C8A','#3F8A7B','#C08A34','#5C7A3E','#9C5B76','#4E6B9C','#A66B3E','#4C8A6B','#6B5C9C','#8A6B3E'];
+const BRAND_COLORS = ['#E63946','#F3722C','#D99A00','#43AA8B','#277DA1','#7209B7','#F72585','#3A86FF','#8338EC','#06A77D','#C9184A','#2A9D8F','#4361EE','#E07A5F','#9B2335','#577590'];
 
 const STATUTS = ['Brouillon','Envoyé'];
 function etatAffaireOutcome(d){
@@ -5407,7 +5407,7 @@ function renderListesPrixNetsDetail(){
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
     ${listes.map(l=>{
       const selected = l.id===ui.pnListeFilter;
-      return `<span class="chip" style="cursor:pointer;${selected?`background:${brandColor(b.id)};`:`background:var(--surface-2);color:var(--ink-soft);`}" onclick="ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();">${selected?'<span class="sq"></span>':''}${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</span>`;
+      return `<span class="chip" style="cursor:pointer;${selected?`background:#2977D9;color:#fff;`:`background:var(--surface-2);color:var(--ink-soft);`}" onclick="ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();">${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</span>`;
     }).join('')}
     <button class="btn btn-sm btn-ghost" onclick="createPrixNetListe('${ui.pnBrandFilter}')">+ Nouvelle liste</button>
   </div>
