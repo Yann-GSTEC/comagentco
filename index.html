@@ -2349,7 +2349,7 @@ const TRASH_TYPE_LABELS = {
   client:'Client', devis:'Devis', marche:'Marché', devisTemplate:'Modèle de devis',
   tarif:'Référence tarif', brand:'Marque', commercial:'Commercial',
   historyNote:'Note de suivi', prixNetListe:'Liste de prix nets', prixNet:'Référence liste de prix nets',
-  paramItem:'Élément de liste', brandHistory:'RDV marque', tarifsBulk:'Tarifs (bloc)', prixNetBulk:'Liste de prix nets (bloc)',
+  paramItem:'Élément de liste', brandHistory:'RDV marque', suiviNote:'Commentaire de suivi devis', tarifsBulk:'Tarifs (bloc)', prixNetBulk:'Liste de prix nets (bloc)',
 };
 function moveToTrash(type, label, data){
   state.trash = state.trash || [];
@@ -2387,6 +2387,15 @@ function restoreFromTrash(trashId){
       state.paramLists[entry.data.listKey].push(entry.data.item);
       persist('paramLists');
       break;
+    case 'suiviNote': {
+      const dv = state.devis.find(x=>x.id===entry.data.devisId);
+      if(!dv){ showToast('Le devis correspondant n\'existe plus.'); return; }
+      dv.suiviNotes = dv.suiviNotes || [];
+      dv.suiviNotes.push(entry.data.note);
+      dv.suiviNotes.sort((a,b)=>(a.ts||'').localeCompare(b.ts||''));
+      persist('devis');
+      break;
+    }
     case 'brandHistory': {
       const b = state.brands.find(x=>x.id===entry.data.brandId);
       if(!b){ showToast('La marque correspondante n\'existe plus.'); return; }
@@ -7121,7 +7130,7 @@ function renderDevisListInner(){
     });
   }
   const q = (ui.devisSearch||'').trim().toLowerCase();
-  if(q) list = list.filter(d=>(clientName(d.clientId)+' '+clientSocieteLabel(d.clientId)+' '+(d.objet||'')+' '+(d.reference||'')+' '+d.number+' '+(d.status||'')).toLowerCase().includes(q));
+  if(q) list = list.filter(d=>(clientName(d.clientId)+' '+clientSocieteLabel(d.clientId)+' '+(d.objet||'')+' '+(d.reference||'')+' '+d.number+' '+(d.status||'')+' '+(d.suiviNotes||[]).map(n=>n.text).join(' ')).toLowerCase().includes(q));
   if(ui.devisDateFrom) list = list.filter(d=>d.date>=ui.devisDateFrom);
   if(ui.devisDateTo) list = list.filter(d=>d.date<=ui.devisDateTo);
   if(ui.devisFilterBrand && ui.devisFilterBrand!=='all') list = list.filter(d=>(d.lines||[]).some(l=>l.brandId===ui.devisFilterBrand));
@@ -7143,7 +7152,7 @@ function renderDevisListInner(){
   if(list.length===0) return emptyState('▧','Aucun devis','Créez votre premier devis à partir de vos listes de prix.');
   return `
   <div class="card table-wrap"><table>
-    <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Marque(s)</th><th>Total HT</th><th>Apporteur</th><th>Statut devis</th><th>État de l'affaire</th></tr></thead>
+    <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Marque(s)</th><th>Total HT</th><th>Apporteur</th><th>Statut devis</th><th>État de l'affaire</th><th>Suivi</th></tr></thead>
     <tbody>
       ${list.map(d=>{
         const t = devisTotal(d);
@@ -7175,6 +7184,11 @@ function renderDevisListInner(){
               ${(state.paramLists.etatAffaires||[]).map(e=>`<option value="${escapeHtml(e.libelle)}" ${d.etatAffaire===e.libelle?'selected':''}>${escapeHtml(e.libelle)}</option>`).join('')}
             </select>
           </td>
+          <td onclick="event.stopPropagation();">${(()=>{
+            const notes = d.suiviNotes||[];
+            const last = notes.length ? notes[notes.length-1].text : '';
+            return `<button class="btn btn-sm btn-ghost" style="${notes.length?'color:#2977D9;font-weight:700;':''}" onclick="openDevisSuiviModal('${d.id}')" title="${escapeHtml(last||'Ajouter un commentaire de suivi')}">💬${notes.length?' '+notes.length:''}</button>`;
+          })()}</td>
         </tr>`;
       }).join('')}
     </tbody>
@@ -7192,6 +7206,77 @@ function changeDevisEtatAffaire(id, etat){
   persist('devis');
   render();
   showToast("État de l'affaire mis à jour.");
+  if(old!==d.etatAffaire && etatAffaireOutcome(d)==='perdue' && !(d.suiviNotes||[]).length){
+    openDevisSuiviModal(id, "Cette affaire est passée en « perdue » : notez ici la raison (prix, concurrent, projet abandonné…) pour la retrouver plus tard.");
+  }
+}
+function renderSuiviNotesList(notes, removeFn, extraArg){
+  if(!notes.length) return '<div class="helper">Aucun commentaire pour l\'instant.</div>';
+  return notes.slice().sort((a,b)=>(b.ts||'').localeCompare(a.ts||'')).map(n=>`
+    <div style="display:flex;gap:10px;align-items:flex-start;padding:8px 10px;margin-bottom:6px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);">
+      <div style="flex:1;min-width:0;">
+        <div class="helper" style="margin-bottom:2px;">${fmtDateTime(n.ts)}</div>
+        <div style="white-space:pre-wrap;word-break:break-word;">${escapeHtml(n.text)}</div>
+      </div>
+      <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="${removeFn}('${extraArg?extraArg+"','":""}${n.id}')" title="Supprimer ce commentaire">✕</button>
+    </div>`).join('');
+}
+function addDraftSuiviNote(){
+  const ta = document.getElementById('d_suiviNew');
+  const text = ta ? ta.value.trim() : '';
+  if(!text){ showToast('Saisissez un commentaire.'); return; }
+  draft.suiviNotes = draft.suiviNotes || [];
+  draft.suiviNotes.push({ id:uid(), ts:new Date().toISOString(), text });
+  ta.value = '';
+  document.getElementById('d_suiviList').innerHTML = renderSuiviNotesList(draft.suiviNotes, 'removeDraftSuiviNote');
+  showToast('Commentaire ajouté — pensez à Enregistrer.');
+}
+function removeDraftSuiviNote(noteId){
+  draft.suiviNotes = (draft.suiviNotes||[]).filter(n=>n.id!==noteId);
+  document.getElementById('d_suiviList').innerHTML = renderSuiviNotesList(draft.suiviNotes, 'removeDraftSuiviNote');
+}
+function openDevisSuiviModal(id, hint){
+  const d = state.devis.find(x=>x.id===id);
+  if(!d) return;
+  openModal(`
+    <div class="modal-head"><h3>Suivi — ${escapeHtml(d.number)}</h3><button class="close-x" onclick="closeDevisSuiviModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="helper" style="margin-bottom:10px;">${escapeHtml(clientSocieteLabel(d.clientId))}${d.objet?' — '+escapeHtml(d.objet):''}${d.etatAffaire?' — État : <strong>'+escapeHtml(d.etatAffaire)+'</strong>':''}</div>
+      ${hint?`<div class="helper" style="margin-bottom:12px;padding:8px 10px;border-left:3px solid #2977D9;background:var(--surface-2);">${escapeHtml(hint)}</div>`:''}
+      <div id="suiviModalList">${renderSuiviNotesList(d.suiviNotes||[], 'removeDevisSuiviNote', id)}</div>
+      <div class="field" style="margin-top:12px;"><label>Nouveau commentaire</label>
+        <textarea id="suiviModalNew" rows="3" placeholder="Ex. perdu au profit d'un concurrent moins cher, projet reporté…"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeDevisSuiviModal()">Fermer</button>
+      <button class="btn btn-primary" onclick="addDevisSuiviNote('${id}')">Ajouter le commentaire</button>
+    </div>
+  `);
+  setTimeout(()=>{ const t=document.getElementById('suiviModalNew'); if(t) t.focus(); },50);
+}
+function closeDevisSuiviModal(){ closeModal(); render(); }
+function addDevisSuiviNote(id){
+  const d = state.devis.find(x=>x.id===id);
+  const ta = document.getElementById('suiviModalNew');
+  const text = ta ? ta.value.trim() : '';
+  if(!d || !text){ showToast('Saisissez un commentaire.'); return; }
+  d.suiviNotes = d.suiviNotes || [];
+  d.suiviNotes.push({ id:uid(), ts:new Date().toISOString(), text });
+  persist('devis');
+  ta.value = '';
+  document.getElementById('suiviModalList').innerHTML = renderSuiviNotesList(d.suiviNotes, 'removeDevisSuiviNote', id);
+  showToast('Commentaire enregistré.');
+}
+function removeDevisSuiviNote(devisId, noteId){
+  const d = state.devis.find(x=>x.id===devisId);
+  if(!d) return;
+  if(!confirm('Supprimer ce commentaire ? Retrouvable dans la Corbeille.')) return;
+  const note = (d.suiviNotes||[]).find(n=>n.id===noteId);
+  if(note) moveToTrash('suiviNote', `${d.number} — ${fmtDateTime(note.ts)}`, {devisId, note});
+  d.suiviNotes = (d.suiviNotes||[]).filter(n=>n.id!==noteId);
+  persist('devis');
+  document.getElementById('suiviModalList').innerHTML = renderSuiviNotesList(d.suiviNotes, 'removeDevisSuiviNote', devisId);
 }
 function changeDevisApporteur(id, apporteur){
   const d = state.devis.find(x=>x.id===id);
@@ -8272,6 +8357,7 @@ function duplicateDraftDevis(){
   clone.createdAt = new Date().toISOString();
   clone.validUntil = defaultValidUntil(clone.type||'Devis', clone.date);
   clone.validUntilAuto = true;
+  clone.suiviNotes = [];
   clone.history = []; // un duplicata démarre son propre journal, plutôt que d'hériter de tout l'historique de l'original
   clone._duplicatedFromId = originalId;
   clone._duplicatedFromNumber = originalNumber;
@@ -8397,6 +8483,14 @@ function devisFormHtml(){
       `:''}
 
       <div class="field" style="margin-top:16px;"><label>Notes / conditions</label><textarea id="d_notes" rows="2" onchange="draft.notes=this.value;">${escapeHtml(draft.notes||'')}</textarea></div>
+      <div class="field" style="margin-top:16px;">
+        <label>💬 Suivi / commentaires <span class="helper" style="display:inline;">— internes, jamais imprimés sur le PDF (ex. motif d'un devis perdu)</span></label>
+        <div id="d_suiviList">${renderSuiviNotesList(draft.suiviNotes||[], 'removeDraftSuiviNote')}</div>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:flex-start;">
+          <textarea id="d_suiviNew" rows="2" placeholder="Ajouter un commentaire…" style="flex:1;"></textarea>
+          <button type="button" class="btn btn-sm" onclick="addDraftSuiviNote()">Ajouter</button>
+        </div>
+      </div>
       <div class="field" style="margin-top:16px;">
         <label>Pièce jointe (PDF) <span class="helper" style="display:inline;">— ex. CCTP, plan… consultable ici, non incluse automatiquement à l'envoi par email</span></label>
         ${draft.attachmentPdfName?`
