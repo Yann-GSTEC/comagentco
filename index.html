@@ -2148,6 +2148,8 @@ function openBrandForm(id){
   const b = id ? state.brands.find(x=>x.id===id) : null;
   pendingLogoData = b ? (b.logo||null) : null;
   brandFormTab = 'identification';
+  brandFrancoRulesDraft = JSON.parse(JSON.stringify((b && b.francoRules) || []));
+  brandFrancoBrandId = b ? b.id : null;
   const civOpts = civiliteOptions();
   openModal(`
     <div class="modal-head"><h3>${b?'Modifier la marque / fournisseur':'Nouvelle marque / fournisseur'}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
@@ -2167,8 +2169,10 @@ function openBrandForm(id){
         <div class="field-row">
           <div class="field" style="max-width:220px;"><label>Franco de port (€ HT)</label><input type="number" id="f_francoPort" min="0" step="0.01" value="${b&&b.francoPort?b.francoPort:''}" placeholder="Ex. 500"></div>
           <div class="field" style="max-width:220px;"><label>Frais de port (€ HT)</label><input type="number" id="f_fraisPort" min="0" step="0.01" value="${b&&b.fraisPort?b.fraisPort:''}" placeholder="Ex. 25"></div>
-          <div class="field"><div class="helper" style="margin-top:22px;">Si le total HT d'un devis pour cette marque est inférieur au franco, une alerte propose d'ajouter les frais de port.</div></div>
+          <div class="field"><div class="helper" style="margin-top:22px;">Franco « général » : s'applique aux articles qui ne correspondent à aucune règle ci-dessous. Si le total HT d'un devis est inférieur au franco, une alerte propose d'ajouter les frais de port.</div></div>
         </div>
+        <div class="section-title" style="margin-top:6px;">Franco par type d'articles <span class="helper" style="display:inline;">(facultatif — ex. prises 350 €, coffrets 850 €)</span></div>
+        <div id="brandFrancoRulesBox">${renderBrandFrancoRules()}</div>
         <div class="field-row">
           <div class="field" style="max-width:140px;"><label>Civilité</label>
             <select id="f_civilite">${civOpts.map(c=>`<option value="${c}" ${b&&b.civilite===c?'selected':''}>${c||'—'}</option>`).join('')}</select>
@@ -2321,6 +2325,7 @@ function saveBrand(id){
     tauxCommission: parseFloat(document.getElementById('f_tauxCommission').value)||0,
     francoPort: parseFloat(document.getElementById('f_francoPort').value)||0,
     fraisPort: parseFloat(document.getElementById('f_fraisPort').value)||0,
+    francoRules: brandFrancoRulesDraft.filter(r=>r.francoPort>0 && (r.famille||r.sousFamille||(r.motsCles||'').trim())),
     civilite: document.getElementById('f_civilite').value,
     prenom: document.getElementById('f_prenom').value.trim(),
     adresse1: document.getElementById('f_adresse1').value.trim(),
@@ -3714,9 +3719,15 @@ function moveContactToClient(contactIndex){
   if(!p || !target) return;
   target.contacts = target.contacts || [];
   target.contacts.push({...p, id:uid()});
+  // Retire aussi le contact de la fiche d'origine tout de suite (et non seulement du formulaire en cours),
+  // sinon il y resterait si le formulaire est fermé sans cliquer sur Enregistrer.
+  const source = clientDraftId ? state.clients.find(x=>x.id===clientDraftId) : null;
+  if(source && Array.isArray(source.contacts)){
+    source.contacts = source.contacts.filter(x=>x.id!==p.id);
+  }
   persist('clients');
   clientDraftContacts.splice(contactIndex,1);
-  showToast(`Contact déplacé chez ${clientDisplayName(target)}.`);
+  showToast(`Contact déplacé chez ${clientDisplayName(target)} et retiré de l'ancienne société.`);
   refreshClientModal();
 }
 function refreshClientContactsTable(){
@@ -8594,20 +8605,102 @@ function devisFormHtml(){
     </div>
   `;
 }
+/* ---- Franco de port par type d'articles (fiche marque) ---- */
+let brandFrancoRulesDraft = [];
+let brandFrancoBrandId = null;
+function brandFrancoFamilyOptions(){
+  const fam = new Set(), sous = new Set();
+  if(brandFrancoBrandId){
+    state.tarifs.filter(t=>t.brandId===brandFrancoBrandId).forEach(t=>{
+      if(t.codeFamilleArticle) fam.add(t.codeFamilleArticle);
+      if(t.codeSousFamilleArticle) sous.add(t.codeSousFamilleArticle);
+    });
+  }
+  return {fam:[...fam].sort(), sous:[...sous].sort()};
+}
+function renderBrandFrancoRules(){
+  const opts = brandFrancoFamilyOptions();
+  const rules = brandFrancoRulesDraft;
+  return `
+    <datalist id="dl_francoFam">${opts.fam.map(x=>`<option value="${escapeHtml(x)}">`).join('')}</datalist>
+    <datalist id="dl_francoSous">${opts.sous.map(x=>`<option value="${escapeHtml(x)}">`).join('')}</datalist>
+    ${rules.length===0?'<div class="helper" style="margin-bottom:8px;">Aucune règle : le franco général ci-dessus s\'applique à tout le devis de cette marque.</div>':''}
+    ${rules.map((r,i)=>`
+      <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:var(--surface-2);">
+        <div class="field-row">
+          <div class="field"><label>Nom du type</label><input type="text" value="${escapeHtml(r.libelle||'')}" placeholder="Ex. Coffrets" onchange="setBrandFrancoRule(${i},'libelle',this.value)"></div>
+          <div class="field" style="max-width:150px;"><label>Franco (€ HT)</label><input type="number" min="0" step="0.01" value="${r.francoPort||''}" placeholder="850" onchange="setBrandFrancoRule(${i},'francoPort',this.value)"></div>
+          <div class="field" style="max-width:150px;"><label>Frais de port (€ HT)</label><input type="number" min="0" step="0.01" value="${r.fraisPort||''}" placeholder="30" onchange="setBrandFrancoRule(${i},'fraisPort',this.value)"></div>
+          <div style="align-self:flex-end;margin-bottom:10px;"><button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="removeBrandFrancoRule(${i})" title="Supprimer cette règle">✕</button></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Famille article</label><input type="text" list="dl_francoFam" value="${escapeHtml(r.famille||'')}" placeholder="Code famille (facultatif)" onchange="setBrandFrancoRule(${i},'famille',this.value)"></div>
+          <div class="field"><label>Sous-famille</label><input type="text" list="dl_francoSous" value="${escapeHtml(r.sousFamille||'')}" placeholder="Code sous-famille (facultatif)" onchange="setBrandFrancoRule(${i},'sousFamille',this.value)"></div>
+          <div class="field"><label>Mot(s) dans la désignation</label><input type="text" value="${escapeHtml(r.motsCles||'')}" placeholder="Ex. coffret, armoire" onchange="setBrandFrancoRule(${i},'motsCles',this.value)"></div>
+        </div>
+        <div class="helper">Un article entre dans ce type s'il correspond à <strong>tous</strong> les critères renseignés (famille, sous-famille, mots — un seul des mots suffit).</div>
+      </div>`).join('')}
+    <button type="button" class="btn btn-sm" onclick="addBrandFrancoRule()">+ Ajouter un type d'articles</button>`;
+}
+function refreshBrandFrancoRules(){ const box=document.getElementById('brandFrancoRulesBox'); if(box) box.innerHTML = renderBrandFrancoRules(); }
+function addBrandFrancoRule(){
+  const gen = parseFloat((document.getElementById('f_fraisPort')||{}).value)||0;
+  brandFrancoRulesDraft.push({id:uid(), libelle:'', famille:'', sousFamille:'', motsCles:'', francoPort:0, fraisPort:gen});
+  refreshBrandFrancoRules();
+}
+function removeBrandFrancoRule(i){ brandFrancoRulesDraft.splice(i,1); refreshBrandFrancoRules(); }
+function setBrandFrancoRule(i, key, val){
+  const r = brandFrancoRulesDraft[i]; if(!r) return;
+  r[key] = (key==='francoPort'||key==='fraisPort') ? (parseFloat(val)||0) : (val||'').trim();
+}
+
+/* ---- Alerte franco dans le devis ---- */
+function francoNormalize(s){ return (s||'').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+function francoRuleForLine(brand, line){
+  const rules = brand.francoRules||[];
+  if(rules.length===0) return null;
+  const tarif = (line.tarifId && state.tarifs.find(t=>t.id===line.tarifId))
+    || state.tarifs.find(t=>t.brandId===line.brandId && t.reference===line.reference) || null;
+  const fam = tarif ? (tarif.codeFamilleArticle||'') : '';
+  const sous = tarif ? (tarif.codeSousFamilleArticle||'') : '';
+  const text = francoNormalize(stripHtml(line.designation||'')+' '+(line.reference||''));
+  let best = null, bestScore = 0;
+  rules.forEach(r=>{
+    let score = 0;
+    if(r.famille){ if(francoNormalize(r.famille)!==francoNormalize(fam)) return; score++; }
+    if(r.sousFamille){ if(francoNormalize(r.sousFamille)!==francoNormalize(sous)) return; score++; }
+    const mots = (r.motsCles||'').split(/[,;]/).map(m=>francoNormalize(m).trim()).filter(Boolean);
+    if(mots.length){ if(!mots.some(m=>text.includes(m))) return; score++; }
+    if(score>bestScore){ best = r; bestScore = score; }
+  });
+  return best;
+}
 function devisFrancoAlerts(){
-  // Une alerte par marque du devis dont le franco de port n'est pas atteint (hors lignes de frais de port).
+  // Une alerte par marque : pour chaque type d'articles (règle de la marque, ou franco général) dont le
+  // franco n'est pas atteint. Aucune alerte si des frais de port ont déjà été ajoutés pour la marque.
   if(draft.isTemplate) return [];
-  const alerts = [];
+  const result = [];
   const brandIds = [...new Set((draft.lines||[]).filter(l=>!l.isTitleLine && !l.isFraisPort && l.brandId).map(l=>l.brandId))];
   brandIds.forEach(bid=>{
     const b = state.brands.find(x=>x.id===bid);
-    if(!b || !(b.francoPort>0)) return;
-    if((draft.lines||[]).some(l=>l.isFraisPort && l.brandId===bid)) return; // frais de port déjà ajoutés
-    const subtotal = (draft.lines||[]).filter(l=>!l.isTitleLine && !l.isFraisPort && l.brandId===bid)
-      .reduce((s,l)=>s+lineTotalHT(l, draft.destinataire),0);
-    if(subtotal < b.francoPort) alerts.push({brand:b, subtotal, franco:b.francoPort, frais:b.fraisPort||0});
+    if(!b) return;
+    if((draft.lines||[]).some(l=>l.isFraisPort && l.brandId===bid)) return;
+    const groups = {}; // clé = id de règle ou '__general'
+    (draft.lines||[]).filter(l=>!l.isTitleLine && !l.isFraisPort && l.brandId===bid).forEach(l=>{
+      const rule = francoRuleForLine(b, l);
+      const key = rule ? rule.id : '__general';
+      if(!groups[key]) groups[key] = {rule, subtotal:0};
+      groups[key].subtotal += lineTotalHT(l, draft.destinataire);
+    });
+    const below = [];
+    Object.values(groups).forEach(g=>{
+      const franco = g.rule ? g.rule.francoPort : b.francoPort;
+      const frais = g.rule ? (g.rule.fraisPort||b.fraisPort||0) : (b.fraisPort||0);
+      if(franco>0 && g.subtotal < franco) below.push({label: g.rule ? (g.rule.libelle||'Type d\'articles') : (b.francoRules&&b.francoRules.length?'Autres articles':''), subtotal:g.subtotal, franco, frais});
+    });
+    if(below.length) result.push({brand:b, below, frais: Math.max(...below.map(x=>x.frais))});
   });
-  return alerts;
+  return result;
 }
 function devisFrancoAlertHtml(){
   const alerts = devisFrancoAlerts();
@@ -8616,23 +8709,24 @@ function devisFrancoAlertHtml(){
     <div style="margin-top:12px;padding:10px 12px;border:1px solid #D9782D;border-left:4px solid #D9782D;border-radius:8px;background:#FFF6EC;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
       <div style="flex:1;min-width:240px;">
         <strong>🚚 Franco de port non atteint — ${escapeHtml(a.brand.name)}</strong>
-        <div class="helper" style="margin-top:2px;">Total HT ${escapeHtml(a.brand.name)} : ${fmtMoney(a.subtotal)} pour un franco de ${fmtMoney(a.franco)}.
-        ${a.frais>0?`Pensez à ajouter les frais de port : <strong>${fmtMoney(a.frais)}</strong>.`:`Aucun montant de frais de port n'est renseigné sur la fiche de cette marque.`}</div>
+        ${a.below.map(x=>`<div class="helper" style="margin-top:2px;">${x.label?escapeHtml(x.label)+' : ':''}${fmtMoney(x.subtotal)} pour un franco de ${fmtMoney(x.franco)}.</div>`).join('')}
+        <div class="helper" style="margin-top:4px;">${a.frais>0?`Pensez à ajouter les frais de port : <strong>${fmtMoney(a.frais)}</strong>.`:`Aucun montant de frais de port n'est renseigné sur la fiche de cette marque.`}</div>
       </div>
-      ${a.frais>0?`<button type="button" class="btn btn-sm btn-primary" onclick="addFraisPortLine('${a.brand.id}')">+ Ajouter les frais de port</button>`:''}
+      ${a.frais>0?`<button type="button" class="btn btn-sm btn-primary" onclick="addFraisPortLine('${a.brand.id}', ${a.frais})">+ Ajouter les frais de port</button>`:''}
     </div>`).join('');
 }
-function addFraisPortLine(brandId){
+function addFraisPortLine(brandId, montant){
   const b = state.brands.find(x=>x.id===brandId);
   if(!b) return;
+  const frais = montant>0 ? montant : (b.fraisPort||0);
   draft.lines.push({
     id:uid(), tarifId:null, brandId, isFraisPort:true,
     reference:'PORT', designation:'Frais de port',
-    qty:1, prixUnitaire:b.fraisPort||0, remisePct1:0, remisePct2:0, remisePct3:0,
+    qty:1, prixUnitaire:frais, remisePct1:0, remisePct2:0, remisePct3:0,
     prixClient:0, prixNetApplied:false, prixNetTarget:null, netPriceOverride:null,
   });
   refreshDevisModal();
-  showToast(`Frais de port ${b.name} ajoutés (${fmtMoney(b.fraisPort||0)}).`);
+  showToast(`Frais de port ${b.name} ajoutés (${fmtMoney(frais)}).`);
 }
 function devisLinesEditorHtml(){
   return `
