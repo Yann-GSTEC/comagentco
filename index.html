@@ -165,9 +165,10 @@ button{font-family:inherit;}
 .settings-top-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
 @media (max-width:1000px){.settings-top-grid{grid-template-columns:1fr;}}
 .param-subnav{display:flex;flex-direction:column;gap:4px;min-width:190px;flex-shrink:0;}
-.param-subnav button{text-align:left;padding:10px 14px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--ink-soft);font-size:13.5px;cursor:pointer;}
+.param-subnav button{text-align:left;padding:10px 16px;border-radius:20px;border:1px solid transparent;background:transparent;color:var(--ink-soft);font-size:13.5px;cursor:pointer;}
 .param-subnav button:hover{background:var(--surface-2);}
-.param-subnav button.active{background:var(--surface);border-color:var(--line);color:var(--ink);font-weight:700;box-shadow:var(--shadow);}
+.param-subnav button.active{background:#2977D9;border-color:#2977D9;color:#fff;font-weight:700;}
+.param-subnav button.active:hover{background:#2977D9;}
 @media (max-width:800px){.param-subnav{flex-direction:row;flex-wrap:wrap;min-width:0;}}
 
 @media (max-width:1000px){
@@ -309,8 +310,9 @@ html.modal-open,html.modal-open body{overflow:hidden;}
   cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
 }
 .tabs-sub button.active{color:var(--accent);border-bottom-color:var(--accent);}
-.tabs-sub button.brand-form-tab{border-radius:20px;border-bottom:none;margin:6px 2px;padding:7px 16px;}
-.tabs-sub button.brand-form-tab.active{background:#2977D9;color:#fff;}
+.tabs-sub button{border-radius:20px;border-bottom:none;margin:6px 2px;padding:7px 16px;}
+.tabs-sub button.active{background:#2977D9;color:#fff;}
+textarea{resize:none;overflow-y:hidden;}
 
 .pill-select{display:flex;flex-wrap:wrap;gap:6px;}
 .filter-details{position:relative;}
@@ -3680,7 +3682,7 @@ function clientContactsRowsHtml(){
       <td><input type="tel" value="${escapeHtml(p.telephone||'')}" onchange="clientDraftContacts[${i}].telephone=this.value;"></td>
       <td><input type="tel" value="${escapeHtml(p.portable||'')}" onchange="clientDraftContacts[${i}].portable=this.value;"></td>
       <td><input type="email" value="${escapeHtml(p.email||'')}" onchange="clientDraftContacts[${i}].email=this.value;"></td>
-      <td><input type="text" value="${escapeHtml(p.commentaire||'')}" onchange="clientDraftContacts[${i}].commentaire=this.value;"></td>
+      <td><textarea rows="1" onchange="clientDraftContacts[${i}].commentaire=this.value;">${escapeHtml(p.commentaire||'')}</textarea></td>
       <td style="text-align:center;"><input type="checkbox" style="width:auto;" ${inactive?'checked':''} onchange="clientDraftContacts[${i}].actif=!this.checked; refreshClientContactsTable();" title="Ce contact n'est plus utilisé"></td>
       <td><button type="button" class="btn btn-sm btn-ghost" onclick="openMoveContactModal(${i})" title="Déplacer ou dupliquer ce contact vers une autre société">⇄</button></td>
       <td><button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="clientDraftContacts.splice(${i},1); refreshClientContactsTable();">✕</button></td>
@@ -5358,12 +5360,24 @@ function enhanceResizableTables(){
     if(saved && saved.length===head.cells.length) setTableColWidths(table, saved);
   });
 }
+/* ---- Zones de commentaire : la hauteur s'ajuste au texte saisi (tout le texte reste visible) ---- */
+function autoGrowTextarea(t){
+  t.style.height = 'auto';
+  t.style.height = (t.scrollHeight + (t.offsetHeight - t.clientHeight)) + 'px';
+}
+function autoGrowAllTextareas(){
+  const visible = Array.from(document.querySelectorAll('textarea')).filter(t=>t.getClientRects().length>0);
+  // lecture groupée d'abord (un seul calcul de mise en page), écriture ensuite
+  const toGrow = visible.filter(t=>!t.dataset.ag || t.scrollHeight > t.clientHeight+1);
+  toGrow.forEach(t=>{ t.dataset.ag = '1'; autoGrowTextarea(t); });
+}
+document.addEventListener('input', e=>{ if(e.target && e.target.tagName==='TEXTAREA') autoGrowTextarea(e.target); });
 let rzScheduled = false;
 new MutationObserver(()=>{
   if(rzScheduled) return;
   rzScheduled = true;
-  requestAnimationFrame(()=>{ rzScheduled = false; enhanceResizableTables(); });
-}).observe(document.body, {childList:true, subtree:true});
+  requestAnimationFrame(()=>{ rzScheduled = false; enhanceResizableTables(); autoGrowAllTextareas(); });
+}).observe(document.body, {childList:true, subtree:true, attributes:true, attributeFilter:['style','class']});
 
 /* ---- Réordonnancement (glisser-déposer un en-tête entier) ---- */
 let colDragKey = null;
@@ -7754,7 +7768,7 @@ function renderCommissionsTableInner(){
         {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
         {key:'ca', label:`CA (${MOIS_LABELS[month-1]} ${year})`, defaultWidth:150, cell:r=>`<input type="number" step="0.01" min="0" value="${r.entry.ca||''}" placeholder="0" style="max-width:140px;" onchange="setCommissionEntry('${r.b.id}',${year},${month},'ca',this.value); render();">`},
         {key:'commission', label:'Montant commission', defaultWidth:170, cell:r=>`<input type="number" step="0.01" min="0" value="${r.entry.commission||''}" placeholder="0" style="max-width:140px;font-weight:700;color:var(--success);" onchange="setCommissionEntry('${r.b.id}',${year},${month},'commission',this.value); render();">`},
-        {key:'commentaire', label:'Commentaire', defaultWidth:260, cell:r=>`<input type="text" value="${escapeHtml(r.entry.commentaire||'')}" placeholder="—" onchange="setCommissionComment('${r.b.id}',${year},${month},this.value);">`},
+        {key:'commentaire', label:'Commentaire', defaultWidth:260, cell:r=>`<textarea rows="1" placeholder="—" onchange="setCommissionComment('${r.b.id}',${year},${month},this.value);">${escapeHtml(r.entry.commentaire||'')}</textarea>`},
       ], rows);
   }
 
@@ -7825,7 +7839,7 @@ function renderCommissionMonthlyDetail(b, year){
               <td>${label}</td>
               <td><input type="number" step="0.01" min="0" value="${e.ca||''}" placeholder="0" style="max-width:130px;" onchange="setCommissionEntry('${b.id}',${year},${m},'ca',this.value); render();"></td>
               <td><input type="number" step="0.01" min="0" value="${e.commission||''}" placeholder="0" style="max-width:130px;font-weight:700;color:var(--success);" onchange="setCommissionEntry('${b.id}',${year},${m},'commission',this.value); render();"></td>
-              <td><input type="text" value="${escapeHtml(e.commentaire||'')}" placeholder="—" onchange="setCommissionComment('${b.id}',${year},${m},this.value);"></td>
+              <td><textarea rows="1" placeholder="—" onchange="setCommissionComment('${b.id}',${year},${m},this.value);">${escapeHtml(e.commentaire||'')}</textarea></td>
             </tr>`;
           }).join('')}
         </tbody>
