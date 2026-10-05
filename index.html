@@ -284,7 +284,10 @@ label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-
 .modal.modal-full .modal-body{flex:1 1 auto;overflow-y:auto;}
 /* Plein écran fixe : occupe toute la zone à droite de la barre latérale (qui reste visible), non déplaçable */
 .modal-overlay.modal-overlay-screen{left:220px;}
-.modal.modal-screen{left:220px !important;top:0 !important;width:calc(100vw - 220px) !important;max-width:calc(100vw - 220px) !important;height:100vh !important;max-height:100vh !important;border-radius:0;box-shadow:none;}
+.modal.modal-screen{left:220px !important;right:0 !important;top:0 !important;bottom:0 !important;width:auto !important;max-width:none !important;height:auto !important;max-height:none !important;border-radius:0;box-shadow:none;}
+/* left/right au lieu de 100vw : 100vw inclut la barre de défilement de la page, ce qui cachait celle de la fenêtre */
+.modal,.modal-body,.autocomplete-list,.filter-details-panel{overscroll-behavior:contain;}
+html.modal-open,html.modal-open body{overflow:hidden;}
 .modal.modal-screen .modal-head{cursor:default;}
 .modal-head{
   display:flex;justify-content:space-between;align-items:center;
@@ -306,6 +309,8 @@ label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-
   cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
 }
 .tabs-sub button.active{color:var(--accent);border-bottom-color:var(--accent);}
+.tabs-sub button.brand-form-tab{border-radius:20px;border-bottom:none;margin:6px 2px;padding:7px 16px;}
+.tabs-sub button.brand-form-tab.active{background:#2977D9;color:#fff;}
 
 .pill-select{display:flex;flex-wrap:wrap;gap:6px;}
 .filter-details{position:relative;}
@@ -2049,6 +2054,7 @@ function openModal(html, opts){
   const overlay = document.createElement('div');
   overlay.className='modal-overlay';
   overlay.id='modalOverlay';
+  document.documentElement.classList.add('modal-open'); // fige le défilement de la page en arrière-plan
   // Toutes les fenêtres s'ouvrent en plein écran, fixes (non déplaçables).
   overlay.innerHTML = `<div class="modal modal-full modal-screen" id="modalBox">${html}</div>`;
   overlay.classList.add('modal-overlay-screen');
@@ -2108,6 +2114,7 @@ function escCloseHandler(e){ if(e.key==='Escape') closeModal(); }
 function closeModal(){
   const el = document.getElementById('modalOverlay');
   if(el) el.remove();
+  document.documentElement.classList.remove('modal-open');
   document.removeEventListener('keydown', escCloseHandler);
   document.removeEventListener('keydown', devisFormKeydownHandler);
   window.removeEventListener('resize', positionModalCentered);
@@ -2176,6 +2183,8 @@ function openBrandForm(id){
     <div class="tabs-sub" style="padding:0 22px;margin:0;">
       <button type="button" class="brand-form-tab active" data-tab="identification" onclick="switchBrandFormTab('identification')">Identification</button>
       <button type="button" class="brand-form-tab" data-tab="devis" onclick="switchBrandFormTab('devis')">Informations du devis</button>
+      <button type="button" class="brand-form-tab" data-tab="fraisport" onclick="switchBrandFormTab('fraisport')">Frais de port</button>
+      <button type="button" class="brand-form-tab" data-tab="departements" onclick="switchBrandFormTab('departements')">Départements représentés</button>
       <button type="button" class="brand-form-tab" data-tab="signature" onclick="switchBrandFormTab('signature')">Signature de mail</button>
     </div>
     <div class="modal-body">
@@ -2186,13 +2195,6 @@ function openBrandForm(id){
           <div class="field"><label>Nom de la marque *</label><input type="text" id="f_name" value="${b?escapeHtml(b.name):''}" placeholder="Ex. Nordik Design"></div>
           <div class="field" style="max-width:140px;"><label>Commission (%)</label><input type="number" id="f_tauxCommission" min="0" max="100" step="0.01" value="${b&&b.tauxCommission!==undefined?b.tauxCommission:''}" placeholder="Ex. 5"></div>
         </div>
-        <div class="field-row">
-          <div class="field" style="max-width:220px;"><label>Franco de port (€ HT)</label><input type="number" id="f_francoPort" min="0" step="0.01" value="${b&&b.francoPort?b.francoPort:''}" placeholder="Ex. 500"></div>
-          <div class="field" style="max-width:220px;"><label>Frais de port (€ HT)</label><input type="number" id="f_fraisPort" min="0" step="0.01" value="${b&&b.fraisPort?b.fraisPort:''}" placeholder="Ex. 25"></div>
-          <div class="field"><div class="helper" style="margin-top:22px;">Franco « général » : s'applique aux articles qui ne correspondent à aucune règle ci-dessous. Si le total HT d'un devis est inférieur au franco, une alerte propose d'ajouter les frais de port.</div></div>
-        </div>
-        <div class="section-title" style="margin-top:6px;">Franco par type d'articles <span class="helper" style="display:inline;">(facultatif — ex. prises 350 €, coffrets 850 €)</span></div>
-        <div id="brandFrancoRulesBox">${renderBrandFrancoRules()}</div>
         <div class="field-row">
           <div class="field" style="max-width:140px;"><label>Civilité</label>
             <select id="f_civilite">${civOpts.map(c=>`<option value="${c}" ${b&&b.civilite===c?'selected':''}>${c||'—'}</option>`).join('')}</select>
@@ -2216,16 +2218,6 @@ function openBrandForm(id){
         </div>
         <div class="field"><label>Email copie devis <span class="helper" style="display:inline;">(reçoit une copie des devis envoyés pour cette marque)</span></label><input type="email" id="f_emailCopie" value="${b?escapeHtml(b.emailCopieDevis||''):''}"></div>
         <div class="field"><label>Email export devis</label><input type="email" id="f_emailExport" value="${b?escapeHtml(b.emailExportDevis||''):''}"></div>
-        <div class="section-title" style="margin-top:14px;">Départements représentés <span class="helper" style="display:inline;">— laissez tout décoché si vous représentez cette marque partout</span></div>
-        <div class="helper" style="margin-bottom:8px;">Cochez uniquement les départements où vous représentez effectivement cette marque. Utilisé pour affiner le ciblage dans l'Emailing.</div>
-        <div style="max-height:160px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 10px;">
-          ${['03','18','28','36','37','41','45','86'].map(code=>`
-            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;">
-              <input type="checkbox" class="f_brandDept" value="${code}" style="width:auto;" ${b&&(b.departementsRepresentes||[]).includes(code)?'checked':''}>
-              ${escapeHtml(code)} — ${escapeHtml(FR_DEPARTEMENTS[code])}
-            </label>
-          `).join('')}
-        </div>
         <div class="field"><label>Commentaire <span class="helper" style="display:inline;">(note interne sur cette marque / ce fournisseur)</span></label><textarea id="f_commentaireId" rows="3" placeholder="Ex. conditions d'achat, contact privilégié, remarques internes…">${b?escapeHtml(b.commentaireIdentification||''):''}</textarea></div>
       </div>
 
@@ -2241,6 +2233,29 @@ function openBrandForm(id){
         <div class="field" style="margin-top:16px;">
           <label>Commentaire à intégrer dans les devis <span class="helper" style="display:inline;">(imprimé sur les devis de cette marque, sous les lignes)</span></label>
           <textarea id="f_commentaire" rows="4" placeholder="Ex. conditions de garantie, délais de livraison, mentions spécifiques à la marque…">${b?escapeHtml(b.commentaire||''):''}</textarea>
+        </div>
+      </div>
+
+      <div class="brand-form-panel" data-panel="fraisport" style="display:none;">
+        <div class="field-row">
+          <div class="field" style="max-width:220px;"><label>Franco de port (€ HT)</label><input type="number" id="f_francoPort" min="0" step="0.01" value="${b&&b.francoPort?b.francoPort:''}" placeholder="Ex. 500"></div>
+          <div class="field" style="max-width:220px;"><label>Frais de port (€ HT)</label><input type="number" id="f_fraisPort" min="0" step="0.01" value="${b&&b.fraisPort?b.fraisPort:''}" placeholder="Ex. 25"></div>
+          <div class="field"><div class="helper" style="margin-top:22px;">Franco « général » : s'applique aux articles qui ne correspondent à aucune règle ci-dessous. Si le total HT d'un devis est inférieur au franco, une alerte propose d'ajouter les frais de port.</div></div>
+        </div>
+        <div class="section-title" style="margin-top:14px;">Franco par type d'articles <span class="helper" style="display:inline;">(facultatif — ex. prises 350 €, coffrets 850 €)</span></div>
+        <div id="brandFrancoRulesBox">${renderBrandFrancoRules()}</div>
+      </div>
+
+      <div class="brand-form-panel" data-panel="departements" style="display:none;">
+        <div class="helper" style="margin-bottom:10px;">Laissez tout décoché si vous représentez cette marque partout.</div>
+        <div class="helper" style="margin-bottom:8px;">Cochez uniquement les départements où vous représentez effectivement cette marque. Utilisé pour affiner le ciblage dans l'Emailing.</div>
+        <div style="max-height:160px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 10px;">
+          ${['03','18','28','36','37','41','45','86'].map(code=>`
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;">
+              <input type="checkbox" class="f_brandDept" value="${code}" style="width:auto;" ${b&&(b.departementsRepresentes||[]).includes(code)?'checked':''}>
+              ${escapeHtml(code)} — ${escapeHtml(FR_DEPARTEMENTS[code])}
+            </label>
+          `).join('')}
         </div>
       </div>
 
