@@ -217,6 +217,11 @@ tbody tr:hover{background:var(--surface-2);}
 .col-resize-handle:hover{background:var(--accent);opacity:.4;}
 .col-custom-table td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .col-custom-table td.wrap-cell{white-space:normal;}
+.rz-table th{position:relative;}
+.rz-table th .col-resize-handle::after{content:'';position:absolute;right:3px;top:25%;bottom:25%;width:1px;background:var(--line);}
+.rz-table th .col-resize-handle:hover::after{background:transparent;}
+.rz-table.rz-fixed td,.rz-table.rz-fixed th{overflow:hidden;text-overflow:ellipsis;}
+body.rz-resizing{cursor:col-resize !important;user-select:none !important;}
 .rapport-canvas{position:relative;min-height:200px;}
 .rapport-widget{position:absolute;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;}
 .rapport-widget-drag{cursor:move;padding:5px 10px;font-size:11px;font-weight:600;color:var(--muted);background:var(--surface-2);border-bottom:1px solid var(--line);user-select:none;flex-shrink:0;letter-spacing:.04em;}
@@ -277,6 +282,10 @@ label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-
 .modal.modal-lg{max-width:1100px;}
 .modal.modal-full{max-width:calc(100vw - 240px);width:calc(100vw - 240px);max-height:97vh;height:97vh;display:flex;flex-direction:column;border-radius:10px;}
 .modal.modal-full .modal-body{flex:1 1 auto;overflow-y:auto;}
+/* Plein écran fixe (devis) : couvre toute la fenêtre, non déplaçable */
+.modal-overlay.modal-overlay-screen{left:0;}
+.modal.modal-screen{left:0 !important;top:0 !important;width:100vw !important;max-width:100vw !important;height:100vh !important;max-height:100vh !important;border-radius:0;box-shadow:none;}
+.modal.modal-screen .modal-head{cursor:default;}
 .modal-head{
   display:flex;justify-content:space-between;align-items:center;
   padding:18px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface);z-index:2;
@@ -2031,7 +2040,9 @@ function openModal(html, opts){
   const overlay = document.createElement('div');
   overlay.className='modal-overlay';
   overlay.id='modalOverlay';
-  overlay.innerHTML = `<div class="modal modal-full" id="modalBox">${html}</div>`;
+  // Toutes les fenêtres s'ouvrent en plein écran, fixes (non déplaçables).
+  overlay.innerHTML = `<div class="modal modal-full modal-screen" id="modalBox">${html}</div>`;
+  overlay.classList.add('modal-overlay-screen');
   overlay.addEventListener('mousedown', (e)=>{ if(e.target===overlay) closeModal(); });
   document.body.appendChild(overlay);
   document.addEventListener('keydown', escCloseHandler);
@@ -2059,7 +2070,7 @@ function makeModalDraggable(){
     const head = e.target.closest('.modal-head');
     if(!head || e.target.closest('.close-x')) return;
     box = head.closest('.modal');
-    if(!box) return;
+    if(!box || box.classList.contains('modal-screen')) { box = null; return; }
     dragging = true;
     const rect = box.getBoundingClientRect();
     offX = e.clientX - rect.left;
@@ -5231,6 +5242,105 @@ function onColResizeEnd(){
   colResizeState = null;
 }
 
+
+/* ============ COLONNES REDIMENSIONNABLES DANS TOUS LES TABLEAUX ============
+   Chaque tableau avec un en-tête reçoit des curseurs entre ses colonnes : glisser pour ajuster la
+   largeur (mémorisée), double-clic sur un curseur pour revenir aux largeurs automatiques.
+   Les tableaux ayant déjà leur propre système (col-custom-table) ne sont pas touchés. */
+function tableResizeLabel(th){
+  return (th.textContent||'').replace(/[▲▼↑↓⇅▾]/g,'').replace(/\d+/g,'#').trim();
+}
+function tableResizeId(table){
+  const head = table.tHead && table.tHead.rows[0];
+  const labels = head ? Array.from(head.cells).map(tableResizeLabel).join('¦') : '';
+  let scope = ui.tab || '';
+  const modal = table.closest('#modalOverlay');
+  if(modal){ const h = modal.querySelector('.modal-head h3'); scope = 'modal:'+(h?h.textContent.trim().replace(/\d+/g,'#').slice(0,40):''); }
+  return scope+'|'+labels;
+}
+function setTableColWidths(table, widths){
+  const head = table.tHead.rows[0];
+  const total = widths.reduce((s,w)=>s+(w||0),0);
+  table.classList.add('rz-fixed');
+  table.style.tableLayout = 'fixed';
+  table.style.width = total+'px';
+  Array.from(head.cells).forEach((th,i)=>{ if(widths[i]) th.style.width = widths[i]+'px'; });
+  const p = table.parentElement;
+  if(p && getComputedStyle(p).overflowX==='visible') p.style.overflowX = 'auto';
+}
+function resetTableColWidths(table){
+  const id = tableResizeId(table);
+  if(state.settings.tableColWidths && state.settings.tableColWidths[id]){
+    delete state.settings.tableColWidths[id];
+    persist('settings');
+  }
+  table.classList.remove('rz-fixed');
+  table.style.tableLayout = ''; table.style.width = '';
+  Array.from(table.tHead.rows[0].cells).forEach(th=>{ th.style.width=''; });
+}
+let tableResizeState = null;
+function startTableColResize(evt, table, th){
+  evt.preventDefault(); evt.stopPropagation();
+  const cells = Array.from(table.tHead.rows[0].cells);
+  const widths = cells.map(c=>c.getBoundingClientRect().width);
+  setTableColWidths(table, widths); // fige les largeurs actuelles pour éviter tout saut
+  tableResizeState = { table, idx: cells.indexOf(th), startX: evt.clientX, widths };
+  document.body.classList.add('rz-resizing');
+  document.addEventListener('mousemove', onTableColResizeMove);
+  document.addEventListener('mouseup', onTableColResizeEnd);
+}
+function onTableColResizeMove(evt){
+  const s = tableResizeState; if(!s) return;
+  const w = s.widths.slice();
+  w[s.idx] = Math.max(40, s.widths[s.idx] + (evt.clientX - s.startX));
+  s.current = w;
+  setTableColWidths(s.table, w);
+}
+function onTableColResizeEnd(){
+  const s = tableResizeState; if(!s) return;
+  document.removeEventListener('mousemove', onTableColResizeMove);
+  document.removeEventListener('mouseup', onTableColResizeEnd);
+  document.body.classList.remove('rz-resizing');
+  if(s.current){
+    state.settings.tableColWidths = state.settings.tableColWidths || {};
+    state.settings.tableColWidths[tableResizeId(s.table)] = s.current;
+    persist('settings');
+  }
+  // Évite qu'un clic de fin de glissement déclenche le tri de l'en-tête survolé
+  const stopper = (e)=>{ e.stopPropagation(); e.preventDefault(); };
+  document.addEventListener('click', stopper, true);
+  setTimeout(()=>document.removeEventListener('click', stopper, true), 0);
+  tableResizeState = null;
+}
+function enhanceResizableTables(){
+  document.querySelectorAll('table').forEach(table=>{
+    if(table.dataset.rz) return;
+    if(table.classList.contains('col-custom-table') || table.classList.contains('no-col-resize')) return;
+    const head = table.tHead && table.tHead.rows[0];
+    if(!head || head.cells.length<2) return;
+    table.dataset.rz = '1';
+    table.classList.add('rz-table');
+    Array.from(head.cells).forEach(th=>{
+      if(th.colSpan>1) return;
+      const h = document.createElement('span');
+      h.className = 'col-resize-handle';
+      h.title = 'Glisser pour ajuster la largeur — double-clic : largeur automatique';
+      h.addEventListener('mousedown', e=>startTableColResize(e, table, th));
+      h.addEventListener('click', e=>e.stopPropagation());
+      h.addEventListener('dblclick', e=>{ e.stopPropagation(); resetTableColWidths(table); });
+      th.appendChild(h);
+    });
+    const saved = state.settings.tableColWidths && state.settings.tableColWidths[tableResizeId(table)];
+    if(saved && saved.length===head.cells.length) setTableColWidths(table, saved);
+  });
+}
+let rzScheduled = false;
+new MutationObserver(()=>{
+  if(rzScheduled) return;
+  rzScheduled = true;
+  requestAnimationFrame(()=>{ rzScheduled = false; enhanceResizableTables(); });
+}).observe(document.body, {childList:true, subtree:true});
+
 /* ---- Réordonnancement (glisser-déposer un en-tête entier) ---- */
 let colDragKey = null;
 function colDragStart(evt){
@@ -8021,7 +8131,7 @@ function openImportedDevisReview(parsed, filename){
   };
   const brandIds = [...new Set((draft.lines||[]).map(l=>l.brandId))].filter(Boolean);
   draft.filterBrandId = brandIds.length===1 ? brandIds[0] : '';
-  openModal(devisFormHtml(), {full:true});
+  openModal(devisFormHtml(), {full:true, screen:true});
   document.addEventListener('keydown', devisFormKeydownHandler);
   draftSavedSnapshot = JSON.stringify(draft);
   if(parsed.warnings.length){
@@ -8222,7 +8332,7 @@ function openDevisTemplateForm(id){
     const brandIds = [...new Set((draft.lines||[]).map(l=>l.brandId))].filter(Boolean);
     draft.filterBrandId = brandIds.length===1 ? brandIds[0] : '';
   }
-  openModal(devisFormHtml(), {full:true});
+  openModal(devisFormHtml(), {full:true, screen:true});
   document.addEventListener('keydown', devisFormKeydownHandler);
   draftSavedSnapshot = JSON.stringify(draft);
 }
@@ -8263,7 +8373,7 @@ function duplicateTemplateToDevis(id){
   };
   const brandIds = [...new Set((draft.lines||[]).map(l=>l.brandId))].filter(Boolean);
   draft.filterBrandId = brandIds.length===1 ? brandIds[0] : '';
-  openModal(devisFormHtml(), {full:true});
+  openModal(devisFormHtml(), {full:true, screen:true});
   document.addEventListener('keydown', devisFormKeydownHandler);
   draftSavedSnapshot = JSON.stringify(draft);
   showToast('Devis créé à partir du modèle — sélectionnez un client pour continuer.');
@@ -8331,7 +8441,7 @@ function openDevisForm(id, presetClientId){
     const brandIds = [...new Set((draft.lines||[]).map(l=>l.brandId))].filter(Boolean);
     draft.filterBrandId = brandIds.length===1 ? brandIds[0] : '';
   }
-  openModal(devisFormHtml(), {full:true});
+  openModal(devisFormHtml(), {full:true, screen:true});
   document.addEventListener('keydown', devisFormKeydownHandler);
   draftSavedSnapshot = JSON.stringify(draft);
 }
