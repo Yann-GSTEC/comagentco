@@ -5424,6 +5424,8 @@ function renderListesPrixNetsDetail(){
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn btn-sm btn-brass" onclick="openPnClientAssign('${ui.pnListeFilter}')">Associer à des clients</button>
       <button class="btn btn-sm btn-ghost" onclick="renamePrixNetListe('${ui.pnListeFilter}')">Renommer cette liste</button>
+      <button class="btn btn-sm btn-ghost" onclick="duplicatePrixNetListe('${ui.pnListeFilter}')" title="Crée une copie de cette liste (références et dates de validité), sans les clients associés">⧉ Dupliquer cette liste</button>
+      <button class="btn btn-sm btn-ghost" onclick="copyPrixNetListeToTemplate('${ui.pnListeFilter}')" title="Crée un modèle de devis reprenant toutes les références de cette liste, avec leurs prix nets">📐 Copier en modèle de devis</button>
       <button class="btn btn-sm btn-ghost" onclick="openListeDatesModal('${ui.pnListeFilter}')">📅 Dates de validité</button>
       <button class="btn btn-sm btn-ghost btn-danger" onclick="clearListePrixNets('${ui.pnListeFilter}')">Vider les références</button>
     </div>
@@ -5446,6 +5448,53 @@ function createPrixNetListe(brandId){
   ui.pnView='detail'; ui.pnBrandFilter=brandId; ui.pnListeFilter=liste.id; ui.pnSearch='';
   render();
   showToast('Liste créée.');
+}
+function duplicatePrixNetListe(listeId){
+  const l = state.prixNetListes.find(x=>x.id===listeId);
+  if(!l) return;
+  const items = state.listesPrixNets.filter(t=>t.listeId===listeId);
+  const nom = prompt(`Nom de la copie de la liste "${l.nom}" (${items.length} référence(s)) :`, `${l.nom} (copie)`);
+  if(!nom || !nom.trim()) return;
+  const copy = {...JSON.parse(JSON.stringify(l)), id:uid(), nom:nom.trim(), isDefault:false};
+  state.prixNetListes.push(copy);
+  items.forEach(t=>{
+    state.listesPrixNets.push({...JSON.parse(JSON.stringify(t)), id:uid(), listeId:copy.id});
+  });
+  persist('prixNetListes'); persist('listesPrixNets');
+  ui.pnView='detail'; ui.pnBrandFilter=copy.brandId; ui.pnListeFilter=copy.id; ui.pnSearch='';
+  render();
+  showToast(`Liste dupliquée : ${items.length} référence(s) copiée(s). Les clients associés ne sont pas repris.`, 4500);
+}
+function copyPrixNetListeToTemplate(listeId){
+  const l = state.prixNetListes.find(x=>x.id===listeId);
+  if(!l) return;
+  const items = state.listesPrixNets.filter(t=>t.listeId===listeId);
+  if(items.length===0){ showToast('Cette liste est vide : rien à copier.'); return; }
+  const nom = prompt(`Nom du modèle de devis créé à partir de la liste "${l.nom}" :`, l.nom);
+  if(nom===null) return;
+  const lines = items.map(t=>{
+    const tarif = state.tarifs.find(x=>x.brandId===t.brandId && x.reference===t.reference);
+    const netPrice = t.prixNet||0;
+    const puTarif = tarif ? (tarif.prixCatalogue||tarif.prixHT||0) : 0;
+    let remise1 = 0;
+    if(puTarif>0){ remise1 = +((1-(netPrice/puTarif))*100).toFixed(2); if(remise1<0) remise1 = 0; }
+    return {
+      id:uid(), tarifId: tarif?tarif.id:null, brandId:t.brandId,
+      reference:t.reference, designation:t.designation||(tarif?tarif.designation:''),
+      qty:1, complementInfo: tarif?(tarif.complementInfo||''):'',
+      ficheTechniqueUrl: tarif?(tarif.ficheTechniqueUrl||''):'', noticeUrl: tarif?(tarif.noticeUrl||''):'', photoUrl: tarif?(tarif.photoUrl||''):'',
+      prixUnitaire: puTarif>0 ? puTarif : netPrice,
+      remisePct1: puTarif>0 ? remise1 : 0, remisePct2:0, remisePct3:0,
+      prixClient:0, prixNetApplied:true, prixNetTarget:'distri', netPriceOverride:netPrice,
+    };
+  });
+  state.devisTemplates = state.devisTemplates || [];
+  state.devisTemplates.push({
+    id:uid(), templateName:(nom.trim()||l.nom), isTemplate:true, notes:'', lines,
+    pdfColumns:{...DEFAULT_PDF_COLUMNS}, createdAt:new Date().toISOString(),
+  });
+  persist('devisTemplates');
+  showToast(`Modèle « ${nom.trim()||l.nom} » créé (${lines.length} ligne(s)) — visible dans Devis → Modèles de devis.`, 5000);
 }
 function renamePrixNetListe(listeId){
   const l = state.prixNetListes.find(x=>x.id===listeId);
