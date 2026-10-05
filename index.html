@@ -5468,7 +5468,8 @@ function duplicatePrixNetListe(listeId){
 function copyPrixNetListeToTemplate(listeId){
   const l = state.prixNetListes.find(x=>x.id===listeId);
   if(!l) return;
-  const items = state.listesPrixNets.filter(t=>t.listeId===listeId);
+  // Même ordre que celui affiché dans la liste (tri par référence), et non l'ordre brut de stockage.
+  const items = state.listesPrixNets.filter(t=>t.listeId===listeId).sort(fastRefCompare);
   if(items.length===0){ showToast('Cette liste est vide : rien à copier.'); return; }
   const nom = prompt(`Nom du modèle de devis créé à partir de la liste "${l.nom}" :`, l.nom);
   if(nom===null) return;
@@ -8237,7 +8238,7 @@ function duplicateTemplateToDevis(id){
     attentionA: '',
     tvaPct: 0,
     notes: tpl.notes||'',
-    lines: JSON.parse(JSON.stringify(tpl.lines||[])).map(l=>({...l, id:uid()})),
+    lines: cloneLinesWithNewIds(tpl.lines),
     pdfColumns: {...DEFAULT_PDF_COLUMNS},
     isNew: true,
     createdAt: new Date().toISOString()
@@ -8418,6 +8419,18 @@ function duplicateDraftDevis(){
   refreshDevisModal();
   showToast(`Dupliqué en nouveau ${((clone.type||'Devis').toLowerCase())} (n° ${clone.number}) — pensez à Enregistrer.`, 4000);
 }
+function cloneLinesWithNewIds(lines){
+  // Copie les lignes dans le même ordre, avec de nouveaux identifiants, en reportant les liens
+  // ligne principale <-> éco-participation sur ces nouveaux identifiants.
+  const copies = JSON.parse(JSON.stringify(lines||[]));
+  const idMap = {};
+  copies.forEach(l=>{ const nid = uid(); idMap[l.id] = nid; l.id = nid; });
+  copies.forEach(l=>{
+    if(l.linkedToLineId) l.linkedToLineId = idMap[l.linkedToLineId] || null;
+    if(l.ecoPartLineId) l.ecoPartLineId = idMap[l.ecoPartLineId] || null;
+  });
+  return copies;
+}
 function duplicateDevisToTemplate(){
   if(draft.lines.length===0){ showToast('Ajoutez au moins une ligne avant de créer un modèle.'); return; }
   const suggestedName = draft.objet || draft.number || 'Nouveau modèle';
@@ -8428,7 +8441,7 @@ function duplicateDevisToTemplate(){
     templateName: (name.trim()||suggestedName),
     isTemplate: true,
     notes: draft.notes||'',
-    lines: JSON.parse(JSON.stringify(draft.lines)).map(l=>({...l, id:uid()})),
+    lines: cloneLinesWithNewIds(draft.lines),
     pdfColumns: {...(draft.pdfColumns||DEFAULT_PDF_COLUMNS)},
     createdAt: new Date().toISOString()
   };
