@@ -2165,6 +2165,11 @@ function openBrandForm(id){
           <div class="field" style="max-width:140px;"><label>Commission (%)</label><input type="number" id="f_tauxCommission" min="0" max="100" step="0.01" value="${b&&b.tauxCommission!==undefined?b.tauxCommission:''}" placeholder="Ex. 5"></div>
         </div>
         <div class="field-row">
+          <div class="field" style="max-width:220px;"><label>Franco de port (€ HT)</label><input type="number" id="f_francoPort" min="0" step="0.01" value="${b&&b.francoPort?b.francoPort:''}" placeholder="Ex. 500"></div>
+          <div class="field" style="max-width:220px;"><label>Frais de port (€ HT)</label><input type="number" id="f_fraisPort" min="0" step="0.01" value="${b&&b.fraisPort?b.fraisPort:''}" placeholder="Ex. 25"></div>
+          <div class="field"><div class="helper" style="margin-top:22px;">Si le total HT d'un devis pour cette marque est inférieur au franco, une alerte propose d'ajouter les frais de port.</div></div>
+        </div>
+        <div class="field-row">
           <div class="field" style="max-width:140px;"><label>Civilité</label>
             <select id="f_civilite">${civOpts.map(c=>`<option value="${c}" ${b&&b.civilite===c?'selected':''}>${c||'—'}</option>`).join('')}</select>
           </div>
@@ -2314,6 +2319,8 @@ function saveBrand(id){
     code: document.getElementById('f_code').value.trim(),
     name,
     tauxCommission: parseFloat(document.getElementById('f_tauxCommission').value)||0,
+    francoPort: parseFloat(document.getElementById('f_francoPort').value)||0,
+    fraisPort: parseFloat(document.getElementById('f_fraisPort').value)||0,
     civilite: document.getElementById('f_civilite').value,
     prenom: document.getElementById('f_prenom').value.trim(),
     adresse1: document.getElementById('f_adresse1').value.trim(),
@@ -8587,6 +8594,46 @@ function devisFormHtml(){
     </div>
   `;
 }
+function devisFrancoAlerts(){
+  // Une alerte par marque du devis dont le franco de port n'est pas atteint (hors lignes de frais de port).
+  if(draft.isTemplate) return [];
+  const alerts = [];
+  const brandIds = [...new Set((draft.lines||[]).filter(l=>!l.isTitleLine && !l.isFraisPort && l.brandId).map(l=>l.brandId))];
+  brandIds.forEach(bid=>{
+    const b = state.brands.find(x=>x.id===bid);
+    if(!b || !(b.francoPort>0)) return;
+    if((draft.lines||[]).some(l=>l.isFraisPort && l.brandId===bid)) return; // frais de port déjà ajoutés
+    const subtotal = (draft.lines||[]).filter(l=>!l.isTitleLine && !l.isFraisPort && l.brandId===bid)
+      .reduce((s,l)=>s+lineTotalHT(l, draft.destinataire),0);
+    if(subtotal < b.francoPort) alerts.push({brand:b, subtotal, franco:b.francoPort, frais:b.fraisPort||0});
+  });
+  return alerts;
+}
+function devisFrancoAlertHtml(){
+  const alerts = devisFrancoAlerts();
+  if(alerts.length===0) return '';
+  return alerts.map(a=>`
+    <div style="margin-top:12px;padding:10px 12px;border:1px solid #D9782D;border-left:4px solid #D9782D;border-radius:8px;background:#FFF6EC;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+      <div style="flex:1;min-width:240px;">
+        <strong>🚚 Franco de port non atteint — ${escapeHtml(a.brand.name)}</strong>
+        <div class="helper" style="margin-top:2px;">Total HT ${escapeHtml(a.brand.name)} : ${fmtMoney(a.subtotal)} pour un franco de ${fmtMoney(a.franco)}.
+        ${a.frais>0?`Pensez à ajouter les frais de port : <strong>${fmtMoney(a.frais)}</strong>.`:`Aucun montant de frais de port n'est renseigné sur la fiche de cette marque.`}</div>
+      </div>
+      ${a.frais>0?`<button type="button" class="btn btn-sm btn-primary" onclick="addFraisPortLine('${a.brand.id}')">+ Ajouter les frais de port</button>`:''}
+    </div>`).join('');
+}
+function addFraisPortLine(brandId){
+  const b = state.brands.find(x=>x.id===brandId);
+  if(!b) return;
+  draft.lines.push({
+    id:uid(), tarifId:null, brandId, isFraisPort:true,
+    reference:'PORT', designation:'Frais de port',
+    qty:1, prixUnitaire:b.fraisPort||0, remisePct1:0, remisePct2:0, remisePct3:0,
+    prixClient:0, prixNetApplied:false, prixNetTarget:null, netPriceOverride:null,
+  });
+  refreshDevisModal();
+  showToast(`Frais de port ${b.name} ajoutés (${fmtMoney(b.fraisPort||0)}).`);
+}
 function devisLinesEditorHtml(){
   return `
       <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
@@ -8633,6 +8680,7 @@ function devisLinesEditorHtml(){
         </table>
       </div>
       <button type="button" class="btn btn-sm btn-ghost" style="margin-top:6px;" onclick="resetColumnPrefs('devisLines')">↺ Réinitialiser la largeur des colonnes</button>
+      ${devisFrancoAlertHtml()}
       ${draft.lines.length===0?'<div class="helper" style="padding:10px 0;">Utilisez la recherche ci-dessus pour ajouter des références depuis vos tarifs.</div>':''}
 
       <div class="section-title">Remises et marge uniformes <span class="helper" style="display:inline;">(la remise ignore les lignes avec un prix net client ; la marge s'applique à toutes les lignes — puis ajustables ligne par ligne si besoin)</span></div>
