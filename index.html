@@ -3534,6 +3534,10 @@ function updateClientsTableOnly(){
 let clientDraftContacts = [];
 let clientDraftRemises = [];
 let clientDraftId = null;
+function switchClientFormTab(tab){
+  document.querySelectorAll('.client-form-panel').forEach(p=>{ p.style.display = (p.dataset.panel===tab) ? 'block' : 'none'; });
+  document.querySelectorAll('.client-form-tab').forEach(t=>{ t.classList.toggle('active', t.dataset.tab===tab); });
+}
 function openClientForm(id){
   const c = id ? state.clients.find(x=>x.id===id) : null;
   clientDraftContacts = c && c.contacts ? JSON.parse(JSON.stringify(c.contacts)) : [];
@@ -3541,7 +3545,13 @@ function openClientForm(id){
   clientDraftId = id || null;
   openModal(`
     <div class="modal-head"><h3>${c?'Modifier le client':'Nouveau client'}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="tabs-sub" style="padding:0 22px;margin:0;">
+      <button type="button" class="client-form-tab active" data-tab="fiche" onclick="switchClientFormTab('fiche')">Fiche client</button>
+      <button type="button" class="client-form-tab" data-tab="contacts" onclick="switchClientFormTab('contacts')">Personnes à contacter chez le client</button>
+      <button type="button" class="client-form-tab" data-tab="remises" onclick="switchClientFormTab('remises')">Remise tarif par défaut</button>
+    </div>
     <div class="modal-body">
+      <div class="client-form-panel" data-panel="fiche" style="display:block;">
       <div class="field" style="display:flex;justify-content:flex-end;margin-bottom:6px;">
         <label style="display:flex;align-items:center;gap:7px;font-weight:600;color:var(--ink-soft);margin-bottom:0;">
           <input type="checkbox" id="f_inactif" style="width:auto;" ${c&&c.actif===false?'checked':''}> N'est plus utilisé
@@ -3596,16 +3606,9 @@ function openClientForm(id){
         <div class="rich-editable" contenteditable="true" id="f_notes" data-placeholder="Notes internes sur ce client…" onpaste="handleRichPaste(event)" style="border:1px solid var(--line);border-radius:7px;min-height:70px;padding:9px 11px;background:#fff;">${c?escapeHtml(c.notes||''):''}</div>
       </div>
 
-      <div class="section-title">Remise tarif par défaut <span class="helper" style="display:inline;">(appliquée automatiquement aux lignes de devis pour ce client, sauf si une liste de prix nets s'applique)</span></div>
-      <div class="table-wrap lines-table">
-        <table>
-          <thead><tr><th style="width:180px;">Marque</th><th style="width:180px;">Famille article</th><th>Remise 1 (%)</th><th>Remise 2 (%)</th><th>Remise 3 (%)</th><th></th></tr></thead>
-          <tbody id="clientRemisesBody">${clientRemisesRowsHtml()}</tbody>
-        </table>
-      </div>
-      <button type="button" class="btn btn-sm" style="margin-top:8px;" onclick="clientDraftRemises.push({id:uid(),brandId:'',familleArticle:'',remise1:0,remise2:0,remise3:0}); refreshClientRemisesTable();">+ Ajouter une règle</button>
 
-      <div class="section-title">Personnes à contacter chez le client</div>
+      </div>
+      <div class="client-form-panel" data-panel="contacts" style="display:none;">
       ${datalistHtml('dl_fonctionsContacts','fonctionsContacts')}
       <div class="table-wrap lines-table">
         <table class="contacts-sheet">
@@ -3614,6 +3617,17 @@ function openClientForm(id){
         </table>
       </div>
       <button type="button" class="btn btn-sm" style="margin-top:8px;" onclick="clientDraftContacts.push({id:uid(),civilite:'',nom:'',prenom:'',fonction:'',telephone:'',portable:'',email:'',commentaire:'',actif:true}); refreshClientContactsTable();">+ Ajouter une personne</button>
+      </div>
+      <div class="client-form-panel" data-panel="remises" style="display:none;">
+      <div class="helper" style="margin-bottom:10px;">Remise appliquée automatiquement aux lignes de devis pour ce client, sauf si une liste de prix nets s'applique.</div>
+      <div class="table-wrap lines-table">
+        <table>
+          <thead><tr><th style="width:180px;">Marque</th><th style="width:180px;">Famille article</th><th>Remise 1 (%)</th><th>Remise 2 (%)</th><th>Remise 3 (%)</th><th></th></tr></thead>
+          <tbody id="clientRemisesBody">${clientRemisesRowsHtml()}</tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-sm" style="margin-top:8px;" onclick="clientDraftRemises.push({id:uid(),brandId:'',familleArticle:'',remise1:0,remise2:0,remise3:0}); refreshClientRemisesTable();">+ Ajouter une règle</button>
+      </div>
     </div>
     <div class="modal-foot">
       ${c?`<button class="btn btn-danger" onclick="deleteClient('${c.id}')" style="margin-right:auto;">Supprimer</button>`:''}
