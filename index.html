@@ -218,6 +218,10 @@ tbody tr:hover{background:var(--surface-2);}
 .col-resize-handle:hover{background:var(--accent);opacity:.4;}
 .col-custom-table td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .col-custom-table td.wrap-cell{white-space:normal;}
+/* Devis dont l'état d'affaire est « À traiter » : ligne en rouge pour les repérer d'un coup d'œil */
+tr.row-a-traiter td{background:#FBD5D5;color:#6B1018;}
+tr.row-a-traiter:hover td{background:#F7BFBF;}
+tr.row-a-traiter td:first-child{box-shadow:inset 5px 0 0 #D62839;}
 .rz-table th{position:relative;}
 .rz-table th .col-resize-handle::after{content:'';position:absolute;right:3px;top:25%;bottom:25%;width:1px;background:var(--line);}
 .rz-table th .col-resize-handle:hover::after{background:transparent;}
@@ -7351,6 +7355,10 @@ function toggleDevisEtatFilter(val){
   else ui.devisFilterEtats.push(val);
   updateDevisListOnly();
 }
+function isEtatATraiter(d){
+  // Insensible à la casse et aux accents : « À traiter », « A traiter », « à traiter »…
+  return (d.etatAffaire||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase()==='a traiter';
+}
 function renderDevisListInner(){
   let list = state.devis.slice();
   if(ui.devisFilterEtats){
@@ -7388,7 +7396,7 @@ function renderDevisListInner(){
         const t = devisTotal(d);
         const brandIds = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean);
         const oc = etatAffaireColor(etatAffaireOutcome(d));
-        return `<tr style="cursor:pointer;" onclick="openDevisForm('${d.id}')" title="Cliquer pour ouvrir">
+        return `<tr class="${isEtatATraiter(d)?'row-a-traiter':''}" style="cursor:pointer;" onclick="openDevisForm('${d.id}')" title="${isEtatATraiter(d)?'À traiter — ':''}Cliquer pour ouvrir">
           <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(d.number)}</td>
           <td><span class="helper" style="font-weight:600;">${escapeHtml(d.type||'Devis')}</span></td>
           <td>${fmtDate(d.date)}</td>
