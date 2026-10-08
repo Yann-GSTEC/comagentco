@@ -752,7 +752,13 @@ function parseRichRuns(html){
     node.childNodes.forEach(child=>walk(child, s, false));
   }
   Array.from(container.childNodes).forEach((n,idx)=>walk(n, {bold:false, color:null, bg:null, fontSize:null}, idx===0));
-  return runs;
+  // Un <br> ou un <div> vide laissé par l'éditeur en fin (ou début) de texte ajoutait une ligne vide
+  // invisible : la cellule du PDF était alors plus haute que son texte. On les retire.
+  const isBlank = r => r.forceBreak || /^\s*$/.test(r.text||'');
+  let s = 0, e = runs.length;
+  while(s<e && isBlank(runs[s])) s++;
+  while(e>s && isBlank(runs[e-1])) e--;
+  return runs.slice(s,e);
 }
 function wrapRunsToWidth(doc, runs, maxWidth, baseFontSize){
   // Découpe les runs (texte + style) en mots et calcule soi-même les retours à la ligne en mesurant la
@@ -863,7 +869,7 @@ function drawDevisLineLinkButtons(doc, cellX, cellWidth, y, line){
     cx += w+gap;
   });
 }
-function drawRichDesignationCell(doc, data, html, baseColorRgb, centered, line){
+function drawRichDesignationCell(doc, data, html, baseColorRgb, centered, line, pitchFactor){
   const runs = parseRichRuns(html);
   const btnHeight = computeLineButtonsHeight(line);
   if(runs.length===0 && btnHeight===0) return false;
@@ -873,7 +879,7 @@ function drawRichDesignationCell(doc, data, html, baseColorRgb, centered, line){
   const fs = data.cell.styles.fontSize || 8.5;
   const maxWidth = data.cell.width - padLeft - padRight;
   const linesOut = runs.length ? wrapRunsToWidth(doc, runs, maxWidth, fs) : [];
-  const lh = fs*0.3528*2.0;
+  const lh = fs*0.3528*(pitchFactor||RICH_LINE_PITCH);
   const btnGap = btnHeight ? 2.2 : 0;
   // Centre l'ensemble (texte + éventuels boutons de liens) verticalement dans la cellule, comme les
   // autres colonnes (valign:'middle'), plutôt que de le caler en haut.
@@ -881,7 +887,9 @@ function drawRichDesignationCell(doc, data, html, baseColorRgb, centered, line){
   const totalHeight = textBlockHeight + (btnHeight?btnGap+btnHeight:0);
   let cursorY = data.cell.y + (data.cell.height - totalHeight)/2;
   if(linesOut.length){
-    drawRichCellText(doc, linesOut, data.cell.x+padLeft, cursorY+fs*0.3528*0.8, lh, fs, baseColorRgb, centered?maxWidth:null);
+    // Chaque ligne est centrée dans sa propre « case » de hauteur lh (ligne de base = milieu de la case
+    // + environ 0,35 × corps du texte), de sorte que le bloc entier soit centré dans la cellule.
+    drawRichCellText(doc, linesOut, data.cell.x+padLeft, cursorY+lh/2+fs*0.3528*0.35, lh, fs, baseColorRgb, centered?maxWidth:null);
     cursorY += textBlockHeight;
   }
   if(btnHeight){
@@ -7045,16 +7053,18 @@ function renderDevis(){
         ${subTabs.map(t=>`<button class="${subTab===t.key?'active':''}" onclick="ui.devisSubTab='${t.key}'; render();">${escapeHtml(t.label)}</button>`).join('')}
       </div>
     </div>
+    ${subTab==='liste'?`
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn" onclick="openImportModalDevis()">⇪ Importer (Excel / CSV)</button>
+      <button class="btn" onclick="openImportDevisPdfPicker()" title="Recrée un devis à partir d'un de vos PDF déjà exportés par ComAgentCo">⇪ Importer un devis (PDF)</button>
+      <button class="btn btn-primary" onclick="openDevisForm()">+ Nouveau devis</button>
+    </div>`:`
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="openDevisTemplateForm()">+ Nouveau modèle</button>
+    </div>`}
   </div>
 
     <div style="${showIf('liste')}">
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px;">
-        <button class="btn" onclick="runEtatAffaireMigration(true)" title="Vérifie et corrige les devis dont l'État de l'affaire (Gagnée/Perdue) ne se serait pas correctement enregistré">↺ Réparer les états d'affaire</button>
-        <button class="btn" onclick="openImportModalDevis()">⇪ Importer (Excel / CSV)</button>
-
-        <button class="btn" onclick="openImportDevisPdfPicker()" title="Recrée un devis à partir d'un de vos PDF déjà exportés par ComAgentCo">⇪ Importer un devis (PDF)</button>
-        <button class="btn btn-primary" onclick="openDevisForm()">+ Nouveau devis</button>
-      </div>
       <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
         <div class="search-box" style="margin-bottom:0;">
           <span class="ic">⌕</span>
@@ -8440,10 +8450,7 @@ function duplicateTemplateToDevis(id){
 }
 function renderDevisTemplates(){
   return `
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-    <div class="helper">Créez un modèle une fois, puis dupliquez-le en vrai devis autant de fois que nécessaire — les lignes et notes sont reprises, il ne restera qu'à choisir le client.</div>
-    <button class="btn btn-primary" onclick="openDevisTemplateForm()" style="white-space:nowrap;">+ Nouveau modèle</button>
-  </div>
+  <div class="helper" style="margin-bottom:14px;">Créez un modèle une fois, puis dupliquez-le en vrai devis autant de fois que nécessaire — les lignes et notes sont reprises, il ne restera qu'à choisir le client.</div>
   ${state.devisTemplates.length===0?emptyState('📐','Aucun modèle','Créez votre premier modèle de devis pour gagner du temps sur vos prochains devis récurrents.'):`
   <div class="table-wrap card"><table>
     <thead><tr><th>Nom du modèle</th><th>Marque(s)</th><th>Lignes</th><th></th></tr></thead>
@@ -9887,6 +9894,7 @@ function pdfDrawFooter(doc, s, LEFT, RIGHT, PAGE_H, pageNumber, totalPagesExp){
   doc.setFontSize(7.5); doc.setTextColor(160);
   doc.text(`Page ${pageNumber}/${totalPagesExp}`, RIGHT, footY+2.6, {align:'right'});
 }
+const RICH_LINE_PITCH = 1.3; // interligne du texte mis en forme dans le PDF (titres et désignations, × corps du texte)
 async function exportDevisPdf(id, mode){
   const d = state.devis.find(x=>x.id===id) || (draft && draft.id===id ? draft : null);
   if(!d){ showToast('Enregistrez le devis avant export.'); return; }
@@ -10040,7 +10048,8 @@ async function exportDevisPdf(id, mode){
 
   const rows = (d.lines||[]).map(l=>{
     if(l.isTitleLine){
-      return [{ content: stripHtml(l.designation)||'', colSpan: colDefs.length, styles:{fontStyle:'bold', fillColor:[240,239,232], textColor:[30,30,30], halign:'left'} }];
+      const richTitle = /[<]/.test(l.designation||'');
+      return [{ content: richTitle ? '' : (stripHtml(l.designation)||''), colSpan: colDefs.length, styles:{fontStyle:'bold', fillColor:[240,239,232], textColor:[30,30,30], halign:'left'} }];
     }
     return colDefs.map(c=>c.get(l));
   });
@@ -10067,6 +10076,23 @@ async function exportDevisPdf(id, mode){
     columnStyles: columnStyles,
     margin:{left:LEFT, right:PAGE_W-RIGHT, top:26, bottom:24},
     didParseCell: (data)=>{
+      // Ligne de titre mise en forme (surlignage, couleur…) : la cellule s'adapte exactement au texte,
+      // sur toute la largeur du tableau, avec un interligne serré.
+      if(data.section==='body' && data.column.index===0){
+        const tl = (d.lines||[])[data.row.index];
+        if(tl && tl.isTitleLine && /[<]/.test(tl.designation||'')){
+          const runs = parseRichRuns(tl.designation);
+          const pad = data.cell.styles.cellPadding || {top:2.6,bottom:2.6,left:2.6,right:2.6};
+          const pL = (typeof pad==='object') ? (pad.left||2.6) : pad;
+          const pR = (typeof pad==='object') ? (pad.right!=null?pad.right:pL) : pad;
+          const pT = (typeof pad==='object') ? (pad.top||2.6) : pad;
+          const pB = (typeof pad==='object') ? (pad.bottom!=null?pad.bottom:pT) : pad;
+          const fs0 = data.cell.styles.fontSize || 8.5;
+          const nLines = runs.length ? wrapRunsToWidth(doc, runs, (RIGHT-LEFT)-pL-pR, fs0).length : 1;
+          data.cell.styles.minCellHeight = Math.max(data.cell.styles.minCellHeight||0, nLines*fs0*0.3528*RICH_LINE_PITCH + pT + pB);
+          return;
+        }
+      }
       // La désignation mise en forme (gras, couleur…) utilise son propre espacement entre les lignes,
       // plus généreux que celui calculé par défaut pour le texte brut : sans ce recalage, la hauteur de
       // ligne réservée par le tableau était trop courte, ce qui poussait le texte à déborder en haut.
@@ -10085,7 +10111,7 @@ async function exportDevisPdf(id, mode){
       const fs = data.cell.styles.fontSize || 8.5;
       const maxWidth = desigWidthMm - padLeft - padRight;
       const linesOut = runs.length ? wrapRunsToWidth(doc, runs, maxWidth, fs) : [];
-      const lh = fs*0.3528*2.0;
+      const lh = fs*0.3528*RICH_LINE_PITCH;
       const btnGap = btnHeight ? 2.2 : 0;
       const needed = linesOut.length*lh + (btnHeight?btnGap+btnHeight:0) + padTop + padBottom;
       data.cell.styles.minCellHeight = Math.max(data.cell.styles.minCellHeight||0, needed);
@@ -10100,7 +10126,7 @@ async function exportDevisPdf(id, mode){
         if(/[<]/.test(line.designation)){
           doc.setFillColor(240,239,232);
           doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
-          drawRichDesignationCell(doc, data, line.designation, [30,30,30], false, line);
+          drawRichDesignationCell(doc, data, line.designation, [30,30,30], false, line, RICH_LINE_PITCH);
           // Le remplissage ci-dessus recouvre le quadrillage du tableau déjà tracé sous cette cellule :
           // on retrace son cadre par-dessus pour qu'elle garde le même encadré que les autres lignes.
           doc.setDrawColor(140,140,140);
