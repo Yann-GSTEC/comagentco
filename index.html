@@ -3543,6 +3543,44 @@ function updateClientsTableOnly(){
   if(wrap) wrap.innerHTML = renderClientsTableInner();
 }
 
+/* ============ MISE EN FORME AUTOMATIQUE (fiche client) ============ */
+function formatCityUpper(s){ return (s||'').toString().trim().replace(/\s+/g,' ').toLocaleUpperCase('fr-FR'); }
+function formatLastName(s){ return (s||'').toString().trim().replace(/\s+/g,' ').toLocaleUpperCase('fr-FR'); }
+function formatFirstName(s){
+  // Majuscule à la première lettre de chaque partie (prénoms composés : Jean-Pierre, Marie-Ève), reste en minuscules
+  return (s||'').toString().trim().replace(/\s+/g,' ').toLocaleLowerCase('fr-FR')
+    .replace(/(^|[\s\-'’])(\p{L})/gu, (m,sep,ch)=>sep+ch.toLocaleUpperCase('fr-FR'));
+}
+function formatPhoneFr(s){
+  // 0254785328 -> « 02 54 78 53 28 » ; +33602198290 -> « +33 6 02 19 82 90 ». Les saisies atypiques (lettres,
+  // plusieurs numéros, extension…) sont laissées telles quelles.
+  const raw = (s||'').toString().trim();
+  if(!raw) return '';
+  if(/[^\d\s.\-()+\/]/.test(raw) || /\//.test(raw)) return raw;
+  let digits = raw.replace(/\D/g,'');
+  const intl = raw.startsWith('+') || digits.startsWith('00');
+  if(digits.startsWith('00')) digits = digits.slice(2);
+  const pairs = d => d.match(/.{1,2}/g).join(' ');
+  if(intl){
+    if(digits.startsWith('33')){
+      let n = digits.slice(2);
+      if(n.startsWith('0')) n = n.slice(1); // +33 (0)6… -> +33 6…
+      if(n.length!==9) return raw;
+      return '+33 ' + n[0] + ' ' + pairs(n.slice(1));
+    }
+    const ccLen = /^[17]/.test(digits) ? 1 : 2;   // indicatif pays : 1 chiffre (+1, +7) sinon 2 (cas courants)
+    const cc = digits.slice(0,ccLen), rest = digits.slice(ccLen);
+    if(rest.length<6) return raw;
+    return '+'+cc+' '+(rest.length%2 ? rest[0]+' '+pairs(rest.slice(1)) : pairs(rest));
+  }
+  if(digits.length===10 && digits.startsWith('0')) return pairs(digits);
+  return raw;
+}
+function normalizeClientContact(p){
+  p.nom = formatLastName(p.nom); p.prenom = formatFirstName(p.prenom);
+  p.telephone = formatPhoneFr(p.telephone); p.portable = formatPhoneFr(p.portable);
+  return p;
+}
 let clientDraftContacts = [];
 let clientDraftRemises = [];
 let clientDraftId = null;
@@ -3552,7 +3590,7 @@ function switchClientFormTab(tab){
 }
 function openClientForm(id){
   const c = id ? state.clients.find(x=>x.id===id) : null;
-  clientDraftContacts = c && c.contacts ? JSON.parse(JSON.stringify(c.contacts)) : [];
+  clientDraftContacts = c && c.contacts ? JSON.parse(JSON.stringify(c.contacts)).map(normalizeClientContact) : [];
   clientDraftRemises = c ? JSON.parse(JSON.stringify(clientRemiseRules(c))) : [];
   clientDraftId = id || null;
   openModal(`
@@ -3584,7 +3622,7 @@ function openClientForm(id){
       <div class="field"><label>Adresse (suite)</label><input type="text" id="f_adresse2" value="${c?escapeHtml(c.adresse2||''):''}"></div>
       <div class="field-row">
         <div class="field" style="max-width:140px;"><label>Code Postal</label><input type="text" id="f_cp" value="${c?escapeHtml(c.codePostal||''):''}"></div>
-        <div class="field"><label>Ville</label><input type="text" id="f_ville" value="${c?escapeHtml(c.ville||''):''}"></div>
+        <div class="field"><label>Ville</label><input type="text" id="f_ville" style="text-transform:uppercase;" value="${c?escapeHtml(formatCityUpper(c.ville||'')):''}" onchange="this.value=formatCityUpper(this.value)"></div>
         <div class="field"><label>Pays</label><input type="text" id="f_pays" value="${c?escapeHtml(c.pays||''):''}" placeholder="France"></div>
       </div>
       <div class="field-row">
@@ -3607,7 +3645,7 @@ function openClientForm(id){
         <div class="field"><label>Site Internet</label><input type="text" id="f_site" value="${c?escapeHtml(c.siteInternet||''):''}"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Téléphone principal</label><input type="tel" id="f_telephonePrincipal" value="${c?escapeHtml(c.telephonePrincipal||''):''}"></div>
+        <div class="field"><label>Téléphone principal</label><input type="tel" id="f_telephonePrincipal" value="${c?escapeHtml(formatPhoneFr(c.telephonePrincipal||'')):''}" onchange="this.value=formatPhoneFr(this.value)"></div>
         <div class="field"><label>Adresse mail principale</label><input type="email" id="f_emailPrincipal" value="${c?escapeHtml(c.emailPrincipal||''):''}"></div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;margin:-6px 0 14px;cursor:pointer;">
@@ -3702,11 +3740,11 @@ function clientContactsRowsHtml(){
     return `
     <tr class="${i%2===0?'row-a':'row-b'}" style="${inactive?'opacity:.5;':''}">
       <td><select onchange="clientDraftContacts[${i}].civilite=this.value;">${civOpts.map(cv=>`<option value="${cv}" ${p.civilite===cv?'selected':''}>${cv||'—'}</option>`).join('')}</select></td>
-      <td><input type="text" value="${escapeHtml(p.nom||'')}" onchange="clientDraftContacts[${i}].nom=this.value;"></td>
-      <td><input type="text" value="${escapeHtml(p.prenom||'')}" onchange="clientDraftContacts[${i}].prenom=this.value;"></td>
+      <td><input type="text" style="text-transform:uppercase;" value="${escapeHtml(p.nom||'')}" onchange="clientDraftContacts[${i}].nom=this.value=formatLastName(this.value);"></td>
+      <td><input type="text" style="text-transform:capitalize;" value="${escapeHtml(p.prenom||'')}" onchange="clientDraftContacts[${i}].prenom=this.value=formatFirstName(this.value);"></td>
       <td><input type="text" list="dl_fonctionsContacts" value="${escapeHtml(p.fonction||'')}" onchange="clientDraftContacts[${i}].fonction=this.value;"></td>
-      <td><input type="tel" value="${escapeHtml(p.telephone||'')}" onchange="clientDraftContacts[${i}].telephone=this.value;"></td>
-      <td><input type="tel" value="${escapeHtml(p.portable||'')}" onchange="clientDraftContacts[${i}].portable=this.value;"></td>
+      <td><input type="tel" value="${escapeHtml(p.telephone||'')}" onchange="clientDraftContacts[${i}].telephone=this.value=formatPhoneFr(this.value);"></td>
+      <td><input type="tel" value="${escapeHtml(p.portable||'')}" onchange="clientDraftContacts[${i}].portable=this.value=formatPhoneFr(this.value);"></td>
       <td><input type="email" value="${escapeHtml(p.email||'')}" onchange="clientDraftContacts[${i}].email=this.value;"></td>
       <td><textarea rows="1" onchange="clientDraftContacts[${i}].commentaire=this.value;">${escapeHtml(p.commentaire||'')}</textarea></td>
       <td style="text-align:center;"><input type="checkbox" style="width:auto;" ${inactive?'checked':''} onchange="clientDraftContacts[${i}].actif=!this.checked; refreshClientContactsTable();" title="Ce contact n'est plus utilisé"></td>
@@ -3836,11 +3874,11 @@ function saveClient(id){
     adresse1: document.getElementById('f_adresse1').value.trim(),
     adresse2: document.getElementById('f_adresse2').value.trim(),
     codePostal: document.getElementById('f_cp').value.trim(),
-    ville: document.getElementById('f_ville').value.trim(),
+    ville: formatCityUpper(document.getElementById('f_ville').value),
     pays: document.getElementById('f_pays').value.trim(),
     acceptEmailing: document.getElementById('f_acceptEmailing').checked,
     siteInternet: document.getElementById('f_site').value.trim(),
-    telephonePrincipal: document.getElementById('f_telephonePrincipal').value.trim(),
+    telephonePrincipal: formatPhoneFr(document.getElementById('f_telephonePrincipal').value),
     emailPrincipal: document.getElementById('f_emailPrincipal').value.trim(),
     famille: document.getElementById('f_famille').value.trim(),
     sousFamille: document.getElementById('f_sousFamille').value.trim(),
@@ -3851,7 +3889,7 @@ function saveClient(id){
     notes: document.getElementById('f_notes').innerHTML.trim(),
     remisesTarif: clientDraftRemises.filter(r=>r.remise1||r.remise2||r.remise3||r.brandId||r.familleArticle),
     actif: !document.getElementById('f_inactif').checked,
-    contacts: clientDraftContacts,
+    contacts: clientDraftContacts.map(normalizeClientContact),
   };
   if(id){
     const existing = state.clients.find(x=>x.id===id);
@@ -4443,7 +4481,7 @@ function confirmClientImport(){
       adresse1: get('adresse1'),
       adresse2: get('adresse2'),
       codePostal: get('codePostal'),
-      ville: get('ville'),
+      ville: formatCityUpper(get('ville')),
       pays: get('pays'),
       siteInternet: get('siteInternet'),
       famille: get('famille'),
@@ -4464,14 +4502,14 @@ function confirmClientImport(){
         const key = contactEmail.toLowerCase();
         const already = key && existing.contacts.some(p=>(p.email||'').toLowerCase()===key);
         if(!already){
-          existing.contacts.push({id:uid(), civilite:contactCivilite, nom:rawName||name, prenom:contactPrenom, fonction:contactFonction, telephone:contactTelephone, portable:contactPortable, email:contactEmail, commentaire:''});
+          existing.contacts.push({id:uid(), civilite:contactCivilite, nom:formatLastName(rawName||name), prenom:formatFirstName(contactPrenom), fonction:contactFonction, telephone:formatPhoneFr(contactTelephone), portable:formatPhoneFr(contactPortable), email:contactEmail, commentaire:''});
         }
       }
       updated++;
     } else {
       const contacts = [];
       if(hasContactInfo){
-        contacts.push({id:uid(), civilite:contactCivilite, nom:rawName||name, prenom:contactPrenom, fonction:contactFonction, telephone:contactTelephone, portable:contactPortable, email:contactEmail, commentaire:''});
+        contacts.push({id:uid(), civilite:contactCivilite, nom:formatLastName(rawName||name), prenom:formatFirstName(contactPrenom), fonction:contactFonction, telephone:formatPhoneFr(contactTelephone), portable:formatPhoneFr(contactPortable), email:contactEmail, commentaire:''});
       }
       state.clients.push({id:uid(), history:[], actif:true, contacts, ...data});
       added++;
