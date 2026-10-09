@@ -222,6 +222,8 @@ tbody tr:hover{background:var(--surface-2);}
 tr.row-a-traiter td{background:#FBD5D5;color:#6B1018;}
 tr.row-a-traiter:hover td{background:#F7BFBF;}
 tr.row-a-traiter td:first-child{box-shadow:inset 5px 0 0 #D62839;}
+.cm-table td,.cm-table th{padding:5px 12px;}
+.cm-table input,.cm-table textarea{padding:6px 10px;}
 .rz-table th{position:relative;}
 .rz-table th .col-resize-handle::after{content:'';position:absolute;right:3px;top:25%;bottom:25%;width:1px;background:var(--line);}
 .rz-table th .col-resize-handle:hover::after{background:transparent;}
@@ -2128,6 +2130,7 @@ function escCloseHandler(e){ if(e.key==='Escape') closeModal(); }
 function closeModal(){
   const el = document.getElementById('modalOverlay');
   if(el) el.remove();
+  if(window._commissionModalOpen){ window._commissionModalOpen = false; commissionModalState = null; render(); }
   document.documentElement.classList.remove('modal-open');
   document.removeEventListener('keydown', escCloseHandler);
   document.removeEventListener('keydown', devisFormKeydownHandler);
@@ -7854,15 +7857,13 @@ function renderCommissionsTableInner(){
       return sortDir==='asc' ? av-bv : bv-av;
     });
     return `
-      <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur le nom d'une marque pour saisir le détail mois par mois.</div>
+      <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur le nom d'une marque pour ouvrir la saisie de toute l'année dans une fenêtre.</div>
       ${renderCustomizableTable('commissionsYear', [
         {key:'rang', label:'#', defaultWidth:50, cellStyle:'font-weight:700;color:var(--muted);', cell:(r)=>String(rows.indexOf(r)+1)},
-        {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};cursor:pointer;" onclick="event.stopPropagation(); toggleCommissionDetail('${r.b.id}')" title="Cliquer pour saisir/masquer le détail par mois"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
+        {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};cursor:pointer;" onclick="event.stopPropagation(); openCommissionYearModal('${r.b.id}')" title="Cliquer pour ouvrir la saisie de l'année complète"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
         {key:'ca', label:`CA (${year})`, defaultWidth:150, cellClass:'num', cellStyle:'font-weight:600;', cell:r=>fmtMoney(r.ca)},
         {key:'commission', label:'Montant commission', defaultWidth:170, cellClass:'num', cellStyle:'font-weight:700;color:var(--success);', cell:r=>fmtMoney(r.commission)},
-      ], rows, {
-        afterRow: r=> ui.commissionsExpandedBrand===r.b.id ? `<tr><td colspan="99" style="padding:0 0 14px 20px;border-bottom:none;">${renderCommissionMonthlyDetail(r.b, year)}</td></tr>` : ''
-      })}
+      ], rows)}
     `;
   }
 
@@ -7892,6 +7893,89 @@ function renderCommissionsTableInner(){
     ], rows)}
   `;
 }
+
+/* ---- Saisie des commissions d'une marque sur l'année complète (fenêtre dédiée) ---- */
+let commissionModalState = null; // {brandId, year}
+function openCommissionYearModal(brandId){
+  const year = ui.commissionsYear || new Date().getFullYear();
+  commissionModalState = {brandId, year};
+  openModal(commissionYearModalHtml());
+  window._commissionModalOpen = true;
+  commissionModalRefreshCalc();
+}
+function commissionYearModalHtml(){
+  const {brandId, year} = commissionModalState;
+  const b = state.brands.find(x=>x.id===brandId);
+  if(!b) return '<div class="modal-body">Marque introuvable.</div>';
+  const years = commissionsAvailableYears().slice().sort((a,b)=>a-b);
+  return `
+    <div class="modal-head">
+      <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span class="chip" style="background:${brandColor(b.id)};font-size:14px;padding:5px 14px;">${escapeHtml(b.name)}</span>
+        Commissions ${year}
+      </h3>
+      <button class="close-x" onclick="closeCommissionYearModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:12px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <span class="helper" style="font-weight:600;">Année :</span>
+          <div class="pill-select">${years.map(y=>`<button class="${y===year?'active':''}" onclick="commissionModalSetYear(${y})">${y}</button>`).join('')}</div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <div class="card" style="padding:6px 16px;"><div class="helper" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;">CA ${year}</div><div class="num" style="font-size:17px;font-weight:700;" id="cm_kpiCa"></div></div>
+          <div class="card" style="padding:6px 16px;"><div class="helper" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;">Commission</div><div class="num" style="font-size:17px;font-weight:700;color:var(--success);" id="cm_kpiCom"></div></div>
+          <div class="card" style="padding:6px 16px;"><div class="helper" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;">Taux effectif</div><div class="num" style="font-size:17px;font-weight:700;" id="cm_kpiRate"></div></div>
+        </div>
+      </div>
+      <div class="table-wrap card"><table class="cm-table no-col-resize">
+        <thead><tr><th style="width:150px;">Mois</th><th class="num" style="width:190px;">CA</th><th class="num" style="width:190px;">Montant commission</th><th class="num" style="width:110px;">Taux</th><th>Commentaire</th></tr></thead>
+        <tbody>
+          ${MOIS_LABELS.map((label,i)=>{
+            const m = i+1;
+            const e = getCommissionEntry(b.id, year, m);
+            return `<tr>
+              <td style="font-weight:600;">${label}</td>
+              <td><input type="number" step="0.01" min="0" id="cm_ca_${m}" value="${e.ca||''}" placeholder="0" style="text-align:right;" onchange="commissionModalSet(${m},'ca',this.value)"></td>
+              <td><input type="number" step="0.01" min="0" id="cm_com_${m}" value="${e.commission||''}" placeholder="0" style="text-align:right;font-weight:700;color:var(--success);" onchange="commissionModalSet(${m},'commission',this.value)"></td>
+              <td class="num helper" id="cm_rate_${m}"></td>
+              <td><textarea rows="1" placeholder="—" onchange="setCommissionComment('${b.id}',${year},${m},this.value);">${escapeHtml(e.commentaire||'')}</textarea></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+        <tfoot><tr style="font-weight:700;border-top:2px solid var(--line);">
+          <td>Total ${year}</td><td class="num" id="cm_totCa"></td><td class="num" style="color:var(--success);" id="cm_totCom"></td><td class="num" id="cm_totRate"></td><td></td>
+        </tr></tfoot>
+      </table></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="closeCommissionYearModal()">Fermer</button></div>
+  `;
+}
+function commissionModalRefreshCalc(){
+  if(!commissionModalState) return;
+  const {brandId, year} = commissionModalState;
+  let totCa = 0, totCom = 0;
+  const rate = (ca,com)=> ca>0 ? (com/ca*100).toFixed(2).replace('.',',')+' %' : '—';
+  for(let m=1;m<=12;m++){
+    const e = getCommissionEntry(brandId, year, m);
+    totCa += e.ca||0; totCom += e.commission||0;
+    const cell = document.getElementById('cm_rate_'+m); if(cell) cell.textContent = rate(e.ca||0, e.commission||0);
+  }
+  const set = (id, txt)=>{ const el = document.getElementById(id); if(el) el.textContent = txt; };
+  set('cm_totCa', fmtMoney(totCa)); set('cm_totCom', fmtMoney(totCom)); set('cm_totRate', rate(totCa, totCom));
+  set('cm_kpiCa', fmtMoney(totCa)); set('cm_kpiCom', fmtMoney(totCom)); set('cm_kpiRate', rate(totCa, totCom));
+}
+function commissionModalSet(month, field, value){
+  const {brandId, year} = commissionModalState;
+  setCommissionEntry(brandId, year, month, field, value);
+  commissionModalRefreshCalc();
+}
+function commissionModalSetYear(year){
+  commissionModalState.year = year;
+  const box = document.getElementById('modalBox');
+  if(box){ box.innerHTML = commissionYearModalHtml(); commissionModalRefreshCalc(); }
+}
+function closeCommissionYearModal(){ closeModal(); }
 function toggleCommissionDetail(brandId){
   ui.commissionsExpandedBrand = (ui.commissionsExpandedBrand===brandId) ? null : brandId;
   updateCommissionsTableOnly();
