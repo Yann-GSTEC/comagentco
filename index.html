@@ -392,6 +392,7 @@ textarea{resize:none;overflow-y:hidden;}
   cursor:pointer;font-size:13px;
 }
 .upload-zone:hover{border-color:var(--accent);color:var(--accent);}
+.upload-zone.drag-over{border-color:#2977D9;background:#E6F0FC;color:#2977D9;}
 .upload-zone input{display:none;}
 
 .signature-editor{
@@ -2244,7 +2245,7 @@ function openBrandForm(id){
           <div id="logoPreviewWrap" style="margin-bottom:10px;">${renderLogoPreview()}</div>
           <div class="upload-zone" onclick="document.getElementById('f_logo').click()">
             <input type="file" id="f_logo" accept="image/*" onchange="handleLogoFile(event)">
-            <div>🖼 Cliquez pour choisir une image (PNG, JPG)</div>
+            <div>🖼 Glissez-déposez une image (PNG, JPG) ici, ou cliquez pour la rechercher dans vos dossiers</div>
           </div>
         </div>
         <div class="field" style="margin-top:16px;">
@@ -4378,7 +4379,7 @@ function openClientImportModal(){
       <label>Fichier</label>
       <div class="upload-zone" onclick="document.getElementById('cimp_file').click()">
         <input type="file" id="cimp_file" accept=".csv,.xlsx,.xls" onchange="handleClientImportFile(event)">
-        <div id="cimp_zoneText">📄 Cliquez pour choisir un fichier .xlsx, .xls ou .csv</div>
+        <div id="cimp_zoneText">📄 Glissez-déposez un fichier .xlsx, .xls ou .csv ici, ou cliquez pour le rechercher dans vos dossiers</div>
       </div>
       <div id="cimp_mapping"></div>
     </div>
@@ -4580,7 +4581,7 @@ function openHistoryImportModal(){
       <label>Fichier</label>
       <div class="upload-zone" onclick="document.getElementById('himp_file').click()">
         <input type="file" id="himp_file" accept=".csv,.xlsx,.xls" onchange="handleHistoryImportFile(event)">
-        <div id="himp_zoneText">📄 Cliquez pour choisir un fichier .xlsx, .xls ou .csv<br><span class="helper">Colonnes attendues : Client, Code postal, Ville, Date du suivi, Action prochaine, Résumé</span></div>
+        <div id="himp_zoneText">📄 Glissez-déposez un fichier .xlsx, .xls ou .csv ici, ou cliquez pour le rechercher dans vos dossiers<br><span class="helper">Colonnes attendues : Client, Code postal, Ville, Date du suivi, Action prochaine, Résumé</span></div>
       </div>
       <div id="himp_mapping"></div>
     </div>
@@ -6060,7 +6061,7 @@ function openImportModalPN(){
       <label>Fichier</label>
       <div class="upload-zone" onclick="document.getElementById('impPN_file').click()">
         <input type="file" id="impPN_file" accept=".csv,.xlsx,.xls" onchange="handleImportFilePN(event)">
-        <div id="impPN_zoneText">📄 Cliquez pour choisir un fichier .xlsx, .xls ou .csv<br><span class="helper">Colonnes attendues : référence, désignation, prix net (l'ordre des colonnes n'a pas d'importance)</span></div>
+        <div id="impPN_zoneText">📄 Glissez-déposez un fichier .xlsx, .xls ou .csv ici, ou cliquez pour le rechercher dans vos dossiers<br><span class="helper">Colonnes attendues : référence, désignation, prix net (l'ordre des colonnes n'a pas d'importance)</span></div>
       </div>
       <div id="impPN_mapping"></div>
     </div>
@@ -6360,7 +6361,7 @@ function openImportModal(defaultTarget){
       <label>Fichier</label>
       <div class="upload-zone" onclick="document.getElementById('imp_file').click()">
         <input type="file" id="imp_file" accept=".csv,.xlsx,.xls" onchange="handleImportFile(event)">
-        <div id="imp_zoneText">📄 Cliquez pour choisir un fichier .xlsx, .xls ou .csv<br><span class="helper">Colonnes attendues : référence, désignation, prix (l'ordre des colonnes n'a pas d'importance)</span></div>
+        <div id="imp_zoneText">📄 Glissez-déposez un fichier .xlsx, .xls ou .csv ici, ou cliquez pour le rechercher dans vos dossiers<br><span class="helper">Colonnes attendues : référence, désignation, prix (l'ordre des colonnes n'a pas d'importance)</span></div>
       </div>
       <div id="imp_mapping"></div>
     </div>
@@ -6706,8 +6707,10 @@ function renderParametres(){
         <div class="helper" style="margin-bottom:10px;">À utiliser dans tous les cas en complément (ou sur Firefox/Safari) : télécharge un fichier que vous pouvez déposer vous-même dans votre dossier OneDrive.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn" onclick="downloadBackupNow()">⇩ Télécharger une sauvegarde</button>
-          <button class="btn btn-ghost" onclick="document.getElementById('restoreFile').click()">⇪ Restaurer une sauvegarde</button>
-          <input type="file" id="restoreFile" accept=".json" style="display:none;" onchange="restoreBackupFile(event)">
+          <div class="upload-zone" style="padding:12px 18px;flex:1;min-width:280px;" onclick="document.getElementById('restoreFile').click()">
+            <input type="file" id="restoreFile" accept=".json" onchange="restoreBackupFile(event)">
+            ⇪ Restaurer une sauvegarde : glissez-déposez un fichier .json ici, ou cliquez pour le rechercher
+          </div>
         </div>
       </div>
     </div>
@@ -7233,7 +7236,7 @@ function openImportModalDevis(){
       <label>Fichier</label>
       <div class="upload-zone" onclick="document.getElementById('impDevis_file').click()">
         <input type="file" id="impDevis_file" accept=".csv,.xlsx,.xls" onchange="handleImportFileDevis(event)">
-        <div id="impDevis_zoneText">📄 Cliquez pour choisir un fichier .xlsx, .xls ou .csv</div>
+        <div id="impDevis_zoneText">📄 Glissez-déposez un fichier .xlsx, .xls ou .csv ici, ou cliquez pour le rechercher dans vos dossiers</div>
       </div>
       <div id="impDevis_mapping"></div>
     </div>
@@ -8037,46 +8040,80 @@ function defaultValidUntil(type, dateStr){
   return result.toISOString().slice(0,10);
 }
 /* ============================= IMPORT D'UN DEVIS DEPUIS UN PDF (déjà exporté par ComAgentCo) ============================= */
+
+/* ============ GLISSER-DÉPOSER / RECHERCHE DE FICHIER : tous les imports ============ */
+function openFileDropModal(opts){
+  window._fileDropCb = opts.onFile;
+  openModal(`
+    <div class="modal-head"><h3>${escapeHtml(opts.title)}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="upload-zone" style="padding:70px 20px;border-width:2px;border-radius:16px;background:var(--surface-2);" onclick="document.getElementById('fd_file').click()">
+        <input type="file" id="fd_file" accept="${escapeHtml(opts.accept||'')}" onchange="fileDropModalPicked(event)">
+        <div style="font-size:46px;line-height:1;margin-bottom:12px;">${opts.icon||'📄'}</div>
+        <div style="font-size:17px;font-weight:700;margin-bottom:6px;color:var(--ink);">Glissez-déposez ${escapeHtml(opts.what||'votre fichier')} ici</div>
+        <div class="helper" style="margin-bottom:14px;">ou</div>
+        <button type="button" class="btn btn-primary" onclick="event.stopPropagation(); document.getElementById('fd_file').click()">Rechercher dans mes dossiers…</button>
+        ${opts.hint?`<div class="helper" style="margin-top:18px;">${escapeHtml(opts.hint)}</div>`:''}
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Annuler</button></div>
+  `);
+}
+function fileDropModalPicked(evt){
+  const f = evt.target.files[0];
+  if(!f) return;
+  const cb = window._fileDropCb;
+  closeModal();
+  if(cb) cb(f);
+}
+function fileMatchesAccept(file, accept){
+  const tokens = (accept||'').split(',').map(t=>t.trim().toLowerCase()).filter(Boolean);
+  if(tokens.length===0) return true;
+  const name = file.name.toLowerCase(), type = (file.type||'').toLowerCase();
+  return tokens.some(t=> t.startsWith('.') ? name.endsWith(t) : (t.endsWith('/*') ? type.startsWith(t.slice(0,-1)) : type===t));
+}
+(function setupGlobalFileDrop(){
+  const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types||[]).includes('Files');
+  const zoneOf = e => e.target && e.target.closest ? e.target.closest('.upload-zone') : null;
+  document.addEventListener('dragover', e=>{
+    if(!hasFiles(e)) return;
+    e.preventDefault(); // sans cela, le navigateur ouvrirait le fichier lâché hors zone et quitterait l'application
+    const z = zoneOf(e);
+    document.querySelectorAll('.upload-zone.drag-over').forEach(x=>{ if(x!==z) x.classList.remove('drag-over'); });
+    if(z) z.classList.add('drag-over');
+  });
+  document.addEventListener('dragleave', e=>{
+    if(!e.relatedTarget) document.querySelectorAll('.upload-zone.drag-over').forEach(x=>x.classList.remove('drag-over'));
+  });
+  document.addEventListener('drop', e=>{
+    if(!hasFiles(e)) return;
+    e.preventDefault();
+    document.querySelectorAll('.upload-zone.drag-over').forEach(x=>x.classList.remove('drag-over'));
+    const z = zoneOf(e);
+    if(!z) return;
+    const input = z.querySelector('input[type=file]');
+    const file = e.dataTransfer.files[0];
+    if(!input || !file) return;
+    if(!fileMatchesAccept(file, input.accept)){
+      showToast(`Format non accepté — formats attendus : ${input.accept.replace(/,/g,', ')}`);
+      return;
+    }
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', {bubbles:true}));
+  });
+})();
 function openImportDevisPdfPicker(){
   if(state.clients.length===0){ showToast('Ajoutez d\'abord un client.'); return; }
   if(typeof pdfjsLib==='undefined'){ showToast("La lecture de PDF n'a pas pu se charger — vérifiez votre connexion internet et réessayez."); return; }
   if(!pdfjsLib.GlobalWorkerOptions.workerSrc){
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
-  openModal(`
-    <div class="modal-head"><h3>Importer un devis (PDF)</h3><button class="close-x" onclick="closeModal()">✕</button></div>
-    <div class="modal-body">
-      <div id="pdfDropZone" style="border:2px dashed #9AA8A0;border-radius:16px;padding:70px 20px;text-align:center;background:var(--surface-2);cursor:pointer;transition:background .15s,border-color .15s;" onclick="pickDevisPdfFromFolders()">
-        <div style="font-size:46px;line-height:1;margin-bottom:12px;">📄</div>
-        <div style="font-size:17px;font-weight:700;margin-bottom:6px;">Glissez-déposez votre devis PDF ici</div>
-        <div class="helper" style="margin-bottom:14px;">ou</div>
-        <button type="button" class="btn btn-primary" onclick="event.stopPropagation(); pickDevisPdfFromFolders()">Rechercher dans mes dossiers…</button>
-        <div class="helper" style="margin-top:18px;">Seuls les PDF générés par ComAgentCo peuvent être relus automatiquement.</div>
-      </div>
-    </div>
-    <div class="modal-foot"><button class="btn" onclick="closeModal()">Annuler</button></div>
-  `);
-  setupPdfDropZone();
-}
-function pickDevisPdfFromFolders(){
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'application/pdf,.pdf';
-  input.onchange = ()=>{ if(input.files[0]) importDevisPdfFile(input.files[0]); };
-  input.click();
-}
-function setupPdfDropZone(){
-  const zone = document.getElementById('pdfDropZone');
-  const overlay = document.getElementById('modalOverlay');
-  if(!zone || !overlay) return;
-  const setHot = (hot)=>{ zone.style.background = hot ? '#E6F0FC' : 'var(--surface-2)'; zone.style.borderColor = hot ? '#2977D9' : '#9AA8A0'; };
-  // Tout le plein écran accepte le survol : un dépôt un peu à côté de la zone n'ouvre pas le PDF dans le navigateur
-  overlay.addEventListener('dragover', e=>{ e.preventDefault(); setHot(true); });
-  overlay.addEventListener('dragleave', e=>{ if(!overlay.contains(e.relatedTarget)) setHot(false); });
-  overlay.addEventListener('drop', e=>{
-    e.preventDefault(); setHot(false);
-    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    if(file) importDevisPdfFile(file);
+  openFileDropModal({
+    title:'Importer un devis (PDF)', accept:'application/pdf,.pdf', icon:'📄', what:'votre devis PDF',
+    hint:'Seuls les PDF générés par ComAgentCo peuvent être relus automatiquement.',
+    onFile: importDevisPdfFile,
   });
 }
 async function handleImportDevisPdfFile(evt){
@@ -8470,12 +8507,9 @@ function replaceDevisLineWithTarif(idx, tarifId){
   };
   refreshDevisModal();
 }
-function pickDevisAttachment(){
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.pdf,application/pdf';
-  input.onchange = async (evt)=>{
-    const file = evt.target.files[0];
+function attachDevisPdfFromInput(evt){ const f = evt.target.files[0]; if(f) attachDevisPdfFile(f); }
+async function attachDevisPdfFile(file){
+  {
     if(!file) return;
     const maxSize = backupDirHandle ? 15*1024*1024 : 3*1024*1024;
     if(file.size > maxSize){
@@ -8502,8 +8536,7 @@ function pickDevisAttachment(){
       console.error(e);
       showToast("Impossible de joindre ce fichier : "+(e.message||String(e)));
     }
-  };
-  input.click();
+  }
 }
 function downloadDevisAttachment(){
   const b64 = state.devisAttachments[draft.id];
@@ -8915,7 +8948,10 @@ function devisFormHtml(){
             <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="draft.attachmentPdfName=null; delete state.devisAttachments[draft.id]; persist('devisAttachments'); refreshDevisModal();">Retirer</button>
           </div>
         `:`
-          <button type="button" class="btn btn-sm btn-ghost" onclick="pickDevisAttachment()">⇪ Joindre un PDF</button>
+          <div class="upload-zone" style="padding:16px;" onclick="document.getElementById('d_attachFile').click()">
+            <input type="file" id="d_attachFile" accept=".pdf,application/pdf" onchange="attachDevisPdfFromInput(event)">
+            📎 Glissez-déposez un PDF ici, ou cliquez pour le rechercher dans vos dossiers
+          </div>
         `}
       </div>
 
@@ -11771,11 +11807,11 @@ function addBrandHistoryEntry(brandId){
 }
 
 function openImportIcsPicker(){
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.ics,text/calendar';
-  input.onchange = handleIcsFile;
-  input.click();
+  openFileDropModal({
+    title:'Importer un agenda (.ics)', accept:'.ics,text/calendar', icon:'📅', what:'votre fichier agenda .ics',
+    hint:'Export de votre agenda (Outlook, Google Agenda…).',
+    onFile: f=>handleIcsFile({target:{files:[f]}}),
+  });
 }
 async function handleIcsFile(evt){
   const file = evt.target.files[0];
