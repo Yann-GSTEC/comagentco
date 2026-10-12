@@ -8043,15 +8043,50 @@ function openImportDevisPdfPicker(){
   if(!pdfjsLib.GlobalWorkerOptions.workerSrc){
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
+  openModal(`
+    <div class="modal-head"><h3>Importer un devis (PDF)</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div id="pdfDropZone" style="border:2px dashed #9AA8A0;border-radius:16px;padding:70px 20px;text-align:center;background:var(--surface-2);cursor:pointer;transition:background .15s,border-color .15s;" onclick="pickDevisPdfFromFolders()">
+        <div style="font-size:46px;line-height:1;margin-bottom:12px;">📄</div>
+        <div style="font-size:17px;font-weight:700;margin-bottom:6px;">Glissez-déposez votre devis PDF ici</div>
+        <div class="helper" style="margin-bottom:14px;">ou</div>
+        <button type="button" class="btn btn-primary" onclick="event.stopPropagation(); pickDevisPdfFromFolders()">Rechercher dans mes dossiers…</button>
+        <div class="helper" style="margin-top:18px;">Seuls les PDF générés par ComAgentCo peuvent être relus automatiquement.</div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">Annuler</button></div>
+  `);
+  setupPdfDropZone();
+}
+function pickDevisPdfFromFolders(){
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'application/pdf,.pdf';
-  input.onchange = handleImportDevisPdfFile;
+  input.onchange = ()=>{ if(input.files[0]) importDevisPdfFile(input.files[0]); };
   input.click();
 }
+function setupPdfDropZone(){
+  const zone = document.getElementById('pdfDropZone');
+  const overlay = document.getElementById('modalOverlay');
+  if(!zone || !overlay) return;
+  const setHot = (hot)=>{ zone.style.background = hot ? '#E6F0FC' : 'var(--surface-2)'; zone.style.borderColor = hot ? '#2977D9' : '#9AA8A0'; };
+  // Tout le plein écran accepte le survol : un dépôt un peu à côté de la zone n'ouvre pas le PDF dans le navigateur
+  overlay.addEventListener('dragover', e=>{ e.preventDefault(); setHot(true); });
+  overlay.addEventListener('dragleave', e=>{ if(!overlay.contains(e.relatedTarget)) setHot(false); });
+  overlay.addEventListener('drop', e=>{
+    e.preventDefault(); setHot(false);
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if(file) importDevisPdfFile(file);
+  });
+}
 async function handleImportDevisPdfFile(evt){
-  const file = evt.target.files[0];
+  const f = evt.target.files[0];
+  if(f) importDevisPdfFile(f);
+}
+async function importDevisPdfFile(file){
   if(!file) return;
+  if(!/\.pdf$/i.test(file.name) && file.type!=='application/pdf'){ showToast('Ce fichier n\'est pas un PDF.'); return; }
+  closeModal();
   showToast('Lecture du PDF en cours…');
   try{
     const buf = await file.arrayBuffer();
