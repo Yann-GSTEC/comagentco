@@ -3969,7 +3969,9 @@ function openClientDetail(id, scrollToSuivi){
   const c = state.clients.find(x=>x.id===id);
   if(!c) return;
   historyNoteSelectedBrands = [];
-  const devisList = state.devis.filter(d=>d.clientId===id).sort((a,b)=>b.date.localeCompare(a.date));
+  // Offres faites à ce client en direct, ou à un distributeur pour son compte (champ « Installateur concerné »)
+  const devisList = state.devis.filter(d=>d.clientId===id || d.installateurId===id).sort((a,b)=>b.date.localeCompare(a.date));
+  const nbVia = devisList.filter(d=>d.clientId!==id).length;
   const contacts = c.contacts||[];
   openModal(`
     <div class="modal-head">
@@ -4019,17 +4021,19 @@ function openClientDetail(id, scrollToSuivi){
       <div class="section-title">Devis</div>
       ${devisList.length===0?'<div class="helper">Aucun devis pour ce client.</div>':`
       <div class="table-wrap"><table>
-        <thead><tr><th>N°</th><th>Date</th><th>Statut</th><th>Total HT</th><th></th></tr></thead>
+        <thead><tr><th>N°</th><th>Date</th><th>Adressé à</th><th>Statut</th><th>Total HT</th><th></th></tr></thead>
         <tbody>${devisList.map(d=>`
           <tr>
             <td style="font-weight:600;">${escapeHtml(d.number)}</td>
             <td>${fmtDate(d.date)}</td>
+            <td>${d.clientId===id?'<span class="helper">Direct</span>':`<span class="chip" style="background:#2977D9;" title="Offre faite à ce distributeur pour cet installateur">Via ${escapeHtml(clientSocieteLabel(d.clientId))}</span>`}</td>
             <td><span class="status-pill status-${d.status}">${d.status}</span></td>
             <td class="num">${fmtMoney(devisTotal(d).ht)}</td>
             <td><button class="btn btn-sm btn-ghost" onclick="closeModal();openDevisForm('${d.id}')">Ouvrir</button></td>
           </tr>`).join('')}
         </tbody>
-      </table></div>`}
+      </table></div>
+      ${nbVia?`<div class="helper" style="margin-top:6px;">${nbVia} offre(s) « via distributeur » : adressées à un distributeur pour le compte de ce client. Leur CA reste compté sur le distributeur.</div>`:''}`}
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal()">Fermer</button>
@@ -7422,7 +7426,7 @@ function renderDevisListInner(){
     });
   }
   const q = (ui.devisSearch||'').trim().toLowerCase();
-  if(q) list = list.filter(d=>(clientName(d.clientId)+' '+clientSocieteLabel(d.clientId)+' '+(d.objet||'')+' '+(d.reference||'')+' '+d.number+' '+(d.status||'')+' '+(d.suiviNotes||[]).map(n=>n.text).join(' ')).toLowerCase().includes(q));
+  if(q) list = list.filter(d=>(clientName(d.clientId)+' '+clientSocieteLabel(d.clientId)+' '+(d.installateurId?clientSocieteLabel(d.installateurId):'')+' '+(d.objet||'')+' '+(d.reference||'')+' '+d.number+' '+(d.status||'')+' '+(d.suiviNotes||[]).map(n=>n.text).join(' ')).toLowerCase().includes(q));
   if(ui.devisDateFrom) list = list.filter(d=>d.date>=ui.devisDateFrom);
   if(ui.devisDateTo) list = list.filter(d=>d.date<=ui.devisDateTo);
   if(ui.devisFilterBrand && ui.devisFilterBrand!=='all') list = list.filter(d=>(d.lines||[]).some(l=>l.brandId===ui.devisFilterBrand));
@@ -7454,7 +7458,7 @@ function renderDevisListInner(){
           <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(d.number)}</td>
           <td><span class="helper" style="font-weight:600;">${escapeHtml(d.type||'Devis')}</span></td>
           <td>${fmtDate(d.date)}</td>
-          <td>${escapeHtml(clientSocieteLabel(d.clientId))}</td>
+          <td>${escapeHtml(clientSocieteLabel(d.clientId))}${d.installateurId?`<div class="helper" style="font-size:11px;">↳ pour ${escapeHtml(clientSocieteLabel(d.installateurId))}</div>`:''}</td>
           <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(d.objet||'—')}</td>
           <td>${brandIds.slice(0,3).map(bid=>`<span class="chip" style="background:${brandColor(bid)};margin-right:3px;"><span class="sq"></span>${escapeHtml(brandName(bid))}</span>`).join('')}${brandIds.length>3?`<span class="helper">+${brandIds.length-3}</span>`:''}</td>
           <td class="num" style="font-weight:700;">${fmtMoney(t.ht)}</td>
@@ -8898,13 +8902,21 @@ function devisFormHtml(){
       </div>
       <div class="field-row">
         <div class="field" style="max-width:220px;"><label>Offre adressée à</label>
-          <select id="d_destinataire" onchange="draft.destinataire=this.value; refreshDevisModal();">
+          <select id="d_destinataire" onchange="draft.destinataire=this.value; if(this.value!=='Distributeur') draft.installateurId=''; refreshDevisModal();">
             <option value="" ${!draft.destinataire?'selected':''}>— Non précisé —</option>
             <option value="Distributeur" ${draft.destinataire==='Distributeur'?'selected':''}>Distributeur</option>
             <option value="Installateur" ${draft.destinataire==='Installateur'?'selected':''}>Installateur (direct)</option>
           </select>
           <div class="helper">Totaux toujours calculés sur le Prix d'achat HT.</div>
         </div>
+        ${draft.destinataire==='Distributeur'?`
+        <div class="field" style="min-width:260px;max-width:340px;"><label>Installateur concerné <span class="helper" style="display:inline;">(l'offre apparaîtra aussi sur sa fiche)</span></label>
+          <div class="autocomplete">
+            <input type="text" id="d_installerSearch" placeholder="Rechercher un client installateur…" value="${escapeHtml(currentInstallerLabel())}" oninput="devisSearchInstallers(this.value)" onfocus="devisSearchInstallers('')" onblur="setTimeout(()=>{const b=document.getElementById('d_installerResults'); if(b) b.innerHTML=''; const i=document.getElementById('d_installerSearch'); if(i) i.value=currentInstallerLabel();},180)" autocomplete="off">
+            <div id="d_installerResults"></div>
+          </div>
+          ${draft.installateurId?`<a href="#" style="font-size:12px;" onclick="event.preventDefault(); clearDevisInstaller();">✕ Retirer l'installateur</a>`:''}
+        </div>`:''}
         <div class="field" style="max-width:240px;"><label>Apporteur de l'affaire</label>
           <div class="pill-select">
             <button type="button" class="${draft.apporteurAffaire==='Agent'?'active':''}" onclick="draft.apporteurAffaire = draft.apporteurAffaire==='Agent' ? '' : 'Agent'; refreshDevisModal();">Agent</button>
@@ -9203,6 +9215,31 @@ function currentClientLabel(){
   if(!c) return '';
   return clientDisplayName(c);
 }
+function currentInstallerLabel(){
+  const c = state.clients.find(x=>x.id===draft.installateurId);
+  return c ? clientDisplayName(c) : '';
+}
+function devisSearchInstallers(q){
+  q = (q||'').trim().toLowerCase();
+  const box = document.getElementById('d_installerResults');
+  if(!box) return;
+  const words = q.split(/\s+/).filter(Boolean);
+  const isInst = c => (c.famille||'').toLowerCase().includes('installateur');
+  const results = state.clients.filter(c=>{
+    if(c.id===draft.clientId) return false; // le distributeur lui-même n'est pas l'installateur
+    if(words.length===0) return true;
+    const hay = (clientDisplayName(c)+' '+(c.name||'')+' '+(c.company||'')+' '+(c.ville||'')+' '+(c.famille||'')+' '+(c.sousFamille||'')).toLowerCase();
+    return words.every(w=>hay.includes(w));
+  }).sort((a,b)=>(isInst(b)?1:0)-(isInst(a)?1:0)).slice(0,20); // les installateurs d'abord
+  if(results.length===0){ box.innerHTML = `<div class="autocomplete-list"><div class="autocomplete-item">Aucun résultat</div></div>`; return; }
+  box.innerHTML = `<div class="autocomplete-list">${results.map(c=>`
+    <div class="autocomplete-item" onmousedown="setDevisInstaller('${c.id}')">
+      <span class="ref">${escapeHtml(clientDisplayName(c))}</span>
+      ${c.ville||c.famille?`<span class="desig"> — ${escapeHtml([c.famille, c.ville].filter(Boolean).join(' · '))}</span>`:''}
+    </div>`).join('')}</div>`;
+}
+function setDevisInstaller(id){ draft.installateurId = id; refreshDevisModal(); }
+function clearDevisInstaller(){ draft.installateurId = ''; refreshDevisModal(); }
 function devisSearchClients(q){
   q = (q||'').trim().toLowerCase();
   const box = document.getElementById('d_clientResults');
@@ -9780,6 +9817,7 @@ function saveDraftDevisTemplate(){
 }
 function saveDraftDevis(thenAction, keepOpen){
   if(draft.isTemplate){ saveDraftDevisTemplate(); return; }
+  if(draft.destinataire!=='Distributeur') draft.installateurId = ''; // pas d'installateur si l'offre n'est pas adressée à un distributeur
   if(!draft.clientId){ showToast('Sélectionnez un client.'); return; }
   if(draft.lines.length===0){ showToast('Ajoutez au moins une ligne au devis.'); return; }
   // Si rien n'a changé depuis le dernier enregistrement, inutile de ressauvegarder (et donc inutile de
