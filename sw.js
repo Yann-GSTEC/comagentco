@@ -3,9 +3,11 @@
 // chercher la dernière version déposée sur GitHub Pages (vos mises à jour s'appliquent donc
 // automatiquement, sans réinstallation). Hors ligne, on retombe sur la dernière version en cache.
 // IMPORTANT : ce service worker ne touche QU'AUX fichiers hébergés sur ce même site (index.html,
-// manifest, icônes). Toute requête vers un autre site (bibliothèques CDN, Microsoft Graph, lien .ics,
-// etc.) n'est jamais interceptée et suit son chemin normal, sans passer par ce cache.
-const CACHE_NAME = 'comagentco-cache-v4';
+// manifest, icônes). Toute requête vers un autre site (Microsoft Graph, lien .ics, etc.) n'est jamais
+// interceptée et suit son chemin normal, sans passer par ce cache.
+// Depuis la v5, les bibliothèques (PDF, Excel, graphiques, polices) sont intégrées dans index.html :
+// l'application fonctionne entièrement hors ligne.
+const CACHE_NAME = 'comagentco-cache-v5';
 const CORE_ASSETS = [
   './',
   './index.html',
