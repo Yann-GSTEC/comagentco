@@ -7,7 +7,7 @@
 // interceptée et suit son chemin normal, sans passer par ce cache.
 // Depuis la v5, les bibliothèques (PDF, Excel, graphiques, polices) sont intégrées dans index.html :
 // l'application fonctionne entièrement hors ligne.
-const CACHE_NAME = 'comagentco-cache-v5';
+const CACHE_NAME = 'comagentco-cache-v8';
 const CORE_ASSETS = [
   './',
   './index.html',

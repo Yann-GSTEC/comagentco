@@ -1203,6 +1203,7 @@ let ui = {
   emailingIncludeContacts:true,
   emailingSelected:{},
   rechercheQuery:'',
+  rechercheBrand:'all',
   rechercheClientQuery:'',
   rechercheSubTab:'prix',
   devisFilterStatus:'all',
@@ -2430,6 +2431,7 @@ const UI_FILTER_DEFAULTS = {
   emailingSousFamilleFilter:'all',
   emailingBrandFilter:'all',
   rechercheQuery:'',
+  rechercheBrand:'all',
   rechercheClientQuery:'',
   rechercheSubTab:'prix',
   devisFilterStatus:'all',
@@ -2457,7 +2459,7 @@ const TAB_FILTER_KEYS = {
   listesprixnets:['pnBrandFilter','pnSearch'],
   clients:['clientsSearch','clientsStatusFilter','clientsFamilleFilter','clientsSousFamilleFilter','clientsDepartementFilter'],
   emailing:['emailingSearch','emailingStatusFilter','emailingFamilleFilter','emailingSousFamilleFilter','emailingBrandFilter'],
-  recherche:['rechercheQuery','rechercheClientQuery','rechercheSubTab'],
+  recherche:['rechercheQuery','rechercheBrand','rechercheClientQuery','rechercheSubTab'],
   devis:['devisFilterStatus','devisFilterEtats','devisFilterBrand','devisFilterApporteur','devisSearch','devisDateFrom','devisDateTo'],
   dashboard:['dashboardYear','dashboardCommercial','dashboardBrand','dashboardClient'],
   commissions:['commissionsYear','commissionsMonth','commissionsBrand'],
@@ -7155,10 +7157,7 @@ function renderRecherche(){
   ];
   const showIf = (key)=> subTab===key ? '' : 'display:none;';
   const q = ui.rechercheQuery.trim().toLowerCase();
-  let results = [];
-  if(q && subTab==='prix'){
-    results = state.tarifs.filter(t=>(t.reference+' '+(t.designation||'')).toLowerCase().includes(q)).slice(0,200);
-  }
+  const results = (q && subTab==='prix') ? rechercheComputeRows() : [];
   const qc = (ui.rechercheClientQuery||'').trim().toLowerCase();
   return `
   <div class="topbar"><div><h1>Recherche</h1><div class="sub">Prix, références ou clients</div></div></div>
@@ -7172,6 +7171,10 @@ function renderRecherche(){
       <div class="search-box" style="max-width:none;margin-bottom:18px;">
         <span class="ic">⌕</span>
         <input type="text" ${subTab==='prix'?'autofocus':''} placeholder="Tapez une référence ou un mot de la désignation…" value="${escapeHtml(ui.rechercheQuery)}" oninput="ui.rechercheQuery=this.value; debouncedRenderRechercheResults();">
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:16px;">
+        <span class="helper" style="font-weight:600;padding-top:6px;white-space:nowrap;">Marque :</span>
+        <div id="rechercheBrandPills">${rechercheBrandPillsHtml()}</div>
       </div>
       <div id="rechercheResults">${renderRechercheResultsInner(results,q)}</div>
     </div>
@@ -7214,30 +7217,84 @@ function renderRechercheClientResults(){
   if(box) box.innerHTML = renderRechercheClientResultsInner((ui.rechercheClientQuery||'').trim().toLowerCase());
 }
 const debouncedRenderRechercheClientResults = debounce(renderRechercheClientResults, 150);
-function renderRechercheResultsInner(results,q){
-  if(!q) return `<div class="helper" style="text-align:center;padding:40px;">Commencez à taper pour rechercher parmi ${state.tarifs.length} références.</div>`;
-  if(results.length===0) return emptyState('⌕','Aucun résultat','Aucune référence ne correspond à cette recherche.');
+function rechercheBrandPillsHtml(){
+  const cur = ui.rechercheBrand || 'all';
+  const brands = state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  return `<div class="pill-select">
+    <button class="${cur==='all'?'active':''}" onclick="setRechercheBrand('all')">Toutes les marques</button>
+    ${brands.map(b=>`<button class="${cur===b.id?'active':''}" onclick="setRechercheBrand('${b.id}')">${escapeHtml(b.name)}</button>`).join('')}
+  </div>`;
+}
+function setRechercheBrand(brandId){
+  ui.rechercheBrand = brandId;
+  const pills = document.getElementById('rechercheBrandPills');
+  if(pills) pills.innerHTML = rechercheBrandPillsHtml();
+  renderRechercheResults();
+}
+/* Recherche de prix : tarif (prix HT) + prix nets des listes, pour la marque choisie (ou toutes) */
+function rechercheComputeRows(){
+  const q = ui.rechercheQuery.trim().toLowerCase();
+  if(!q) return [];
+  const qNorm = normalizeRefQuery(q);
+  const brand = ui.rechercheBrand || 'all';
+  const inBrand = t => brand==='all' || t.brandId===brand;
+  const keyOf = (b,r)=> b+'|'+normalizeRefQuery(r);
+  // Prix nets, regroupés par marque + référence
+  const netsByKey = new Map();
+  state.listesPrixNets.forEach(t=>{
+    if(!inBrand(t)) return;
+    const k = keyOf(t.brandId, t.reference);
+    if(!netsByKey.has(k)) netsByKey.set(k, []);
+    netsByKey.get(k).push(t);
+  });
+  const listeById = new Map(state.prixNetListes.map(l=>[l.id,l]));
+  const rank = t => { const r = normalizeRefQuery(t.reference); return r===qNorm ? 0 : r.startsWith(qNorm) ? 1 : r.includes(qNorm) ? 2 : 3; };
+  const mkNets = (items)=> (items||[]).map(n=>({ liste: listeById.get(n.listeId), prixNet:n.prixNet, achat:n.prixAchatDistributeur })).filter(n=>n.liste);
+  // Références du tarif correspondant à la saisie (références exactes d'abord)
+  const tarifRows = getSortedTarifs().filter(t=>inBrand(t) && tarifMatchesQuery(t,q,qNorm))
+    .map((t,i)=>({t,i,r:rank(t)})).sort((a,b)=>a.r-b.r || a.i-b.i)
+    .map(x=>({ brandId:x.t.brandId, reference:x.t.reference, designation:x.t.designation, prixHT:x.t.prixHT, nets:mkNets(netsByKey.get(keyOf(x.t.brandId,x.t.reference))), source:'tarif' }));
+  // Références présentes seulement dans une liste de prix nets (absentes du tarif)
+  const tarifKeys = new Set(state.tarifs.map(t=>keyOf(t.brandId,t.reference)));
+  const pnOnly = new Map();
+  getSortedListesPrixNets().forEach(t=>{
+    if(!inBrand(t) || !tarifMatchesQuery(t,q,qNorm)) return;
+    const k = keyOf(t.brandId, t.reference);
+    if(tarifKeys.has(k) || pnOnly.has(k)) return;
+    pnOnly.set(k, { brandId:t.brandId, reference:t.reference, designation:t.designation, prixHT:null, nets:mkNets(netsByKey.get(k)), source:'net', r:rank(t) });
+  });
+  const netOnlyRows = [...pnOnly.values()].sort((a,b)=>a.r-b.r);
+  return tarifRows.concat(netOnlyRows);
+}
+function renderRechercheResultsInner(rows,q){
+  const brand = ui.rechercheBrand || 'all';
+  const brandLabel = brand==='all' ? '' : ` de ${escapeHtml(brandName(brand))}`;
+  if(!q) return `<div class="helper" style="text-align:center;padding:40px;">Tapez une référence${brandLabel} pour voir son prix — ${state.tarifs.length} références au tarif${brand==='all'?'':' (toutes marques)'}.</div>`;
+  if(rows.length===0) return emptyState('⌕','Aucun résultat', brand==='all' ? 'Aucune référence ne correspond à cette recherche.' : `Aucune référence ne correspond à cette recherche chez ${brandName(brand)}. Essayez « Toutes les marques ».`);
+  const shown = rows.slice(0,200);
   return `
+    <div class="helper" style="margin-bottom:8px;">${rows.length} résultat(s)${brandLabel}${rows.length>200?' — 200 premiers affichés, affinez votre recherche':''}</div>
     <div class="table-wrap card"><table>
-      <thead><tr><th>Marque</th><th>Référence</th><th>Désignation</th><th>Prix HT</th></tr></thead>
+      <thead><tr><th>Marque</th><th>Référence</th><th>Désignation</th><th class="num">Prix HT (tarif)</th><th>Prix nets</th></tr></thead>
       <tbody>
-        ${results.map(t=>`
+        ${shown.map(r=>`
           <tr>
-            <td><span class="chip" style="background:${brandColor(t.brandId)}"><span class="sq"></span>${escapeHtml(brandName(t.brandId))}</span></td>
-            <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(t.reference)}</td>
-            <td>${escapeHtml(t.designation||'—')}</td>
-            <td class="num" style="font-weight:600;">${fmtMoney(t.prixHT)}</td>
+            <td><span class="chip" style="background:${brandColor(r.brandId)}"><span class="sq"></span>${escapeHtml(brandName(r.brandId))}</span></td>
+            <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(r.reference)}</td>
+            <td>${escapeHtml(r.designation||'—')}</td>
+            <td class="num" style="font-weight:600;">${r.prixHT!=null?fmtMoney(r.prixHT):'<span class="helper" title="Référence absente du tarif, présente uniquement dans une liste de prix nets">—</span>'}</td>
+            <td>${r.nets.length===0?'<span class="helper">—</span>':r.nets.map(n=>`<div style="white-space:nowrap;margin:1px 0;"><span class="chip" style="background:#2977D9;font-size:10.5px;">${escapeHtml(n.liste.nom||'Liste')}</span> <strong>${n.prixNet?fmtMoney(n.prixNet):'—'}</strong>${listeValidityBadgeHtml(n.liste)}</div>`).join('')}</td>
           </tr>
         `).join('')}
       </tbody>
     </table></div>
-    ${results.length===200?'<div class="helper" style="padding:10px;">200 premiers résultats affichés — affinez votre recherche.</div>':''}
   `;
 }
 function renderRechercheResults(){
   const q = ui.rechercheQuery.trim().toLowerCase();
-  const results = q ? state.tarifs.filter(t=>(t.reference+' '+(t.designation||'')).toLowerCase().includes(q)).slice(0,200) : [];
-  document.getElementById('rechercheResults').innerHTML = renderRechercheResultsInner(results,q);
+  const rows = q ? rechercheComputeRows() : [];
+  const box = document.getElementById('rechercheResults');
+  if(box) box.innerHTML = renderRechercheResultsInner(rows,q);
 }
 
 /* ============================= PARAMETRES ============================= */
