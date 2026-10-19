@@ -7157,7 +7157,7 @@ function renderRecherche(){
   ];
   const showIf = (key)=> subTab===key ? '' : 'display:none;';
   const q = ui.rechercheQuery.trim().toLowerCase();
-  const results = (q && subTab==='prix') ? rechercheComputeRows() : [];
+  const results = (q && subTab==='prix') ? rechercheComputeAll() : {tarif:[], devis:[]};
   const qc = (ui.rechercheClientQuery||'').trim().toLowerCase();
   return `
   <div class="topbar"><div><h1>Recherche</h1><div class="sub">Prix, références ou clients</div></div></div>
@@ -7266,15 +7266,53 @@ function rechercheComputeRows(){
   const netOnlyRows = [...pnOnly.values()].sort((a,b)=>a.r-b.r);
   return tarifRows.concat(netOnlyRows);
 }
-function renderRechercheResultsInner(rows,q){
+/* ---- Prix pratiqués dans les devis et marchés déjà faits ---- */
+const devisLineSKCache = new WeakMap(); // clé de recherche calculée une seule fois par ligne (la ligne est remplacée si le devis change)
+function devisLineSK(l){
+  let v = devisLineSKCache.get(l);
+  if(!v){
+    const des = (l.designation && l.designation.indexOf('<')>=0) ? stripHtml(l.designation) : (l.designation||'');
+    const t = ((l.reference||'')+' '+des).toLowerCase();
+    v = { t, n: normalizeRefQuery(t), des, ref: normalizeRefQuery(l.reference||'') };
+    devisLineSKCache.set(l, v);
+  }
+  return v;
+}
+function rechercheDevisRows(q, qNorm, brand){
+  const out = [];
+  (state.devis||[]).forEach(d=>{
+    (d.lines||[]).forEach(l=>{
+      if(l.isTitleLine) return;
+      if(brand!=='all' && l.brandId!==brand) return;
+      const sk = devisLineSK(l);
+      if(!(sk.t.includes(q) || (qNorm && sk.n.includes(qNorm)))) return;
+      out.push({ d, l, des:sk.des, r: sk.ref===qNorm ? 0 : sk.ref.startsWith(qNorm) ? 1 : sk.ref.includes(qNorm) ? 2 : 3 });
+    });
+  });
+  // références exactes d'abord, puis les devis les plus récents
+  return out.sort((a,b)=> a.r-b.r || (b.d.date||'').localeCompare(a.d.date||''));
+}
+function rechercheComputeAll(){
+  const q = ui.rechercheQuery.trim().toLowerCase();
+  if(!q) return {tarif:[], devis:[]};
+  const qNorm = normalizeRefQuery(q);
+  return { tarif: rechercheComputeRows(), devis: rechercheDevisRows(q, qNorm, ui.rechercheBrand||'all') };
+}
+function renderRechercheResultsInner(all,q){
+  const rows = all.tarif, devisRows = all.devis;
   const brand = ui.rechercheBrand || 'all';
   const brandLabel = brand==='all' ? '' : ` de ${escapeHtml(brandName(brand))}`;
-  if(!q) return `<div class="helper" style="text-align:center;padding:40px;">Tapez une référence${brandLabel} pour voir son prix — ${state.tarifs.length} références au tarif${brand==='all'?'':' (toutes marques)'}.</div>`;
-  if(rows.length===0) return emptyState('⌕','Aucun résultat', brand==='all' ? 'Aucune référence ne correspond à cette recherche.' : `Aucune référence ne correspond à cette recherche chez ${brandName(brand)}. Essayez « Toutes les marques ».`);
+  if(!q) return `<div class="helper" style="text-align:center;padding:40px;">Tapez une référence${brandLabel} pour voir son prix — ${state.tarifs.length} références au tarif${brand==='all'?'':' (toutes marques)'}, et vos ${state.devis.length} devis / marchés.</div>`;
+  if(rows.length===0 && devisRows.length===0) return emptyState('⌕','Aucun résultat', brand==='all' ? 'Aucune référence ne correspond à cette recherche, ni au tarif ni dans vos devis.' : `Aucune référence ne correspond à cette recherche chez ${brandName(brand)}. Essayez « Toutes les marques ».`);
   const shown = rows.slice(0,200);
+  const DEV_CAP = 150;
+  const shownDevis = devisRows.slice(0,DEV_CAP);
+  const remises = l => [l.remisePct1,l.remisePct2,l.remisePct3].filter(x=>x>0).join(' + ');
   return `
-    <div class="helper" style="margin-bottom:8px;">${rows.length} résultat(s)${brandLabel}${rows.length>200?' — 200 premiers affichés, affinez votre recherche':''}</div>
-    <div class="table-wrap card"><table>
+    <div class="helper" style="margin-bottom:8px;">${rows.length} résultat(s) au tarif${brandLabel} · ${devisRows.length} ligne(s) dans vos devis et marchés${rows.length>200?' — 200 premiers résultats du tarif affichés':''}</div>
+    ${rows.length===0?'<div class="helper" style="margin-bottom:14px;">Aucune référence au tarif ni en liste de prix nets pour cette recherche.</div>':`
+    <div class="section-title">Au tarif et en listes de prix nets</div>
+    <div class="table-wrap card" style="margin-bottom:24px;"><table>
       <thead><tr><th>Marque</th><th>Référence</th><th>Désignation</th><th class="num">Prix HT (tarif)</th><th>Prix nets</th></tr></thead>
       <tbody>
         ${shown.map(r=>`
@@ -7287,12 +7325,35 @@ function renderRechercheResultsInner(rows,q){
           </tr>
         `).join('')}
       </tbody>
+    </table></div>`}
+    ${devisRows.length===0?'':`
+    <div class="section-title">Dans vos devis et marchés <span class="helper" style="display:inline;">— cliquez sur une ligne pour ouvrir le devis</span></div>
+    <div class="table-wrap card"><table>
+      <thead><tr><th>Date</th><th>N°</th><th>Société</th><th>Marque</th><th>Référence</th><th>Désignation</th><th class="num">Qté</th><th class="num">PU tarif</th><th>Remise</th><th class="num">Prix d'achat HT</th><th class="num">Total HT</th></tr></thead>
+      <tbody>
+        ${shownDevis.map(x=>`
+          <tr style="cursor:pointer;" onclick="openDevisForm('${x.d.id}')" title="Ouvrir ce ${x.d.type==='Marché'?'marché':'devis'}">
+            <td>${fmtDate(x.d.date)}</td>
+            <td style="font-weight:600;white-space:nowrap;">${escapeHtml(x.d.number||'—')}${x.d.type==='Marché'?' <span class="chip" style="background:var(--ink-soft);font-size:10px;">Marché</span>':''}${x.d.etatAffaire?`<div class="helper" style="font-size:11px;">${escapeHtml(x.d.etatAffaire)}</div>`:''}</td>
+            <td>${escapeHtml(clientSocieteLabel(x.d.clientId))}${x.d.installateurId?`<div class="helper" style="font-size:11px;">↳ pour ${escapeHtml(clientSocieteLabel(x.d.installateurId))}</div>`:''}</td>
+            <td>${x.l.brandId?`<span class="chip" style="background:${brandColor(x.l.brandId)}"><span class="sq"></span>${escapeHtml(brandName(x.l.brandId))}</span>`:'—'}</td>
+            <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(x.l.reference||'—')}</td>
+            <td>${escapeHtml(x.des||'—')}</td>
+            <td class="num">${x.l.qty||0}</td>
+            <td class="num">${x.l.prixUnitaire?fmtMoney(x.l.prixUnitaire):'—'}</td>
+            <td>${x.l.prixNetApplied && x.l.prixNetTarget==='distri' && x.l.netPriceOverride!=null ? '<span class="chip" style="background:#2977D9;font-size:10px;">Prix net</span>' : (remises(x.l)?remises(x.l)+' %':'—')}</td>
+            <td class="num" style="font-weight:600;">${fmtMoney(lineDistribUnit(x.l))}</td>
+            <td class="num">${fmtMoney(lineTotalHT(x.l, x.d.destinataire))}</td>
+          </tr>
+        `).join('')}
+      </tbody>
     </table></div>
+    ${devisRows.length>DEV_CAP?`<div class="helper" style="padding:10px;">${DEV_CAP} lignes affichées sur ${devisRows.length} (les références exactes puis les devis les plus récents d'abord) — affinez votre recherche.</div>`:''}`}
   `;
 }
 function renderRechercheResults(){
   const q = ui.rechercheQuery.trim().toLowerCase();
-  const rows = q ? rechercheComputeRows() : [];
+  const rows = q ? rechercheComputeAll() : {tarif:[], devis:[]};
   const box = document.getElementById('rechercheResults');
   if(box) box.innerHTML = renderRechercheResultsInner(rows,q);
 }
