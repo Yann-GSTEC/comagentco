@@ -4171,6 +4171,71 @@ function normalizeClientContact(p){
   p.telephone = formatPhoneFr(p.telephone); p.portable = formatPhoneFr(p.portable);
   return p;
 }
+/* ---- Partenaires d'un client (distributeur, BE, installateur, promoteur…) ---- */
+const PARTNER_TYPES = ['Distributeur','Bureau d\'études','Installateur','Promoteur','Maître d\'œuvre','Architecte','Maître d\'ouvrage','Fabricant','Autre'];
+let clientDraftPartners = [];
+function renderClientPartnersTable(selfId){
+  const rows = clientDraftPartners;
+  const reverse = selfId ? state.clients.filter(o=>o.id!==selfId && (o.partenaires||[]).some(p=>p.clientId===selfId)) : [];
+  return `
+    ${rows.length===0?'<div class="helper" style="margin:14px 0;">Aucun partenaire pour l\'instant.</div>':`
+    <div class="table-wrap card" style="margin-top:6px;"><table class="no-col-resize">
+      <thead><tr><th>Société</th><th>Ville</th><th>Famille</th><th style="width:240px;">Type de partenariat</th><th style="width:50px;"></th></tr></thead>
+      <tbody>
+        ${rows.map((p,i)=>{
+          const pc = state.clients.find(x=>x.id===p.clientId);
+          return `<tr>
+            <td style="font-weight:600;">${pc?escapeHtml(clientDisplayName(pc)):'<span class="helper">Client supprimé</span>'}</td>
+            <td>${pc?escapeHtml(pc.ville||'—'):'—'}</td>
+            <td>${pc?escapeHtml(pc.famille||'—'):'—'}</td>
+            <td><input type="text" list="dl_partnerTypes" value="${escapeHtml(p.type||'')}" placeholder="Distributeur, BE…" onchange="clientDraftPartners[${i}].type=this.value.trim();"></td>
+            <td class="table-actions"><button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="removeClientPartner(${i})" title="Retirer ce partenaire">✕</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>`}
+    ${reverse.length?`
+    <div class="section-title" style="margin-top:18px;">Déclaré comme partenaire par</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;">${reverse.map(o=>{ const p = o.partenaires.find(x=>x.clientId===selfId); return `<span class="chip" style="background:var(--surface-2);color:var(--ink);">${escapeHtml(clientDisplayName(o))}${p&&p.type?` <span class="helper" style="display:inline;">(${escapeHtml(p.type)})</span>`:''}</span>`; }).join('')}</div>`:''}`;
+}
+function refreshClientPartnersTable(){ const b = document.getElementById('clientPartnersBox'); if(b) b.innerHTML = renderClientPartnersTable(clientDraftId); }
+function clientPartnerSearch(q){
+  const box = document.getElementById('f_partnerResults'); if(!box) return;
+  const words = (q||'').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const taken = new Set(clientDraftPartners.map(p=>p.clientId));
+  const results = state.clients.filter(c=>{
+    if(c.id===clientDraftId || taken.has(c.id)) return false;
+    if(words.length===0) return true;
+    const hay = (clientDisplayName(c)+' '+(c.name||'')+' '+(c.company||'')+' '+(c.ville||'')+' '+(c.famille||'')).toLowerCase();
+    return words.every(w=>hay.includes(w));
+  }).sort((a,b)=>clientDisplayName(a).localeCompare(clientDisplayName(b))).slice(0,20);
+  if(results.length===0){ box.innerHTML = '<div class="autocomplete-list"><div class="autocomplete-item">Aucun client trouvé</div></div>'; return; }
+  box.innerHTML = `<div class="autocomplete-list">${results.map(c=>`
+    <div class="autocomplete-item" onmousedown="event.preventDefault(); addClientPartner('${c.id}');">
+      <span class="ref">${escapeHtml(clientDisplayName(c))}</span>${c.ville||c.famille?`<span class="desig"> — ${escapeHtml([c.famille,c.ville].filter(Boolean).join(' · '))}</span>`:''}
+    </div>`).join('')}</div>`;
+}
+function addClientPartner(id){
+  if(clientDraftPartners.some(p=>p.clientId===id)) return;
+  const pc = state.clients.find(x=>x.id===id);
+  // Le type est proposé d'après la famille du client choisi (modifiable)
+  const guess = pc ? (PARTNER_TYPES.find(t=>t.toLowerCase()===(pc.famille||'').toLowerCase()) || (pc.famille||'')) : '';
+  clientDraftPartners.push({ id:uid(), clientId:id, type:guess });
+  const s = document.getElementById('f_partnerSearch'); if(s) s.value = '';
+  const r = document.getElementById('f_partnerResults'); if(r) r.innerHTML = '';
+  refreshClientPartnersTable();
+}
+function removeClientPartner(i){ clientDraftPartners.splice(i,1); refreshClientPartnersTable(); }
+function remapMergedClientRefs(idMap){
+  // Après une fusion de fiches : les partenaires et installateurs désignés suivent la fiche conservée
+  state.clients.forEach(c=>{
+    if(!Array.isArray(c.partenaires) || c.partenaires.length===0) return;
+    const seen = new Set(); const out = [];
+    c.partenaires.forEach(p=>{ const nid = idMap[p.clientId] || p.clientId; if(nid===c.id || seen.has(nid)) return; seen.add(nid); out.push({...p, clientId:nid}); });
+    c.partenaires = out;
+  });
+  state.devis.forEach(d=>{ if(d.installateurId && idMap[d.installateurId]) d.installateurId = idMap[d.installateurId]; });
+}
 let clientDraftContacts = [];
 let clientDraftRemises = [];
 let clientDraftId = null;
@@ -4182,6 +4247,7 @@ function openClientForm(id){
   const c = id ? state.clients.find(x=>x.id===id) : null;
   clientDraftContacts = c && c.contacts ? JSON.parse(JSON.stringify(c.contacts)).map(normalizeClientContact) : [];
   clientDraftRemises = c ? JSON.parse(JSON.stringify(clientRemiseRules(c))) : [];
+  clientDraftPartners = c && c.partenaires ? JSON.parse(JSON.stringify(c.partenaires)) : [];
   clientDraftId = id || null;
   openModal(`
     <div class="modal-head"><h3>${c?'Modifier le client':'Nouveau client'}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
@@ -4189,6 +4255,7 @@ function openClientForm(id){
       <button type="button" class="client-form-tab active" data-tab="fiche" onclick="switchClientFormTab('fiche')">Fiche client</button>
       <button type="button" class="client-form-tab" data-tab="contacts" onclick="switchClientFormTab('contacts')">Personnes à contacter chez le client</button>
       <button type="button" class="client-form-tab" data-tab="remises" onclick="switchClientFormTab('remises')">Remise tarif par défaut</button>
+      <button type="button" class="client-form-tab" data-tab="partenaires" onclick="switchClientFormTab('partenaires')">Partenaires</button>
     </div>
     <div class="modal-body">
       <div class="client-form-panel" data-panel="fiche" style="display:block;">
@@ -4267,6 +4334,17 @@ function openClientForm(id){
         </table>
       </div>
       <button type="button" class="btn btn-sm" style="margin-top:8px;" onclick="clientDraftRemises.push({id:uid(),brandId:'',familleArticle:'',remise1:0,remise2:0,remise3:0}); refreshClientRemisesTable();">+ Ajouter une règle</button>
+      </div>
+      <div class="client-form-panel" data-panel="partenaires" style="display:none;">
+        <div class="helper" style="margin-bottom:12px;">Les sociétés avec lesquelles ce client travaille : distributeur, bureau d'études, installateur, promoteur… Recherchez-les dans votre liste de clients, vous pouvez en ajouter autant que nécessaire.</div>
+        <div class="field" style="max-width:520px;"><label>Ajouter un partenaire</label>
+          <div class="autocomplete">
+            <input type="text" id="f_partnerSearch" placeholder="Taper le nom d'un client…" autocomplete="off" oninput="clientPartnerSearch(this.value)" onfocus="clientPartnerSearch(this.value)" onblur="setTimeout(()=>{const b=document.getElementById('f_partnerResults'); if(b) b.innerHTML='';},180)">
+            <div id="f_partnerResults"></div>
+          </div>
+        </div>
+        <datalist id="dl_partnerTypes">${PARTNER_TYPES.map(t=>`<option value="${escapeHtml(t)}">`).join('')}</datalist>
+        <div id="clientPartnersBox">${renderClientPartnersTable(c?c.id:null)}</div>
       </div>
     </div>
     <div class="modal-foot">
@@ -4480,6 +4558,7 @@ function saveClient(id){
     remisesTarif: clientDraftRemises.filter(r=>r.remise1||r.remise2||r.remise3||r.brandId||r.familleArticle),
     actif: !document.getElementById('f_inactif').checked,
     contacts: clientDraftContacts.map(normalizeClientContact),
+    partenaires: clientDraftPartners.filter(p=>p.clientId),
   };
   if(id){
     const existing = state.clients.find(x=>x.id===id);
@@ -4601,6 +4680,17 @@ function openClientDetail(id, scrollToSuivi){
       </table></div>`:`
       <div class="section-title">Personnes à contacter</div>
       <div class="helper" style="margin-bottom:14px;">Aucun contact enregistré pour ce client. <a href="#" onclick="event.preventDefault(); openClientForm('${c.id}');">+ Ajouter un contact</a></div>`}
+
+      ${(()=>{
+        const mine = (c.partenaires||[]).map(p=>({p, pc:state.clients.find(x=>x.id===p.clientId)})).filter(x=>x.pc);
+        const rev = state.clients.filter(o=>o.id!==c.id && (o.partenaires||[]).some(p=>p.clientId===c.id));
+        if(mine.length===0 && rev.length===0) return '';
+        return `<div class="section-title">Partenaires</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+          ${mine.map(x=>`<span class="chip" style="background:#2977D9;cursor:pointer;" onclick="openClientDetail('${x.pc.id}')" title="Ouvrir la synthèse de ${escapeHtml(clientDisplayName(x.pc))}">${x.p.type?escapeHtml(x.p.type)+' — ':''}${escapeHtml(clientDisplayName(x.pc))}</span>`).join('')}
+          ${rev.map(o=>{ const p = o.partenaires.find(q=>q.clientId===c.id); return `<span class="chip" style="background:var(--surface-2);color:var(--ink);cursor:pointer;" onclick="openClientDetail('${o.id}')" title="Cette société vous déclare comme partenaire">← ${escapeHtml(clientDisplayName(o))}${p&&p.type?` <span class="helper" style="display:inline;">(${escapeHtml(p.type)})</span>`:''}</span>`; }).join('')}
+        </div>`;
+      })()}
 
       ${renderClientSuiviCommercialSection(c, '180px', true)}
 
@@ -5460,6 +5550,7 @@ function confirmMergeClientGroup(groupIds, gi){
     state.devis.forEach(d=>{ if(d.clientId===id) d.clientId=keepId; });
   });
   const removeIds = new Set(groupIds.filter(id=>id!==keepId));
+  { const m = {}; removeIds.forEach(id=>{ m[id] = keepId; }); remapMergedClientRefs(m); }
   state.clients = state.clients.filter(c=>!removeIds.has(c.id));
   persist('clients'); persist('devis');
   render();
@@ -5526,6 +5617,7 @@ function confirmMergeContacts(){
   const groups = computeContactMergeGroups();
   let mergedCount = 0;
   const idsToRemove = new Set();
+  const mergeIdMap = {};
   groups.forEach(g=>{
     const group = g.clients;
     // La fiche "primaire" retenue est celle qui a le plus d'informations société renseignées
@@ -5554,9 +5646,11 @@ function confirmMergeContacts(){
         if(emailKey) existingEmails.add(emailKey);
       }
       idsToRemove.add(c.id);
+      mergeIdMap[c.id] = primary.id;
       mergedCount++;
     });
   });
+  remapMergedClientRefs(mergeIdMap);
   state.clients = state.clients.filter(c=>!idsToRemove.has(c.id));
   persist('clients');
   closeModal();
