@@ -4179,7 +4179,7 @@ function renderClientPartnersTable(selfId){
   const reverse = selfId ? state.clients.filter(o=>o.id!==selfId && (o.partenaires||[]).some(p=>p.clientId===selfId)) : [];
   return `
     ${rows.length===0?'<div class="helper" style="margin:14px 0;">Aucun partenaire pour l\'instant.</div>':`
-    <div class="table-wrap card" style="margin-top:6px;"><table class="no-col-resize">
+    <div class="table-wrap card" style="margin-top:6px;"><table>
       <thead><tr><th>Société</th><th style="width:260px;">Contact</th><th>Ville</th><th>Famille</th><th style="width:240px;">Type de partenariat</th><th style="width:50px;"></th></tr></thead>
       <tbody>
         ${rows.map((p,i)=>{
