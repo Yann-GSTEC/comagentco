@@ -4180,12 +4180,13 @@ function renderClientPartnersTable(selfId){
   return `
     ${rows.length===0?'<div class="helper" style="margin:14px 0;">Aucun partenaire pour l\'instant.</div>':`
     <div class="table-wrap card" style="margin-top:6px;"><table class="no-col-resize">
-      <thead><tr><th>Société</th><th>Ville</th><th>Famille</th><th style="width:240px;">Type de partenariat</th><th style="width:50px;"></th></tr></thead>
+      <thead><tr><th>Société</th><th style="width:260px;">Contact</th><th>Ville</th><th>Famille</th><th style="width:240px;">Type de partenariat</th><th style="width:50px;"></th></tr></thead>
       <tbody>
         ${rows.map((p,i)=>{
           const pc = state.clients.find(x=>x.id===p.clientId);
           return `<tr>
             <td style="font-weight:600;">${pc?escapeHtml(clientDisplayName(pc)):'<span class="helper">Client supprimé</span>'}</td>
+            <td>${partnerContactSelectHtml(p, pc, i)}</td>
             <td>${pc?escapeHtml(pc.ville||'—'):'—'}</td>
             <td>${pc?escapeHtml(pc.famille||'—'):'—'}</td>
             <td><input type="text" list="dl_partnerTypes" value="${escapeHtml(p.type||'')}" placeholder="Distributeur, BE…" onchange="clientDraftPartners[${i}].type=this.value.trim();"></td>
@@ -4196,7 +4197,26 @@ function renderClientPartnersTable(selfId){
     </table></div>`}
     ${reverse.length?`
     <div class="section-title" style="margin-top:18px;">Déclaré comme partenaire par</div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;">${reverse.map(o=>{ const p = o.partenaires.find(x=>x.clientId===selfId); return `<span class="chip" style="background:var(--surface-2);color:var(--ink);">${escapeHtml(clientDisplayName(o))}${p&&p.type?` <span class="helper" style="display:inline;">(${escapeHtml(p.type)})</span>`:''}</span>`; }).join('')}</div>`:''}`;
+    <div style="display:flex;flex-wrap:wrap;gap:8px;">${reverse.map(o=>{ const p = o.partenaires.find(x=>x.clientId===selfId); const cn = p ? partnerContactName(state.clients.find(x=>x.id===selfId), p.contactId) : ''; return `<span class="chip" style="background:var(--surface-2);color:var(--ink);">${escapeHtml(clientDisplayName(o))}${p&&p.type?` <span class="helper" style="display:inline;">(${escapeHtml(p.type)}${cn?' — contact : '+escapeHtml(cn):''})</span>`:(cn?` <span class="helper" style="display:inline;">(contact : ${escapeHtml(cn)})</span>`:'')}</span>`; }).join('')}</div>`:''}`;
+}
+function partnerContactLabel(ct){
+  const nom = [ct.prenom, ct.nom].filter(Boolean).join(' ') || ct.email || '(sans nom)';
+  return nom + (ct.fonction ? ' — '+ct.fonction : '') + (ct.actif===false ? ' (inactif)' : '');
+}
+function partnerContactSelectHtml(p, pc, i){
+  if(!pc) return '<span class="helper">—</span>';
+  const contacts = (pc.contacts||[]).slice().sort((a,b)=>(a.actif===false?1:0)-(b.actif===false?1:0));
+  const found = !p.contactId || contacts.some(ct=>ct.id===p.contactId);
+  if(contacts.length===0 && !p.contactId) return '<span class="helper">Aucun contact enregistré</span>';
+  return `<select onchange="clientDraftPartners[${i}].contactId=this.value;">
+    <option value="">— Aucun contact précis —</option>
+    ${contacts.map(ct=>`<option value="${ct.id}" ${p.contactId===ct.id?'selected':''}>${escapeHtml(partnerContactLabel(ct))}</option>`).join('')}
+    ${found?'':`<option value="${p.contactId}" selected>Contact introuvable (supprimé ou déplacé)</option>`}
+  </select>`;
+}
+function partnerContactName(pc, contactId){
+  const ct = pc && contactId ? (pc.contacts||[]).find(x=>x.id===contactId) : null;
+  return ct ? [ct.prenom, ct.nom].filter(Boolean).join(' ') : '';
 }
 function refreshClientPartnersTable(){ const b = document.getElementById('clientPartnersBox'); if(b) b.innerHTML = renderClientPartnersTable(clientDraftId); }
 function clientPartnerSearch(q){
@@ -4220,14 +4240,43 @@ function addClientPartner(id){
   const pc = state.clients.find(x=>x.id===id);
   // Le type est proposé d'après la famille du client choisi (modifiable)
   const guess = pc ? (PARTNER_TYPES.find(t=>t.toLowerCase()===(pc.famille||'').toLowerCase()) || (pc.famille||'')) : '';
-  clientDraftPartners.push({ id:uid(), clientId:id, type:guess });
+  clientDraftPartners.push({ id:uid(), clientId:id, contactId:'', type:guess });
   const s = document.getElementById('f_partnerSearch'); if(s) s.value = '';
   const r = document.getElementById('f_partnerResults'); if(r) r.innerHTML = '';
   refreshClientPartnersTable();
 }
 function removeClientPartner(i){ clientDraftPartners.splice(i,1); refreshClientPartnersTable(); }
+function absorbDuplicateClientData(keep, other){
+  // Ce que la fiche supprimée apportait à la fiche conservée : notes de suivi, remises, listes de prix nets
+  keep.history = (keep.history||[]).concat(other.history||[]);
+  keep.remisesTarif = keep.remisesTarif || [];
+  const ruleKey = r => JSON.stringify([r.brandId||'', r.familleArticle||'', r.remise1||0, r.remise2||0, r.remise3||0]);
+  const seen = new Set(keep.remisesTarif.map(ruleKey));
+  (other.remisesTarif||[]).forEach(r=>{ if(!seen.has(ruleKey(r))){ seen.add(ruleKey(r)); keep.remisesTarif.push(r); } });
+  const lists = new Set([...(keep.netPriceListeIds||[]), ...(other.netPriceListeIds||[])]);
+  if(lists.size) keep.netPriceListeIds = [...lists];
+}
 function remapMergedClientRefs(idMap){
-  // Après une fusion de fiches : les partenaires et installateurs désignés suivent la fiche conservée
+  // Après une fusion de fiches : tout ce qui désignait une fiche supprimée suit la fiche conservée
+  // (devis, partenaires, installateurs, CA (VVA) saisis par client, agences d'une animation commerciale)
+  state.devis.forEach(d=>{ if(d.clientId && idMap[d.clientId]) d.clientId = idMap[d.clientId]; });
+  Object.keys(state.caVva||{}).forEach(y=>{
+    Object.keys(state.caVva[y]||{}).forEach(bk=>{
+      const byClient = state.caVva[y][bk];
+      Object.keys(idMap).forEach(oldId=>{
+        if(!byClient || !byClient[oldId]) return;
+        const dest = byClient[idMap[oldId]] = byClient[idMap[oldId]] || {};
+        Object.keys(byClient[oldId]).forEach(m=>{ if(dest[m]==null) dest[m] = byClient[oldId][m]; }); // le mois déjà saisi sur la fiche conservée prime
+        delete byClient[oldId];
+      });
+    });
+  });
+  state.clients.forEach(cl=>{
+    (cl.history||[]).forEach(h=>{
+      if(!Array.isArray(h.animationClientIds)) return;
+      h.animationClientIds = [...new Set(h.animationClientIds.map(id=>idMap[id]||id))].filter(id=>id!==cl.id);
+    });
+  });
   state.clients.forEach(c=>{
     if(!Array.isArray(c.partenaires) || c.partenaires.length===0) return;
     const seen = new Set(); const out = [];
@@ -4687,8 +4736,8 @@ function openClientDetail(id, scrollToSuivi){
         if(mine.length===0 && rev.length===0) return '';
         return `<div class="section-title">Partenaires</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
-          ${mine.map(x=>`<span class="chip" style="background:#2977D9;cursor:pointer;" onclick="openClientDetail('${x.pc.id}')" title="Ouvrir la synthèse de ${escapeHtml(clientDisplayName(x.pc))}">${x.p.type?escapeHtml(x.p.type)+' — ':''}${escapeHtml(clientDisplayName(x.pc))}</span>`).join('')}
-          ${rev.map(o=>{ const p = o.partenaires.find(q=>q.clientId===c.id); return `<span class="chip" style="background:var(--surface-2);color:var(--ink);cursor:pointer;" onclick="openClientDetail('${o.id}')" title="Cette société vous déclare comme partenaire">← ${escapeHtml(clientDisplayName(o))}${p&&p.type?` <span class="helper" style="display:inline;">(${escapeHtml(p.type)})</span>`:''}</span>`; }).join('')}
+          ${mine.map(x=>`<span class="chip" style="background:#2977D9;cursor:pointer;" onclick="openClientDetail('${x.pc.id}')" title="Ouvrir la synthèse de ${escapeHtml(clientDisplayName(x.pc))}">${x.p.type?escapeHtml(x.p.type)+' — ':''}${escapeHtml(clientDisplayName(x.pc))}${partnerContactName(x.pc, x.p.contactId)?' · '+escapeHtml(partnerContactName(x.pc, x.p.contactId)):''}</span>`).join('')}
+          ${rev.map(o=>{ const p = o.partenaires.find(q=>q.clientId===c.id); const cn = p ? partnerContactName(c, p.contactId) : ''; return `<span class="chip" style="background:var(--surface-2);color:var(--ink);cursor:pointer;" onclick="openClientDetail('${o.id}')" title="Cette société vous déclare comme partenaire">← ${escapeHtml(clientDisplayName(o))}${p&&(p.type||cn)?` <span class="helper" style="display:inline;">(${escapeHtml(p.type||'')}${cn?(p.type?' — ':'')+'contact : '+escapeHtml(cn):''})</span>`:''}</span>`; }).join('')}
         </div>`;
       })()}
 
@@ -5547,12 +5596,13 @@ function confirmMergeClientGroup(groupIds, gi){
     });
     keep.remisesTarif = keep.remisesTarif.concat(other.remisesTarif||[]);
     keep.history = (keep.history||[]).concat(other.history||[]);
+    { const lists = new Set([...(keep.netPriceListeIds||[]), ...(other.netPriceListeIds||[])]); if(lists.size) keep.netPriceListeIds = [...lists]; }
     state.devis.forEach(d=>{ if(d.clientId===id) d.clientId=keepId; });
   });
   const removeIds = new Set(groupIds.filter(id=>id!==keepId));
   { const m = {}; removeIds.forEach(id=>{ m[id] = keepId; }); remapMergedClientRefs(m); }
   state.clients = state.clients.filter(c=>!removeIds.has(c.id));
-  persist('clients'); persist('devis');
+  persist('clients'); persist('devis'); persist('caVva');
   render();
   showToast('Fusion effectuée.');
   openDuplicatesFinderModal();
@@ -5645,6 +5695,7 @@ function confirmMergeContacts(){
         });
         if(emailKey) existingEmails.add(emailKey);
       }
+      absorbDuplicateClientData(primary, c);
       idsToRemove.add(c.id);
       mergeIdMap[c.id] = primary.id;
       mergedCount++;
@@ -5652,7 +5703,7 @@ function confirmMergeContacts(){
   });
   remapMergedClientRefs(mergeIdMap);
   state.clients = state.clients.filter(c=>!idsToRemove.has(c.id));
-  persist('clients');
+  persist('clients'); persist('devis'); persist('caVva');
   closeModal();
   render();
   showToast(`${groups.length} société(s) regroupée(s) — ${mergedCount} fiche(s) transformée(s) en « Personnes à contacter ».`, 6000);
