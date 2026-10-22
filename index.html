@@ -4746,15 +4746,15 @@ function openClientDetail(id, scrollToSuivi){
       <div class="section-title">Devis</div>
       ${devisList.length===0?'<div class="helper">Aucun devis pour ce client.</div>':`
       <div class="table-wrap"><table>
-        <thead><tr><th>N°</th><th>Date</th><th>Adressé à</th><th>Statut</th><th>Total HT</th><th></th></tr></thead>
+        <thead><tr><th>N°</th><th>Date</th><th>Adressé à</th><th>Statut</th><th>État de l'affaire</th><th class="num">Total HT</th></tr></thead>
         <tbody>${devisList.map(d=>`
-          <tr>
-            <td style="font-weight:600;">${escapeHtml(d.number)}</td>
+          <tr class="${isEtatATraiter(d)?'row-a-traiter':''}" style="cursor:pointer;" onclick="closeModal();openDevisForm('${d.id}')" title="Cliquer pour ouvrir ce ${d.type==='Marché'?'marché':'devis'}">
+            <td style="font-weight:600;">${escapeHtml(d.number)}${d.type==='Marché'?' <span class="chip" style="background:var(--ink-soft);font-size:10px;">Marché</span>':''}</td>
             <td>${fmtDate(d.date)}</td>
             <td>${d.clientId===id?'<span class="helper">Direct</span>':`<span class="chip" style="background:#2977D9;" title="Offre faite à ce distributeur pour cet installateur">Via ${escapeHtml(clientSocieteLabel(d.clientId))}</span>`}</td>
             <td><span class="status-pill status-${d.status}">${d.status}</span></td>
+            <td>${d.etatAffaire?(()=>{ const col = etatAffaireColor(etatAffaireOutcome(d)); return `<span class="status-pill" style="background:${col.bg};color:${col.fg};">${escapeHtml(d.etatAffaire)}</span>`; })():'<span class="helper">—</span>'}</td>
             <td class="num">${fmtMoney(devisTotal(d).ht)}</td>
-            <td><button class="btn btn-sm btn-ghost" onclick="closeModal();openDevisForm('${d.id}')">Ouvrir</button></td>
           </tr>`).join('')}
         </tbody>
       </table></div>
