@@ -4746,25 +4746,45 @@ function openClientDetail(id, scrollToSuivi){
       <div class="section-title">Devis</div>
       ${devisList.length===0?'<div class="helper">Aucun devis pour ce client.</div>':`
       <div class="table-wrap"><table>
-        <thead><tr><th>N°</th><th>Date</th><th>Marque(s)</th><th>Adressé à</th><th>Statut</th><th>État de l'affaire</th><th class="num">Total HT</th></tr></thead>
-        <tbody>${devisList.map(d=>`
-          <tr class="${isEtatATraiter(d)?'row-a-traiter':''}" style="cursor:pointer;" onclick="closeModal();openDevisForm('${d.id}')" title="Cliquer pour ouvrir ce ${d.type==='Marché'?'marché':'devis'}">
-            <td style="font-weight:600;">${escapeHtml(d.number)}${d.type==='Marché'?' <span class="chip" style="background:var(--ink-soft);font-size:10px;">Marché</span>':''}</td>
-            <td>${fmtDate(d.date)}</td>
-            <td>${[...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean).map(bid=>`<span class="chip" style="background:${brandColor(bid)};margin:1px 3px 1px 0;"><span class="sq"></span>${escapeHtml(brandName(bid))}</span>`).join('')||'<span class="helper">—</span>'}</td>
-            <td>${d.clientId===id?'<span class="helper">Direct</span>':`<span class="chip" style="background:#2977D9;" title="Offre faite à ce distributeur pour cet installateur">Via ${escapeHtml(clientSocieteLabel(d.clientId))}</span>`}</td>
+        <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Marque(s)</th><th class="num">Total HT</th><th>Apporteur</th><th>Statut devis</th><th>État de l'affaire</th><th>Suivi</th></tr></thead>
+        <tbody>${devisList.map(d=>{
+          const t = devisTotal(d);
+          const brandIds = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean);
+          const oc = etatAffaireColor(etatAffaireOutcome(d));
+          return `
+          <tr class="${isEtatATraiter(d)?'row-a-traiter':''}" style="cursor:pointer;" onclick="closeModal();openDevisForm('${d.id}')" title="${isEtatATraiter(d)?'À traiter — ':''}Cliquer pour ouvrir ce ${d.type==='Marché'?'marché':'devis'}">
+            <td style="font-weight:700;font-family:'Space Grotesk';white-space:nowrap;">${escapeHtml(d.number)}</td>
+            <td><span class="helper" style="font-weight:600;">${escapeHtml(d.type||'Devis')}</span></td>
+            <td style="white-space:nowrap;">${fmtDate(d.date)}</td>
+            <td>${d.clientId===id?`${escapeHtml(clientSocieteLabel(d.clientId))}${d.installateurId?`<div class="helper" style="font-size:11px;">↳ pour ${escapeHtml(clientSocieteLabel(d.installateurId))}</div>`:''}`:`<span class="chip" style="background:#2977D9;" title="Offre faite à ce distributeur pour cet installateur">Via ${escapeHtml(clientSocieteLabel(d.clientId))}</span>`}</td>
+            <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(d.objet||'')}">${escapeHtml(d.objet||'—')}</td>
+            <td>${brandIds.slice(0,3).map(bid=>`<span class="chip" style="background:${brandColor(bid)};margin-right:3px;"><span class="sq"></span>${escapeHtml(brandName(bid))}</span>`).join('')||'<span class="helper">—</span>'}${brandIds.length>3?`<span class="helper">+${brandIds.length-3}</span>`:''}</td>
+            <td class="num" style="font-weight:700;white-space:nowrap;">${fmtMoney(t.ht)}</td>
+            <td onclick="event.stopPropagation();">
+              <select onchange="clientDetailChangeApporteur('${c.id}','${d.id}', this.value)" style="width:auto;padding:4px 8px;font-size:11.5px;">
+                <option value="" ${!d.apporteurAffaire?'selected':''}>—</option>
+                <option value="Agent" ${d.apporteurAffaire==='Agent'?'selected':''}>Agent</option>
+                <option value="Distributeur" ${d.apporteurAffaire==='Distributeur'?'selected':''}>Distributeur</option>
+              </select>
+            </td>
             <td onclick="event.stopPropagation();">
               <select onchange="clientDetailChangeStatus('${c.id}','${d.id}', this.value)" style="width:auto;padding:4px 8px;font-size:11.5px;font-weight:700;border-radius:20px;" class="status-pill status-${d.status}">
                 ${STATUTS.map(s=>`<option value="${s}" ${s===d.status?'selected':''}>${s}</option>`).join('')}
               </select>
             </td>
-            <td onclick="event.stopPropagation();">${(()=>{ const oc = etatAffaireColor(etatAffaireOutcome(d)); return `
+            <td onclick="event.stopPropagation();">
               <select onchange="clientDetailChangeEtat('${c.id}','${d.id}', this.value)" style="width:auto;padding:4px 8px;font-size:11.5px;font-weight:700;border-radius:20px;background:${oc.bg};color:${oc.fg};border-color:transparent;">
                 <option value="" ${!d.etatAffaire?'selected':''}>—</option>
                 ${(state.paramLists.etatAffaires||[]).map(e=>`<option value="${escapeHtml(e.libelle)}" ${d.etatAffaire===e.libelle?'selected':''}>${escapeHtml(e.libelle)}</option>`).join('')}
-              </select>`; })()}</td>
-            <td class="num">${fmtMoney(devisTotal(d).ht)}</td>
-          </tr>`).join('')}
+              </select>
+            </td>
+            <td onclick="event.stopPropagation();">${(()=>{
+              const notes = d.suiviNotes||[];
+              const last = notes.length ? notes[notes.length-1].text : '';
+              return `<button class="btn btn-sm btn-ghost" style="${notes.length?'color:#2977D9;font-weight:700;':''}" onclick="clientDetailOpenSuivi('${c.id}','${d.id}')" title="${escapeHtml(last||'Ajouter un commentaire de suivi')}">💬${notes.length?' '+notes.length:''}</button>`;
+            })()}</td>
+          </tr>`;
+        }).join('')}
         </tbody>
       </table></div>
       ${nbVia?`<div class="helper" style="margin-top:6px;">${nbVia} offre(s) « via distributeur » : adressées à un distributeur pour le compte de ce client. Leur CA reste compté sur le distributeur.</div>`:''}`}
@@ -8487,6 +8507,15 @@ function clientDetailChangeStatus(clientId, devisId, value){
   const st = (document.querySelector('#modalBox .modal-body')||{}).scrollTop || 0;
   changeDevisStatus(devisId, value);
   reopenClientDetail(clientId, st);
+}
+function clientDetailChangeApporteur(clientId, devisId, value){
+  const st = (document.querySelector('#modalBox .modal-body')||{}).scrollTop || 0;
+  changeDevisApporteur(devisId, value);
+  reopenClientDetail(clientId, st);
+}
+function clientDetailOpenSuivi(clientId, devisId){
+  window._returnToClientDetail = clientId;   // « Fermer » ramène à la synthèse du client
+  openDevisSuiviModal(devisId);
 }
 function clientDetailChangeEtat(clientId, devisId, value){
   const st = (document.querySelector('#modalBox .modal-body')||{}).scrollTop || 0;
