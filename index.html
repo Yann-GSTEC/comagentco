@@ -9447,6 +9447,7 @@ function replaceDevisLineWithTarif(idx, tarifId){
     qty: line.qty, complementInfo:t.complementInfo||'', ficheTechniqueUrl:t.ficheTechniqueUrl||'', noticeUrl:t.noticeUrl||'', photoUrl:t.photoUrl||'', ...pricing,
     ecoPartLineId: line.ecoPartLineId, linkedToLineId: line.linkedToLineId,
   };
+  applyInstallerNetPrices();
   refreshDevisModal();
 }
 function attachDevisPdfFromInput(evt){ const f = evt.target.files[0]; if(f) attachDevisPdfFile(f); }
@@ -9835,7 +9836,7 @@ function devisFormHtml(){
             <div id="d_clientResults"></div>
           </div>
         </div>
-        <div class="field"><label>Date</label><input type="date" id="d_date" value="${draft.date}" onchange="draft.date=this.value; if(draft.validUntilAuto!==false){draft.validUntil=defaultValidUntil(draft.type, draft.date);} refreshDevisModal();"></div>
+        <div class="field"><label>Date</label><input type="date" id="d_date" value="${draft.date}" onchange="draft.date=this.value; if(draft.validUntilAuto!==false){draft.validUntil=defaultValidUntil(draft.type, draft.date);} applyInstallerNetPrices(); refreshDevisModal();"></div>
         <div class="field"><label>Validité</label><input type="date" id="d_validUntil" value="${draft.validUntil||''}" onchange="draft.validUntil=this.value; draft.validUntilAuto=false;"></div>
       </div>
       <div class="field-row">
@@ -10126,6 +10127,7 @@ function refreshDevisLinePrices(){
     Object.assign(l, pricing);
     updated++;
   });
+  applyInstallerNetPrices();
   refreshDevisModal();
   let msg = `${updated} ligne(s) réactualisée(s) avec le tarif et la liste de prix nets en vigueur.`;
   if(missing>0) msg += ` ${missing} ligne(s) ignorée(s) (référence introuvable dans les tarifs actuels).`;
@@ -10176,8 +10178,38 @@ function devisSearchInstallers(q){
       ${c.ville||c.famille?`<span class="desig"> — ${escapeHtml([c.famille, c.ville].filter(Boolean).join(' · '))}</span>`:''}
     </div>`).join('')}</div>`;
 }
-function setDevisInstaller(id){ draft.installateurId = id; refreshDevisModal(); }
-function clearDevisInstaller(){ draft.installateurId = ''; refreshDevisModal(); }
+/* Prix de vente conseillé HT = prix net de la liste de prix nets de l'installateur concerné (devis à un distributeur).
+   Les prix saisis à la main (prix de vente ou marge) ne sont jamais écrasés ; ceux remplis automatiquement
+   sont retirés ou remplacés quand on change d'installateur. */
+function applyInstallerNetPrices(){
+  const res = { applied:0, missing:0 };
+  if(!draft || draft.isTemplate || !Array.isArray(draft.lines)) return res;
+  const inst = draft.installateurId;
+  draft.lines.forEach(l=>{
+    if(l.isTitleLine || l.isFraisPort || l.isEcoPart || !l.reference || !l.brandId) return;
+    if(l.prixClientAuto){ l.prixClient = 0; l.prixClientAuto = false; delete l.prixClientListe; }
+    if(!inst) return;
+    if(l.prixClientManual || l.prixClient>0 || l.margeTarget!=null) return;
+    const entry = findClientNetPriceEntry(inst, l.brandId, l.reference, draft.date);
+    if(entry && entry.prixNet>0){
+      l.prixClient = entry.prixNet; l.prixClientAuto = true;
+      const liste = state.prixNetListes.find(x=>x.id===entry.listeId); l.prixClientListe = liste ? liste.nom : '';
+      res.applied++;
+    } else res.missing++;
+  });
+  return res;
+}
+function installerNetPricesToast(res){
+  const inst = state.clients.find(x=>x.id===draft.installateurId);
+  if(!inst){ showToast("Installateur retiré : les prix de vente conseillés repris de sa liste ont été effacés."); return; }
+  const nom = clientDisplayName(inst);
+  const hasLists = (inst.netPriceListeIds||[]).length>0;
+  if(!hasLists) showToast(`${nom} n'a aucune liste de prix nets associée — rien à reprendre dans « Prix de vente conseillé HT ».`, 5000);
+  else if(res.applied===0 && res.missing===0) showToast(`Installateur : ${nom}. Les prix de vente conseillés se rempliront à l'ajout des lignes.`, 4000);
+  else showToast(`Prix de vente conseillé HT repris de la liste de prix nets de ${nom} : ${res.applied} ligne(s) renseignée(s)${res.missing?`, ${res.missing} sans prix net (ou liste non valide à la date du devis)`:''}.`, 5500);
+}
+function setDevisInstaller(id){ draft.installateurId = id; const res = applyInstallerNetPrices(); refreshDevisModal(); installerNetPricesToast(res); }
+function clearDevisInstaller(){ draft.installateurId = ''; const res = applyInstallerNetPrices(); refreshDevisModal(); installerNetPricesToast(res); }
 function devisSearchClients(q){
   q = (q||'').trim().toLowerCase();
   const box = document.getElementById('d_clientResults');
@@ -10300,7 +10332,7 @@ function devisLinesRowsHtml(){
       <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct3?l.remisePct3:''}" placeholder="0" onchange="draft.lines[${i}].remisePct3=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
       <td><input type="number" min="0" step="0.01" value="${(+lineDistribUnit(l))?(+lineDistribUnit(l)).toFixed(2):''}" placeholder="0.00" style="font-weight:600;${netOnDistri?'color:var(--info, #2F6FBD);font-weight:700;':(l.distribManuallySet?'color:var(--ink);font-weight:700;':'color:var(--ink-soft);')}" title="${netOnDistri?'Prix repris de la liste de prix nets du client (modifiable ici si besoin)':(l.distribManuallySet?'Prix d\'achat modifié manuellement — Remise 1 recalculée en conséquence':'Calculé à partir du PU Tarif et des remises — modifiable directement si besoin')}" onchange="devisLineSetDistrib(${i}, this.value)"></td>
       <td><input type="number" step="0.01" value="${Math.abs(displayMarge)<0.005?'':(+displayMarge).toFixed(2)}" placeholder="0" title="${l.margeTarget!=null?'Marge cible demandée — peut différer de quelques centièmes du calcul réel après arrondi du Prix de vente conseillé HT à la centime.':''}" style="color:${displayMarge>=0?'var(--success)':'var(--danger)'};font-weight:800;font-size:12.5px;text-align:center;background:${displayMarge>=0?'rgba(63,138,123,.12)':'rgba(179,57,44,.1)'};border:1.5px solid ${displayMarge>=0?'var(--success)':'var(--danger)'};border-radius:6px;" onchange="devisLineSetMarge(${i}, this.value)"></td>
-      <td><input type="number" min="0" step="0.01" value="${l.prixClient?l.prixClient:''}" placeholder="0" style="font-weight:600;${netOnClient?'color:var(--info, #2F6FBD);font-weight:700;':''}" title="${netOnClient?'Prix repris de la liste de prix nets du client':''}" onchange="devisLineSetClient(${i}, this.value)"></td>
+      <td><input type="number" min="0" step="0.01" value="${l.prixClient?l.prixClient:''}" placeholder="0" style="font-weight:600;${(netOnClient||l.prixClientAuto)?'color:var(--info, #2F6FBD);font-weight:700;':''}" title="${l.prixClientAuto?`Prix net de l'installateur${l.prixClientListe?' — liste « '+escapeHtml(l.prixClientListe)+' »':''}`:(netOnClient?'Prix repris de la liste de prix nets du client':'')}" onchange="devisLineSetClient(${i}, this.value)"></td>
       <td class="num" style="font-weight:700;">${fmtMoney(lineTotalHT(l, draft.destinataire))}</td>
       <td><button class="btn btn-sm btn-ghost btn-danger" onclick="removeDevisLine(${i})">✕</button></td>
     </tr>
@@ -10350,6 +10382,7 @@ function devisLineSetDistrib(i, val){
 }
 function devisLineSetClient(i, val){
   draft.lines[i].prixClient = parseFloat(val)||0;
+  draft.lines[i].prixClientAuto = false; draft.lines[i].prixClientManual = true;
   draft.lines[i].margeTarget = null;
   if(draft.lines[i].prixNetTarget==='client') draft.lines[i].prixNetTarget = null;
   refreshDevisModal();
@@ -10357,6 +10390,7 @@ function devisLineSetClient(i, val){
 function devisLineSetMarge(i, val){
   const marge = parseFloat(val);
   const distrib = lineDistribUnit(draft.lines[i]);
+  draft.lines[i].prixClientAuto = false; draft.lines[i].prixClientManual = true;
   if(!isNaN(marge) && distrib>0 && marge<100){
     draft.lines[i].prixClient = +(distrib/(1-marge/100)).toFixed(2);
     draft.lines[i].margeTarget = marge;
@@ -10395,6 +10429,7 @@ function applyUniformMarge(){
     if(distrib>0 && marge<100){
       l.prixClient = +(distrib/(1-marge/100)).toFixed(2);
       l.margeTarget = marge;
+      l.prixClientAuto = false; l.prixClientManual = true;
       if(l.prixNetTarget==='client') l.prixNetTarget = null; // la marge saisie prime désormais sur le prix net pour cette ligne
       applied++;
     } else {
@@ -10689,6 +10724,7 @@ function addDevisLine(tarifId){
   }
   document.getElementById('d_search').value='';
   document.getElementById('d_searchResults').innerHTML='';
+  applyInstallerNetPrices();
   refreshDevisModal();
 }
 function devisLineSetQty(i, val){
