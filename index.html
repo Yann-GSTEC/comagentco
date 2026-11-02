@@ -7034,8 +7034,8 @@ function openTarifForm(id){
       </div>
       <div class="section-title">Prix</div>
       <div class="field-row">
-        <div class="field"><label>Prix Net (€) * <span class="helper" style="display:inline;">— utilisé dans les devis</span></label><input type="number" step="0.01" id="f_prix" value="${t?t.prixHT:''}"></div>
-        <div class="field"><label>Prix Catalogue (€)</label><input type="number" step="0.01" id="f_prixCatalogue" value="${t&&t.prixCatalogue?t.prixCatalogue:''}"></div>
+        <div class="field"><label>Prix Catalogue (€) * <span class="helper" style="display:inline;">— PU tarif utilisé dans les devis</span></label><input type="number" step="0.01" min="0" id="f_prixCatalogue" value="${t&&t.prixCatalogue?t.prixCatalogue:''}"></div>
+        <div class="field"><label>Prix Net (€) <span class="helper" style="display:inline;">— facultatif</span></label><input type="number" step="0.01" min="0" id="f_prix" value="${t&&t.prixHT?t.prixHT:''}"></div>
       </div>
       <div class="field-row">
         <div class="field"><label>Prix Achat Distributeur (€)</label><input type="number" step="0.01" id="f_prixAchatDistrib" value="${t&&t.prixAchatDistributeur?t.prixAchatDistributeur:''}" oninput="tarifRecalcFromDistrib()"></div>
@@ -7079,9 +7079,15 @@ function refreshTarifFamilleDatalist(){
 }
 function saveTarif(id){
   const reference = document.getElementById('f_ref').value.trim();
-  const prixHT = parseFloat(document.getElementById('f_prix').value);
+  const prixCatalogueSaisi = parseFloat(document.getElementById('f_prixCatalogue').value);
+  const prixHT = parseFloat(document.getElementById('f_prix').value) || 0;   // prix net : facultatif
   const brandId = document.getElementById('f_brand').value;
-  if(!reference || isNaN(prixHT)){ showToast('Référence et prix net sont requis.'); return; }
+  // Le prix catalogue est obligatoire. Une référence ancienne qui n'avait qu'un prix net peut encore être modifiée
+  // sans prix catalogue (elle reste signalée « ⚠ 0,00 € » dans le tableau tant qu'il manque).
+  const old = id ? state.tarifs.find(x=>x.id===id) : null;
+  const legacyNetOnly = !!old && !(old.prixCatalogue>0) && old.prixHT>0;
+  if(!reference){ showToast('La référence est requise.'); return; }
+  if(isNaN(prixCatalogueSaisi) && !legacyNetOnly){ showToast('Le prix catalogue est requis.'); return; }
   const data = {
     reference, prixHT, brandId,
     designation: document.getElementById('f_desig').value.trim(),
@@ -7092,7 +7098,7 @@ function saveTarif(id){
     ficheTechniqueUrl: document.getElementById('f_ficheTechniqueUrl').value.trim(),
     noticeUrl: document.getElementById('f_noticeUrl').value.trim(),
     photoUrl: document.getElementById('f_photoUrl').value.trim(),
-    prixCatalogue: parseFloat(document.getElementById('f_prixCatalogue').value)||0,
+    prixCatalogue: prixCatalogueSaisi||0,
     prixAchatDistributeur: parseFloat(document.getElementById('f_prixAchatDistrib').value)||0,
     prixAchatConseilleInstallateur: parseFloat(document.getElementById('f_prixAchatConseille').value)||0,
   };
