@@ -802,10 +802,16 @@ tbody tr:hover{background:var(--surface-2);}
 .col-resize-handle:hover{background:var(--accent);opacity:.4;}
 .col-custom-table td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .col-custom-table td.wrap-cell{white-space:normal;}
-/* Devis dont l'état d'affaire est « À traiter » : ligne en rouge pour les repérer d'un coup d'œil */
-tr.row-a-traiter td{background:#FBD5D5;color:#6B1018;}
-tr.row-a-traiter:hover td{background:#F7BFBF;}
-tr.row-a-traiter td:first-child{box-shadow:inset 5px 0 0 #D62839;}
+/* Ligne entière colorée selon l'état de l'affaire : À traiter = orange, Gagnée = vert, Perdue = rouge */
+tr.row-a-traiter td{background:#FFE2BF;color:#7A3B00;}
+tr.row-a-traiter:hover td{background:#FFD3A1;}
+tr.row-a-traiter td:first-child{box-shadow:inset 5px 0 0 #F28C1E;}
+tr.row-gagnee td{background:#D9F0DF;color:#1E4D2B;}
+tr.row-gagnee:hover td{background:#C7E8D0;}
+tr.row-gagnee td:first-child{box-shadow:inset 5px 0 0 #2E9D5B;}
+tr.row-perdue td{background:#FBD5D5;color:#6B1018;}
+tr.row-perdue:hover td{background:#F7BFBF;}
+tr.row-perdue td:first-child{box-shadow:inset 5px 0 0 #D62839;}
 .cm-table td,.cm-table th{padding:5px 12px;}
 .cm-table input,.cm-table textarea{padding:6px 10px;}
 .rz-table th{position:relative;}
@@ -4741,7 +4747,7 @@ function openClientDetail(id, scrollToSuivi){
           const brandIds = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean);
           const oc = etatAffaireColor(etatAffaireOutcome(d));
           return `
-          <tr class="${isEtatATraiter(d)?'row-a-traiter':''}" style="cursor:pointer;" onclick="closeModal();openDevisForm('${d.id}')" title="${isEtatATraiter(d)?'À traiter — ':''}Cliquer pour ouvrir ce ${d.type==='Marché'?'marché':'devis'}">
+          <tr class="${devisRowClass(d)}" style="cursor:pointer;" onclick="closeModal();openDevisForm('${d.id}')" title="${devisRowTitle(d)}Cliquer pour ouvrir ce ${d.type==='Marché'?'marché':'devis'}">
             <td style="font-weight:700;font-family:'Space Grotesk';white-space:nowrap;">${escapeHtml(d.number)}</td>
             <td><span class="helper" style="font-weight:600;">${escapeHtml(d.type||'Devis')}</span></td>
             <td style="white-space:nowrap;">${fmtDate(d.date)}</td>
@@ -8348,6 +8354,18 @@ function toggleDevisEtatFilter(val){
   else ui.devisFilterEtats.push(val);
   updateDevisListOnly();
 }
+function devisRowClass(d){
+  // Couleur de toute la ligne selon l'état de l'affaire : À traiter = orange, Gagnée = vert, Perdue = rouge
+  if(isEtatATraiter(d)) return 'row-a-traiter';
+  const oc = etatAffaireOutcome(d);
+  if(oc==='gagnee') return 'row-gagnee';
+  if(oc==='perdue') return 'row-perdue';
+  return '';
+}
+function devisRowTitle(d){
+  const cls = devisRowClass(d);
+  return cls && d.etatAffaire ? d.etatAffaire+' — ' : '';
+}
 function isEtatATraiter(d){
   // Insensible à la casse et aux accents : « À traiter », « A traiter », « à traiter »…
   return (d.etatAffaire||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase()==='a traiter';
@@ -8389,7 +8407,7 @@ function renderDevisListInner(){
         const t = devisTotal(d);
         const brandIds = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean);
         const oc = etatAffaireColor(etatAffaireOutcome(d));
-        return `<tr class="${isEtatATraiter(d)?'row-a-traiter':''}" style="cursor:pointer;" onclick="openDevisForm('${d.id}')" title="${isEtatATraiter(d)?'À traiter — ':''}Cliquer pour ouvrir">
+        return `<tr class="${devisRowClass(d)}" style="cursor:pointer;" onclick="openDevisForm('${d.id}')" title="${devisRowTitle(d)}Cliquer pour ouvrir">
           <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(d.number)}</td>
           <td><span class="helper" style="font-weight:600;">${escapeHtml(d.type||'Devis')}</span></td>
           <td>${fmtDate(d.date)}</td>
@@ -9267,11 +9285,10 @@ function parseComagentcoDevisPdf(lines, page1RightText, page1LeftText){
     if(found){
       usedRefs.add(found.ref);
       const vals = extractPdfLineValues(line.text, found.ref);
-      let prixUnitaire = found.prixCatalogue||0;
-      if(vals.prixAchatUnitaire!=null){ prixUnitaire = +(vals.prixAchatUnitaire/((1-(vals.pctVals[0]||0)/100)*(1-(vals.pctVals[1]||0)/100)*(1-(vals.pctVals[2]||0)/100)||1)).toFixed(4); numbersRecovered++; }
+      if(vals.prixAchatUnitaire!=null) numbersRecovered++;
       result.linesGuess.push({
         id: uid(), brandId: found.brandId, reference: found.ref, designation: found.designation||'',
-        qty: vals.qty||1, prixUnitaire, remisePct1: vals.pctVals[0]||0, remisePct2: vals.pctVals[1]||0, remisePct3: vals.pctVals[2]||0, prixClient:0,
+        qty: vals.qty||1, ...pdfLinePricing(vals, found.prixCatalogue), prixClient:0,
       });
       return;
     }
@@ -9287,8 +9304,7 @@ function parseComagentcoDevisPdf(lines, page1RightText, page1LeftText){
     if(vals.moneyVals.length===0) return;
     result.linesGuess.push({
       id: uid(), brandId: defaultBrandId, reference: refCandidate, designation: rest.replace(/[\d\s,.%€]+$/,'').trim()||rest,
-      qty: vals.qty||1, prixUnitaire: vals.prixAchatUnitaire!=null?vals.prixAchatUnitaire:(vals.moneyVals[0]||0),
-      remisePct1: vals.pctVals[0]||0, remisePct2: vals.pctVals[1]||0, remisePct3: vals.pctVals[2]||0, prixClient:0,
+      qty: vals.qty||1, ...pdfLinePricing(vals, vals.moneyVals[0]||0), prixClient:0,
       isFreeLine: true,
     });
     horsCatalogue++;
@@ -9305,18 +9321,16 @@ function parseFrenchNumber(raw){
   return parseFloat(String(raw).replace(/[\s\u00A0]/g,'').replace(',', '.'));
 }
 function extractPdfLineValues(text, reference){
-  // Repère, dans le texte reconstitué d'une ligne, les montants et les pourcentages, puis une quantité
-  // probable (le dernier nombre entier isolé situé juste avant le premier montant).
-  // Les montants sont acceptés sous deux formats, selon la version de ComAgentCo qui a généré le PDF :
-  // "474.99" (point, jamais séparé par des espaces, sans symbole) ou "1 474,99 €" (virgule, avec
-  // regroupement des milliers par espace, symbole €). Les deux formats sont traités séparément : le
-  // format à point n'autorise PAS d'espace interne, sinon un nombre isolé juste avant (ex. la quantité
-  // "1" devant "474.99") serait avalé par erreur comme premier groupe de milliers du montant.
+  // Repère, dans le texte reconstitué d'une ligne, les montants et les pourcentages, puis la quantité.
+  // Montants acceptés : « 474.99 » (point, sans espace), « 474,99 € » et « 1 474,99 € » (milliers par espace).
+  // ATTENTION : dans le PDF, l'espace des milliers et l'espace entre deux colonnes sont le même caractère.
+  // Un montant à virgule ne peut donc contenir un espace que devant des groupes d'EXACTEMENT 3 chiffres
+  // (« 31 460,00 »), sinon la quantité qui précède (« 90 15,73 € ») serait avalée dans le prix (9 015,73 €).
   const withoutRef = reference ? text.replace(reference, ' ') : text;
-  const moneyRe = /\d+\.\d{2}(?!\d)|\d[\d\s\u00A0]*,\d{2}\s*(?:€|EUR)?/g;
+  const moneyRe = /\d{1,3}(?:[ \u00A0\u202F]\d{3})+,\d{2}\s*(?:€|EUR)?|\d+,\d{2}\s*(?:€|EUR)?|\d+\.\d{2}(?!\d)/g;
   const pctRe = /(-?\d[\d\s\u00A0]*(?:[.,]\d{1,2})?)\s*%/g;
   const moneyMatches = [...withoutRef.matchAll(moneyRe)];
-  const moneyVals = moneyMatches.map(mm=>parseFrenchNumber(mm[0])).filter(n=>!isNaN(n));
+  let moneyVals = moneyMatches.map(mm=>parseFrenchNumber(mm[0])).filter(n=>!isNaN(n));
   const pctVals = [...withoutRef.matchAll(pctRe)].map(mm=>parseFrenchNumber(mm[1])).filter(n=>!isNaN(n));
   let qty = 1;
   // On s'arrête AVANT le début du premier montant (et non juste avant un éventuel symbole €), sinon les
@@ -9329,12 +9343,68 @@ function extractPdfLineValues(text, reference){
     const last = parseInt(intMatches[intMatches.length-1], 10);
     if(!isNaN(last) && last>0 && last<100000) qty = last;
   }
+  // Contrôle arithmétique avec le Total HT de la ligne (dernier montant) : Total HT = Quantité × Prix d'achat HT.
+  // Il corrige les cas ambigus (ex. « 12 238,21 » : quantité 12 et prix 238,21, ou prix de 12 238,21 ?).
+  if(moneyVals.length>=2){
+    const T = moneyVals[moneyVals.length-1];
+    const fits = (q, vals) => q>=1 && vals.some(v=>v>0 && Math.abs(q*v - T) <= 0.011);
+    // 1) Premier montant lu avec un « faux » groupe de milliers : on teste la séparation quantité + prix
+    const m0 = moneyMatches[0] && moneyMatches[0][0].match(/^(\d{1,3})[ \u00A0\u202F](\d{3},\d{2})/);
+    // (ou si le montant suivant est identique aux 3 derniers chiffres : « 1 474,99 € 474,99 € » = quantité 1, prix 474,99)
+    const v2peek = m0 ? parseFrenchNumber(m0[2]) : NaN;
+    if(m0 && (!fits(qty, moneyVals.slice(0,-1)) || (moneyVals.length>=3 && Math.abs(v2peek - moneyVals[1]) < 0.006))){
+      const q2 = parseInt(m0[1],10), v2 = parseFrenchNumber(m0[2]);
+      const alt = [v2, ...moneyVals.slice(1,-1)];
+      if(!isNaN(v2) && fits(q2, alt)){ qty = q2; moneyVals = [v2, ...moneyVals.slice(1)]; }
+    }
+    // 2) Quantité non lue ou mal lue : on la déduit du Total HT ÷ prix d'achat
+    const cands = moneyVals.slice(0,-1);
+    if(!fits(qty, cands)){
+      for(let k=cands.length-1;k>=0;k--){
+        const v = cands[k];
+        if(!(v>0)) continue;
+        const q2 = Math.round(T / v);
+        if(q2>=1 && q2<1000000 && Math.abs(q2*v - T) <= 0.011){ qty = q2; break; }
+      }
+    }
+  }
   // Prix d'achat unitaire = colonne "PU Net HT" / "Prix d'achat HT" : c'est toujours la PREMIÈRE valeur
   // monétaire de la ligne (les colonnes suivantes, s'il y en a — remise, total — viennent après). On lit
   // cette valeur telle quelle plutôt que de la recalculer à partir du Total HT ÷ Quantité, pour éviter
   // tout écart dû aux arrondis d'affichage du PDF.
-  const prixAchatUnitaire = moneyVals.length ? moneyVals[0] : null;
-  return { qty, moneyVals, pctVals, prixAchatUnitaire };
+  let prixAchatUnitaire = moneyVals.length ? moneyVals[0] : null;
+  let puTarif = null;
+  if(moneyVals.length>=3){
+    // PDF avec colonne « PU Tarif HT » (puis éventuellement remises, « Prix d'achat HT », prix de vente) : le prix d'achat
+    // est la valeur dont Quantité × valeur = Total HT de la ligne ; le PU tarif est le montant imprimé avant lui.
+    const T = moneyVals[moneyVals.length-1], cands = moneyVals.slice(0,-1);
+    for(let k=cands.length-1;k>=0;k--){
+      if(cands[k]>0 && Math.abs(qty*cands[k] - T) <= 0.011){
+        prixAchatUnitaire = cands[k];
+        if(k>0 && cands[0]>=cands[k]) puTarif = cands[0];
+        break;
+      }
+    }
+  }
+  return { qty, moneyVals, pctVals, prixAchatUnitaire, puTarif };
+}
+function pdfLinePricing(vals, tarifFallback){
+  // Prix de la ligne à partir de ce qui a été lu dans le PDF : on retrouve exactement le prix d'achat imprimé,
+  // donc Quantité × prix d'achat = Total HT de la ligne du PDF.
+  const pct = vals.pctVals || [];
+  const out = { prixUnitaire: tarifFallback||0, remisePct1: pct[0]||0, remisePct2: pct[1]||0, remisePct3: pct[2]||0 };
+  const pa = vals.prixAchatUnitaire;
+  if(pa==null) return out;
+  if(vals.puTarif!=null && vals.puTarif>0){
+    out.prixUnitaire = vals.puTarif;
+    if(pct.length===0) out.remisePct1 = vals.puTarif>pa ? +((1-pa/vals.puTarif)*100).toFixed(8) : 0;
+    const f = (1-out.remisePct1/100)*(1-out.remisePct2/100)*(1-out.remisePct3/100);
+    if(Math.abs(vals.puTarif*f - pa) > 0.004){ out.distribOverride = pa; out.distribManuallySet = true; }
+  } else {
+    const f = (1-(pct[0]||0)/100)*(1-(pct[1]||0)/100)*(1-(pct[2]||0)/100) || 1;
+    out.prixUnitaire = +(pa/f).toFixed(4);
+  }
+  return out;
 }
 function openImportedDevisReview(parsed, filename){
   draft = {
