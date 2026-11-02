@@ -4745,7 +4745,7 @@ function openClientDetail(id, scrollToSuivi){
         <tbody>${devisList.map(d=>{
           const t = devisTotal(d);
           const brandIds = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean);
-          const oc = etatAffaireColor(etatAffaireOutcome(d));
+          const oc = devisEtatColor(d);
           return `
           <tr class="${devisRowClass(d)}" style="cursor:pointer;" onclick="closeModal();openDevisForm('${d.id}')" title="${devisRowTitle(d)}Cliquer pour ouvrir ce ${d.type==='Marché'?'marché':'devis'}">
             <td style="font-weight:700;font-family:'Space Grotesk';white-space:nowrap;">${escapeHtml(d.number)}</td>
@@ -8360,7 +8360,14 @@ function devisRowClass(d){
   const oc = etatAffaireOutcome(d);
   if(oc==='gagnee') return 'row-gagnee';
   if(oc==='perdue') return 'row-perdue';
+  // « Abandonné(e) » : traité comme perdu pour la couleur, quel que soit le type donné à cet état dans les listes de référence
+  if(/abandon/.test(normSearch(d.etatAffaire||''))) return 'row-perdue';
   return '';
+}
+function devisEtatColor(d){
+  // Couleur de la pastille de l'état de l'affaire : suit celle de la ligne (rouge pour perdu / abandonné)
+  const cls = devisRowClass(d);
+  return etatAffaireColor(cls==='row-perdue' ? 'perdue' : (cls==='row-gagnee' ? 'gagnee' : etatAffaireOutcome(d)));
 }
 function devisRowTitle(d){
   const cls = devisRowClass(d);
@@ -8406,7 +8413,7 @@ function renderDevisListInner(){
       ${list.map(d=>{
         const t = devisTotal(d);
         const brandIds = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean);
-        const oc = etatAffaireColor(etatAffaireOutcome(d));
+        const oc = devisEtatColor(d);
         return `<tr class="${devisRowClass(d)}" style="cursor:pointer;" onclick="openDevisForm('${d.id}')" title="${devisRowTitle(d)}Cliquer pour ouvrir">
           <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(d.number)}</td>
           <td><span class="helper" style="font-weight:600;">${escapeHtml(d.type||'Devis')}</span></td>
@@ -12232,7 +12239,7 @@ function rapportDevisSectionBody(list, lineAmount){
     <thead><tr><th>N°</th><th>Date</th><th>Client</th><th>Objet</th><th>État de l'affaire</th><th>Montant (marque)</th></tr></thead>
     <tbody>
       ${list.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(d=>{
-        const oc = etatAffaireColor(etatAffaireOutcome(d));
+        const oc = devisEtatColor(d);
         return `
         <tr style="cursor:pointer;" onclick="openDevisForm('${d.id}')">
           <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(d.number)}</td>
