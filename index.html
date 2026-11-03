@@ -3006,7 +3006,7 @@ const TRASH_TYPE_LABELS = {
   client:'Client', devis:'Devis', marche:'Marché', devisTemplate:'Modèle de devis',
   tarif:'Référence tarif', brand:'Marque', commercial:'Commercial',
   historyNote:'Note de suivi', prixNetListe:'Liste de prix nets', prixNet:'Référence liste de prix nets',
-  paramItem:'Élément de liste', brandHistory:'RDV marque', suiviNote:'Commentaire de suivi devis', tarifsBulk:'Tarifs (bloc)', prixNetBulk:'Liste de prix nets (bloc)',
+  paramItem:'Élément de liste', brandHistory:'RDV marque', suiviNote:'Commentaire de suivi devis', devisVersion:'Ancienne version de devis', tarifsBulk:'Tarifs (bloc)', prixNetBulk:'Liste de prix nets (bloc)',
 };
 function moveToTrash(type, label, data){
   state.trash = state.trash || [];
@@ -3050,6 +3050,15 @@ function restoreFromTrash(trashId){
       dv.suiviNotes = dv.suiviNotes || [];
       dv.suiviNotes.push(entry.data.note);
       dv.suiviNotes.sort((a,b)=>(a.ts||'').localeCompare(b.ts||''));
+      persist('devis');
+      break;
+    }
+    case 'devisVersion': {
+      const dv = state.devis.find(x=>x.id===entry.data.docId);
+      if(!dv){ showToast('Le devis correspondant n\'existe plus.'); return; }
+      dv.versions = dv.versions || [];
+      if(!dv.versions.some(x=>x.id===entry.data.version.id)) dv.versions.push(entry.data.version);
+      dv.versions.sort((a,b)=>parseDevisVersion(a.number).version - parseDevisVersion(b.number).version);
       persist('devis');
       break;
     }
@@ -11037,6 +11046,7 @@ function devisHistoryEntryLabel(entry){
       return 'Modification enregistrée (aucun changement de contenu détecté)';
     }
     case 'new_version': return `Nouvelle version <strong>${escapeHtml(entry.detail||'')}</strong> — l'ancienne version <strong>${escapeHtml(entry.from||'')}</strong> est conservée${entry.restoredFrom?` · contenu repris de <strong>${escapeHtml(entry.restoredFrom)}</strong>`:''}${entry.changes&&entry.changes.length?`<ul style="margin:4px 0 0 16px;padding:0;">${entry.changes.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul>`:''}`;
+    case 'version_deleted': return `Ancienne version <strong>${escapeHtml(entry.detail||'')}</strong> supprimée (récupérable dans la Corbeille)`;
     case 'duplicated_to': return `Dupliqué vers la nouvelle version <strong>${escapeHtml(entry.detail||'')}</strong>${entry.clientLabel?` — pour <strong>${escapeHtml(entry.clientLabel)}</strong>`:''}`;
     case 'duplicated_from': return `Créé par duplication depuis <strong>${escapeHtml(entry.detail||'')}</strong>${entry.clientLabel?` — pour <strong>${escapeHtml(entry.clientLabel)}</strong>`:''}`;
     case 'duplicate_deleted': return `Le duplicata <strong>${escapeHtml(entry.detail||'')}</strong>${entry.clientLabel?` (pour <strong>${escapeHtml(entry.clientLabel)}</strong>)`:''} a été supprimé`;
@@ -11101,7 +11111,7 @@ function openDevisHistoryModal(){
       <td>${escapeHtml(cl?clientDisplayName(cl):'—')}</td>
       <td><span class="status-pill status-${escapeHtml(v.status||'')}">${escapeHtml(v.status||'—')}</span></td>
       <td class="num" style="font-weight:600;">${fmtMoney(v.total)}</td>
-      <td style="white-space:nowrap;"><button type="button" class="btn btn-sm btn-ghost" onclick="openDevisVersionViewer('${doc.id}','${v.id}')">Voir</button> <button type="button" class="btn btn-sm btn-ghost" onclick="restoreDevisVersion('${doc.id}','${v.id}')" title="Reprendre son contenu sous un nouveau numéro">↺ Restaurer</button></td>
+      <td style="white-space:nowrap;"><button type="button" class="btn btn-sm btn-ghost" onclick="openDevisVersionViewer('${doc.id}','${v.id}')">Voir</button> <button type="button" class="btn btn-sm btn-ghost" onclick="restoreDevisVersion('${doc.id}','${v.id}')" title="Reprendre son contenu sous un nouveau numéro">↺ Restaurer</button> <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="deleteDevisVersion('${doc.id}','${v.id}')" title="Supprimer cette ancienne version (récupérable dans la Corbeille)">Supprimer</button></td>
     </tr>`;
   }).join('');
   const rows = versions.map(d=>{
@@ -11254,6 +11264,25 @@ function openDevisVersionViewer(docId, versionId){
       <button class="btn btn-brass" onclick="restoreDevisVersion('${docId}','${versionId}')">↺ Restaurer comme nouvelle version</button>
     </div>
   `);
+}
+function deleteDevisVersion(docId, versionId){
+  const {doc, v} = findDevisVersion(docId, versionId);
+  if(!doc || !v) return;
+  if(!confirm(`Supprimer l'ancienne version ${v.number} de ce devis ?\n\nElle sera placée dans la Corbeille, d'où tu pourras la récupérer. Le devis actuel (${doc.number}) n'est pas modifié.`)) return;
+  const ts = new Date().toISOString();
+  moveToTrash('devisVersion', `${doc.number} — ancienne version ${v.number}`, { docId, version:v });
+  doc.versions = (doc.versions||[]).filter(x=>x.id!==versionId);
+  doc.history = (Array.isArray(doc.history) ? doc.history.slice() : []).concat([{ ts, type:'version_deleted', detail:v.number }]);
+  persist('devis');
+  // Le formulaire ouvert travaille sur une copie du devis : on la met à jour pour que l'enregistrement ne ressuscite pas la version supprimée
+  if(draft && draft.id===docId){
+    draft.versions = doc.versions.slice();
+    draft.history = doc.history.slice();
+    try{ const snap = JSON.parse(draftSavedSnapshot); snap.versions = draft.versions; snap.history = draft.history; draftSavedSnapshot = JSON.stringify(snap); }catch(e){}
+  }
+  render();
+  openDevisHistoryModal();
+  showToast(`Version ${v.number} supprimée (récupérable dans la Corbeille).`, 4500);
 }
 function restoreDevisVersion(docId, versionId){
   const {doc, v} = findDevisVersion(docId, versionId);
