@@ -7136,11 +7136,10 @@ function clearBrandTarifs(brandId){
 }
 
 /* ---- Import Excel / CSV ---- */
+/* L'import de tarifs ne charge que le prix catalogue (tarif public) : c'est le PU tarif des devis.
+   Les prix nets ont leur propre import (Liste de prix nets). */
 const IMPORT_TARGETS = [
-  {key:'prixHT', label:'Prix Net (utilisé dans les devis)'},
   {key:'prixCatalogue', label:'Prix Catalogue (tarif public)'},
-  {key:'prixAchatDistributeur', label:'Prix Achat Distributeur'},
-  {key:'prixAchatConseilleInstallateur', label:'Prix Achat Conseillé Installateur'},
 ];
 let importParsedRows = null;
 function openImportModal(defaultTarget){
@@ -7153,9 +7152,10 @@ function openImportModal(defaultTarget){
       <div class="field"><label>Marque de destination *</label>
         <select id="imp_brand">${state.brands.map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
       </div>
-      <div class="field"><label>Type de prix importé *</label>
-        <select id="imp_target">${IMPORT_TARGETS.map(t=>`<option value="${t.key}" ${t.key===defaultTarget?'selected':''}>${t.label}</option>`).join('')}</select>
-        <div class="helper">Utilisez cette option pour importer séparément vos tarifs, vos listes de prix nets, ou vos prix d'achat — pour une même référence, chaque import ne met à jour que le prix choisi.</div>
+      <div class="field"><label>Prix importé</label>
+        <input type="hidden" id="imp_target" value="prixCatalogue">
+        <div style="padding:9px 11px;border:1px solid var(--line);border-radius:7px;background:var(--surface-2);font-weight:600;">Prix Catalogue (tarif public)</div>
+        <div class="helper">La colonne de prix choisie ci-dessous est importée comme prix catalogue. Pour une référence déjà présente, seul son prix catalogue est mis à jour.</div>
       </div>
       <label>Fichier</label>
       <div class="upload-zone" onclick="document.getElementById('imp_file').click()">
