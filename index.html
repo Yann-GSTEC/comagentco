@@ -9873,6 +9873,7 @@ function duplicateDraftDevis(){
   clone.validUntil = defaultValidUntil(clone.type||'Devis', clone.date);
   clone.validUntilAuto = true;
   clone.suiviNotes = [];
+  clone.versions = [];
   clone.history = []; // un duplicata démarre son propre journal, plutôt que d'hériter de tout l'historique de l'original
   clone._duplicatedFromId = originalId;
   clone._duplicatedFromNumber = originalNumber;
@@ -9943,12 +9944,13 @@ function devisFormHtml(){
     <div class="modal-head">
       <h3 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         ${escapeHtml(draft.type||'Devis')}
-        <input type="text" value="${escapeHtml(draft.number)}" onchange="draft.number=this.value.trim()||draft.number; draft.numberEditedManually=true; refreshDevisModal();" style="font-size:15px;font-weight:700;font-family:'Space Grotesk';width:150px;padding:4px 8px;height:auto;" title="Modifier le numéro de ce devis">
+        <input type="text" value="${escapeHtml(draft.number)}" onchange="draft.number=this.value.trim()||draft.number; draft.numberEditedManually=true; refreshDevisModal();" style="font-size:15px;font-weight:700;font-family:'Space Grotesk';width:185px;padding:4px 8px;height:auto;" title="Modifier le numéro de ce devis">
+        ${(draft.versions||[]).length?`<span class="chip" style="background:#2977D9;cursor:pointer;" onclick="openDevisHistoryModal()" title="Voir, imprimer ou restaurer les anciennes versions">${(draft.versions||[]).length} ancienne${(draft.versions||[]).length>1?'s':''} version${(draft.versions||[]).length>1?'s':''}</span>`:''}
         ${draft.isNew && !draft.numberEditedManually?'<span class="helper" style="font-weight:400;">(numéro proposé — modifiable, définitif à l\'enregistrement)</span>':''}
       </h3>
       <div style="display:flex;align-items:center;gap:10px;">
         ${draft.pdfImportRawText?`<button type="button" class="btn btn-sm btn-ghost" onclick="showRawPdfImportText()">📄 Voir le texte extrait du PDF</button>`:''}
-        ${!draft.isNew?`<button type="button" class="btn btn-sm btn-ghost" onclick="openDevisHistoryModal()">🕒 Historique complet</button>`:''}
+        ${!draft.isNew?`<button type="button" class="btn btn-sm btn-ghost" onclick="openDevisHistoryModal()">🕒 Versions et historique</button>`:''}
         <button class="close-x" onclick="closeDevisFormWithCheck()">✕</button>
       </div>
     </div>
@@ -10999,9 +11001,12 @@ function finalizeSaveDraftDevis(skipAutoLog, keepOpen){
   if(devisSaveThenAction){ const fn = devisSaveThenAction; devisSaveThenAction = null; fn(toSave.id); }
 }
 function parseDevisVersion(number){
-  const m = /^(.*)\/(\d+)$/.exec(number||'');
+  const n = number||'';
+  let m = /^(.*)\/(\d+)$/.exec(n);                 // ancien format : YG-10223/002 (documents distincts)
   if(m) return {base:m[1], version:parseInt(m[2],10)};
-  return {base:number||'', version:1};
+  m = /^(.+-\d+)-(\d{3})$/.exec(n);                // format actuel : YG-10223-002 (même document)
+  if(m) return {base:m[1], version:parseInt(m[2],10)};
+  return {base:n, version:1};
 }
 function nextDevisVersionNumber(number){
   const {base} = parseDevisVersion(number);
@@ -11009,8 +11014,18 @@ function nextDevisVersionNumber(number){
   state.devis.forEach(d=>{
     const p = parseDevisVersion(d.number);
     if(p.base===base && p.version>maxVersion) maxVersion = p.version;
+    (d.versions||[]).forEach(v=>{ const q = parseDevisVersion(v.number); if(q.base===base && q.version>maxVersion) maxVersion = q.version; });
   });
-  return `${base}/${String(maxVersion+1).padStart(3,'0')}`;
+  return `${base}-${String(maxVersion+1).padStart(3,'0')}`;
+}
+/* Une « version » conserve l'état complet du devis tel qu'il était enregistré avant la nouvelle version.
+   Le document reste UN SEUL devis (même fiche, même historique, mêmes commentaires de suivi) ; seul son numéro change. */
+function makeDevisVersionSnapshot(d){
+  const snap = JSON.parse(JSON.stringify(d));
+  ['versions','history','suiviNotes','pdfImportRawText'].forEach(k=>{ delete snap[k]; });
+  const hist = d.history||[];
+  const savedAt = (hist.length && hist[hist.length-1].ts) || d.updatedAt || d.createdAt || (d.date ? d.date+'T00:00:00' : new Date().toISOString());
+  return { id:uid(), number:d.number, savedAt, archivedAt:new Date().toISOString(), status:d.status, etatAffaire:d.etatAffaire||'', total:devisTotal(d).ht, snapshot:snap };
 }
 function devisHistoryEntryLabel(entry){
   switch(entry.type){
@@ -11021,6 +11036,7 @@ function devisHistoryEntryLabel(entry){
       }
       return 'Modification enregistrée (aucun changement de contenu détecté)';
     }
+    case 'new_version': return `Nouvelle version <strong>${escapeHtml(entry.detail||'')}</strong> — l'ancienne version <strong>${escapeHtml(entry.from||'')}</strong> est conservée${entry.restoredFrom?` · contenu repris de <strong>${escapeHtml(entry.restoredFrom)}</strong>`:''}${entry.changes&&entry.changes.length?`<ul style="margin:4px 0 0 16px;padding:0;">${entry.changes.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul>`:''}`;
     case 'duplicated_to': return `Dupliqué vers la nouvelle version <strong>${escapeHtml(entry.detail||'')}</strong>${entry.clientLabel?` — pour <strong>${escapeHtml(entry.clientLabel)}</strong>`:''}`;
     case 'duplicated_from': return `Créé par duplication depuis <strong>${escapeHtml(entry.detail||'')}</strong>${entry.clientLabel?` — pour <strong>${escapeHtml(entry.clientLabel)}</strong>`:''}`;
     case 'duplicate_deleted': return `Le duplicata <strong>${escapeHtml(entry.detail||'')}</strong>${entry.clientLabel?` (pour <strong>${escapeHtml(entry.clientLabel)}</strong>)`:''} a été supprimé`;
@@ -11074,6 +11090,20 @@ function openDevisHistoryModal(){
     .filter(d=>parseDevisVersion(d.number).base===base)
     .slice()
     .sort((a,b)=>parseDevisVersion(a.number).version - parseDevisVersion(b.number).version);
+  const archivedRows = [];
+  versions.forEach(d=>{ (d.versions||[]).forEach(v=>archivedRows.push({doc:d, v})); });
+  archivedRows.sort((a,b)=>parseDevisVersion(a.v.number).version - parseDevisVersion(b.v.number).version);
+  const archivedHtml = archivedRows.map(({doc, v})=>{
+    const cl = state.clients.find(x=>x.id===v.snapshot.clientId);
+    return `<tr>
+      <td style="font-weight:600;">${escapeHtml(v.number)} <span class="helper">(ancienne version)</span></td>
+      <td>${fmtDateTime(v.savedAt)}</td>
+      <td>${escapeHtml(cl?clientDisplayName(cl):'—')}</td>
+      <td><span class="status-pill status-${escapeHtml(v.status||'')}">${escapeHtml(v.status||'—')}</span></td>
+      <td class="num" style="font-weight:600;">${fmtMoney(v.total)}</td>
+      <td style="white-space:nowrap;"><button type="button" class="btn btn-sm btn-ghost" onclick="openDevisVersionViewer('${doc.id}','${v.id}')">Voir</button> <button type="button" class="btn btn-sm btn-ghost" onclick="restoreDevisVersion('${doc.id}','${v.id}')" title="Reprendre son contenu sous un nouveau numéro">↺ Restaurer</button></td>
+    </tr>`;
+  }).join('');
   const rows = versions.map(d=>{
     const isCurrent = d.id===draft.id;
     const c = state.clients.find(x=>x.id===d.clientId);
@@ -11090,7 +11120,12 @@ function openDevisHistoryModal(){
   // Journal chronologique : toutes les sauvegardes (même numéro conservé) et duplications, tous numéros confondus, avec date et heure exactes.
   const timeline = [];
   versions.forEach(d=>{
-    (d.history||[]).forEach(h=>timeline.push({...h, number:d.number}));
+    // La colonne « Version » indique le numéro que portait le devis au moment de l'évènement
+    let running = (d.versions && d.versions.length) ? d.versions[0].number : d.number;
+    (d.history||[]).forEach(h=>{
+      if(h.type==='new_version' && h.detail) running = h.detail;
+      timeline.push({...h, number:running});
+    });
   });
   timeline.sort((a,b)=> new Date(b.ts) - new Date(a.ts));
   const timelineHtml = timeline.length===0 ? `<div class="helper">Aucun journal détaillé disponible pour ce devis (créé avant l'activation de cette fonctionnalité).</div>` : `
@@ -11110,10 +11145,10 @@ function openDevisHistoryModal(){
     <div class="modal-head"><h3>Historique du devis ${escapeHtml(base)}</h3><button class="close-x" onclick="refreshDevisModal()">✕</button></div>
     <div class="modal-body">
       <div class="section-title">Versions</div>
-      <div class="helper" style="margin-bottom:14px;">${versions.length} version${versions.length>1?'s':''} enregistrée${versions.length>1?'s':''} pour ce document${versions.length>1?' — la plus récente est celle à privilégier pour l\'envoi au client':''}.</div>
+      <div class="helper" style="margin-bottom:14px;">${versions.length+archivedRows.length} version${versions.length+archivedRows.length>1?'s':''} enregistrée${versions.length+archivedRows.length>1?'s':''} pour ce document${versions.length+archivedRows.length>1?' — la ligne grisée est celle d\'aujourd\'hui ; les anciennes versions restent consultables (Voir), imprimables et restaurables':''}.</div>
       <div class="table-wrap"><table>
         <thead><tr><th>Numéro</th><th>Date</th><th>Client</th><th>Statut</th><th>Total HT</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rows}${archivedHtml}</tbody>
       </table></div>
 
       <div class="section-title" style="margin-top:22px;">Journal des modifications <span class="helper" style="display:inline;">(date et heure exactes, y compris quand le même numéro est conservé)</span></div>
@@ -11138,11 +11173,11 @@ function openDevisVersionChoiceModal(){
       <div style="display:flex;flex-direction:column;gap:10px;">
         <button type="button" class="btn" style="justify-content:flex-start;text-align:left;padding:14px;height:auto;" onclick="confirmSaveDevisKeepNumber()">
           <div style="font-weight:700;">Garder le même numéro (${escapeHtml(currentNumber)})</div>
-          <div class="helper" style="margin-top:2px;">Remplace la version actuellement enregistrée.</div>
+          <div class="helper" style="margin-top:2px;">Remplace la version actuellement enregistrée (elle n'est pas conservée).</div>
         </button>
         <button type="button" class="btn btn-brass" style="justify-content:flex-start;text-align:left;padding:14px;height:auto;" onclick="confirmSaveDevisNewVersion()">
           <div style="font-weight:700;color:#fff;">Enregistrer comme nouvelle version (${escapeHtml(nextVersion)})</div>
-          <div style="margin-top:2px;color:rgba(255,255,255,.85);font-size:12px;">Conserve ${escapeHtml(currentNumber)} tel quel et crée un nouveau document distinct, repassé en Brouillon.</div>
+          <div style="margin-top:2px;color:rgba(255,255,255,.85);font-size:12px;">Le même devis prend le numéro ${escapeHtml(nextVersion)} (repassé en Brouillon). La version ${escapeHtml(currentNumber)} est conservée dans « Versions » : tu peux la revoir, en sortir le PDF ou la restaurer.</div>
         </button>
       </div>
     </div>
@@ -11155,26 +11190,95 @@ function confirmSaveDevisKeepNumber(){
   finalizeSaveDraftDevis(false, devisSaveKeepOpen);
 }
 function confirmSaveDevisNewVersion(){
-  const originalId = draft.id;
-  const originalNumber = draft.number;
+  const prev = state.devis.find(d=>d.id===draft.id);
+  if(!prev){ finalizeSaveDraftDevis(false, devisSaveKeepOpen); return; }
   const ts = new Date().toISOString();
-  const newNumber = nextDevisVersionNumber(draft.number);
-  const clientLabel = draft.clientId ? clientDisplayName(state.clients.find(c=>c.id===draft.clientId)||{}) : '—';
-  // Trace la duplication sur le devis d'origine, qui reste inchangé par ailleurs.
-  const originalIdx = state.devis.findIndex(d=>d.id===originalId);
-  if(originalIdx>=0){
-    const orig = state.devis[originalIdx];
-    orig.history = Array.isArray(orig.history) ? orig.history.slice() : [];
-    orig.history.push({ ts, type:'duplicated_to', detail:newNumber, clientLabel });
-    persist('devis');
-  }
-  draft.id = uid();
+  const newNumber = nextDevisVersionNumber(prev.number);
+  const changes = diffDevisForHistory(prev, draft);
+  // 1) on archive la version qui était enregistrée ; 2) le même document prend le nouveau numéro
+  draft.versions = (prev.versions||[]).concat([ makeDevisVersionSnapshot(prev) ]);
   draft.number = newNumber;
+  draft.numberEditedManually = false;
   draft.status = 'Brouillon';
   draft.etatAffaire = '';
-  draft.duplicatedFromId = originalId;
-  draft.history = [{ ts, type:'duplicated_from', detail:originalNumber, clientLabel }];
-  finalizeSaveDraftDevis(true);
+  draft.history = (Array.isArray(prev.history) ? prev.history.slice() : []).concat([{ ts, type:'new_version', detail:newNumber, from:prev.number, changes }]);
+  finalizeSaveDraftDevis(true, devisSaveKeepOpen);
+  showToast(`Nouvelle version enregistrée : ${newNumber}. L'ancienne version ${prev.number} reste consultable dans « Versions ».`, 5000);
+}
+
+/* ---- Consulter / restaurer une ancienne version ---- */
+function findDevisVersion(docId, versionId){
+  const doc = state.devis.find(d=>d.id===docId);
+  const v = doc ? (doc.versions||[]).find(x=>x.id===versionId) : null;
+  return {doc, v};
+}
+function openDevisVersionViewer(docId, versionId){
+  const {doc, v} = findDevisVersion(docId, versionId);
+  if(!v) return;
+  const s = v.snapshot;
+  const cl = state.clients.find(x=>x.id===s.clientId);
+  const remises = l => [l.remisePct1,l.remisePct2,l.remisePct3].filter(x=>x>0).join(' + ');
+  const lines = (s.lines||[]);
+  openModal(`
+    <div class="modal-head"><h3>Version ${escapeHtml(v.number)} <span class="chip" style="background:var(--ink-soft);font-size:11px;">ancienne version — lecture seule</span></h3><button class="close-x" onclick="openDevisHistoryModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="helper" style="margin-bottom:14px;line-height:1.7;">
+        Enregistrée le <strong>${fmtDateTime(v.savedAt)}</strong> · ${escapeHtml(s.type||'Devis')} du ${fmtDate(s.date)} · ${escapeHtml(cl?clientDisplayName(cl):'—')}${s.objet?' · '+escapeHtml(s.objet):''}<br>
+        Statut à l'époque : <strong>${escapeHtml(v.status||'—')}</strong>${v.etatAffaire?` · État : <strong>${escapeHtml(v.etatAffaire)}</strong>`:''} · Total HT : <strong>${fmtMoney(v.total)}</strong><br>
+        Document actuel : <strong>${escapeHtml(doc.number)}</strong>
+      </div>
+      <div class="table-wrap card"><table class="no-col-resize">
+        <thead><tr><th>Marque</th><th>Référence</th><th>Désignation</th><th class="num">Qté</th><th class="num">PU tarif</th><th>Remise</th><th class="num">Prix d'achat HT</th><th class="num">Total HT</th></tr></thead>
+        <tbody>
+          ${lines.map(l=> l.isTitleLine
+            ? `<tr><td colspan="8" style="background:var(--surface-2);font-weight:700;">${cleanRichHtml(l.designation||'')}</td></tr>`
+            : `<tr>
+                <td>${l.brandId?`<span class="chip" style="background:${brandColor(l.brandId)}"><span class="sq"></span>${escapeHtml(brandName(l.brandId))}</span>`:'—'}</td>
+                <td style="font-weight:700;font-family:'Space Grotesk';white-space:nowrap;">${escapeHtml(l.reference||'—')}</td>
+                <td>${cleanRichHtml(l.designation||'')||'—'}</td>
+                <td class="num">${l.qty||0}</td>
+                <td class="num">${l.prixUnitaire?fmtMoney(l.prixUnitaire):'—'}</td>
+                <td>${remises(l)?remises(l)+' %':'—'}</td>
+                <td class="num">${fmtMoney(lineDistribUnit(l))}</td>
+                <td class="num" style="font-weight:700;">${fmtMoney(lineTotalHT(l, s.destinataire))}</td>
+              </tr>`).join('')}
+        </tbody>
+        <tfoot><tr style="font-weight:700;border-top:2px solid var(--line);"><td colspan="7">Total HT (prix d'achat)</td><td class="num">${fmtMoney(v.total)}</td></tr></tfoot>
+      </table></div>
+      ${s.notes?`<div class="section-title" style="margin-top:16px;">Notes / conditions</div><div style="white-space:pre-wrap;">${escapeHtml(s.notes)}</div>`:''}
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="openDevisHistoryModal()">← Retour aux versions</button>
+      <button class="btn" onclick="exportDevisPdf(findDevisVersion('${docId}','${versionId}').v.snapshot, 'preview')">Aperçu du PDF</button>
+      <button class="btn" onclick="exportDevisPdf(findDevisVersion('${docId}','${versionId}').v.snapshot)">⇩ Télécharger le PDF</button>
+      <button class="btn btn-brass" onclick="restoreDevisVersion('${docId}','${versionId}')">↺ Restaurer comme nouvelle version</button>
+    </div>
+  `);
+}
+function restoreDevisVersion(docId, versionId){
+  const {doc, v} = findDevisVersion(docId, versionId);
+  if(!doc || !v) return;
+  const unsaved = draft && draft.id===docId && JSON.stringify(draft)!==draftSavedSnapshot;
+  const newNumber = nextDevisVersionNumber(doc.number);
+  if(!confirm(`Restaurer le contenu de la version ${v.number} ?\n\nLe devis prendra le numéro ${newNumber} et sa version actuelle (${doc.number}) sera conservée dans les versions.${unsaved?'\n\n⚠ Les modifications non enregistrées du devis ouvert seront perdues.':''}`)) return;
+  const ts = new Date().toISOString();
+  const restored = JSON.parse(JSON.stringify(v.snapshot));
+  restored.id = doc.id;
+  restored.number = newNumber;
+  restored.numberEditedManually = false;
+  restored.status = 'Brouillon';
+  restored.etatAffaire = '';
+  restored.createdAt = doc.createdAt;
+  restored.suiviNotes = doc.suiviNotes || [];
+  restored.versions = (doc.versions||[]).concat([ makeDevisVersionSnapshot(doc) ]);
+  restored.history = (Array.isArray(doc.history) ? doc.history.slice() : []).concat([{ ts, type:'new_version', detail:newNumber, from:doc.number, restoredFrom:v.number }]);
+  const idx = state.devis.findIndex(d=>d.id===doc.id);
+  state.devis[idx] = restored;
+  persist('devis');
+  closeModal();
+  render();
+  openDevisForm(doc.id);
+  showToast(`Version ${v.number} restaurée sous le numéro ${newNumber}.`, 5000);
 }
 
 /* ============================= EXPORT PDF ============================= */
@@ -11234,7 +11338,7 @@ function pdfDrawFooter(doc, s, LEFT, RIGHT, PAGE_H, pageNumber, totalPagesExp){
 }
 const RICH_LINE_PITCH = 1.3; // interligne du texte mis en forme dans le PDF (titres et désignations, × corps du texte)
 async function exportDevisPdf(id, mode){
-  const d = state.devis.find(x=>x.id===id) || (draft && draft.id===id ? draft : null);
+  const d = (id && typeof id==='object') ? id : (state.devis.find(x=>x.id===id) || (draft && draft.id===id ? draft : null));
   if(!d){ showToast('Enregistrez le devis avant export.'); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({unit:'mm', format:'a4'});
