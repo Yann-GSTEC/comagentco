@@ -1879,6 +1879,7 @@ async function loadAll(){
   reindexSearchKeys();
   ensurePrixNetListes();
   ensureClientContactsMigrated();
+  repairMangledVersionNumbers();
   render();
 }
 /* ---- Performance : clé de recherche pré-calculée + cache trié pour les grands catalogues ---- */
@@ -9883,6 +9884,7 @@ function duplicateDraftDevis(){
   clone.validUntilAuto = true;
   clone.suiviNotes = [];
   clone.versions = [];
+  delete clone.versionBase;
   clone.history = []; // un duplicata démarre son propre journal, plutôt que d'hériter de tout l'historique de l'original
   clone._duplicatedFromId = originalId;
   clone._duplicatedFromNumber = originalNumber;
@@ -11013,25 +11015,66 @@ function parseDevisVersion(number){
   const n = number||'';
   let m = /^(.*)\/(\d+)$/.exec(n);                 // ancien format : YG-10223/002 (documents distincts)
   if(m) return {base:m[1], version:parseInt(m[2],10)};
-  m = /^(.+-\d+)-(\d{3})$/.exec(n);                // format actuel : YG-10223-002 (même document)
+  m = /^(.+-\d+)-(\d{3})$/.exec(n);                // YG-10223-002
+  if(m) return {base:m[1], version:parseInt(m[2],10)};
+  m = /^(\d{5,})-(\d{3})$/.exec(n);                // 202611010-002 (numéro purement numérique)
   if(m) return {base:m[1], version:parseInt(m[2],10)};
   return {base:n, version:1};
 }
-function nextDevisVersionNumber(number){
-  const {base} = parseDevisVersion(number);
-  let maxVersion = 1;
+function devisVersionBase(d){
+  // Numéro « de base » du document, sans suffixe de version : mémorisé à la 1re nouvelle version, sinon déduit.
+  if(d && d.versionBase) return d.versionBase;
+  if(d && d.versions && d.versions.length) return parseDevisVersion(d.versions[0].number).base;
+  return parseDevisVersion(d ? d.number : '').base;
+}
+function devisVersionIndex(numberStr, base){
+  // Rang de version porté par un numéro, par rapport à son numéro de base : base -> 1, base-002 -> 2…
+  if(numberStr===base) return 1;
+  if(numberStr && numberStr.startsWith(base+'-')){ const rest = numberStr.slice(base.length+1); if(/^\d{3}$/.test(rest)) return parseInt(rest,10); }
+  const p = parseDevisVersion(numberStr);
+  return p.base===base ? p.version : 0;
+}
+function nextDevisVersionNumber(arg){
+  // arg : un devis (de préférence) ou un simple numéro
+  const doc = (arg && typeof arg==='object') ? arg : { number:String(arg||'') };
+  const base = devisVersionBase(doc);
+  let maxVersion = devisVersionIndex(doc.number, base);
+  (doc.versions||[]).forEach(v=>{ maxVersion = Math.max(maxVersion, devisVersionIndex(v.number, base)); });
   state.devis.forEach(d=>{
-    const p = parseDevisVersion(d.number);
-    if(p.base===base && p.version>maxVersion) maxVersion = p.version;
-    (d.versions||[]).forEach(v=>{ const q = parseDevisVersion(v.number); if(q.base===base && q.version>maxVersion) maxVersion = q.version; });
+    if(devisVersionBase(d)!==base) return;
+    maxVersion = Math.max(maxVersion, devisVersionIndex(d.number, base));
+    (d.versions||[]).forEach(v=>{ maxVersion = Math.max(maxVersion, devisVersionIndex(v.number, base)); });
   });
-  return `${base}-${String(maxVersion+1).padStart(3,'0')}`;
+  return `${base}-${String(Math.max(1,maxVersion)+1).padStart(3,'0')}`;
+}
+function repairMangledVersionNumbers(){
+  // Répare les numéros « à suffixe double » produits par une ancienne analyse (ex. 202611010-002-002 -> 202611010-003)
+  let fixed = 0;
+  (state.devis||[]).forEach(d=>{
+    if(!d.versions || !d.versions.length) return;
+    const base = devisVersionBase(d);
+    const esc = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const mangled = new RegExp('^'+esc+'(?:-\\d{3}){2,}$');
+    if(!mangled.test(d.number) && !d.versions.some(v=>mangled.test(v.number))) return;
+    const oldNumbers = {};
+    let maxV = 1;
+    d.versions.forEach(v=>{ if(!mangled.test(v.number)) maxV = Math.max(maxV, devisVersionIndex(v.number, base)); });
+    d.versions.forEach(v=>{
+      if(mangled.test(v.number)){ maxV++; const nn = base+'-'+String(maxV).padStart(3,'0'); oldNumbers[v.number] = nn; v.number = nn; if(v.snapshot) v.snapshot.number = nn; }
+    });
+    if(mangled.test(d.number)){ maxV++; const nn = base+'-'+String(maxV).padStart(3,'0'); oldNumbers[d.number] = nn; d.number = nn; }
+    (d.history||[]).forEach(h=>{ if(oldNumbers[h.detail]) h.detail = oldNumbers[h.detail]; if(oldNumbers[h.from]) h.from = oldNumbers[h.from]; });
+    d.versionBase = base;
+    fixed++;
+  });
+  if(fixed) persist('devis');
+  return fixed;
 }
 /* Une « version » conserve l'état complet du devis tel qu'il était enregistré avant la nouvelle version.
    Le document reste UN SEUL devis (même fiche, même historique, mêmes commentaires de suivi) ; seul son numéro change. */
 function makeDevisVersionSnapshot(d){
   const snap = JSON.parse(JSON.stringify(d));
-  ['versions','history','suiviNotes','pdfImportRawText'].forEach(k=>{ delete snap[k]; });
+  ['versions','history','suiviNotes','pdfImportRawText','versionBase'].forEach(k=>{ delete snap[k]; });
   const hist = d.history||[];
   const savedAt = (hist.length && hist[hist.length-1].ts) || d.updatedAt || d.createdAt || (d.date ? d.date+'T00:00:00' : new Date().toISOString());
   return { id:uid(), number:d.number, savedAt, archivedAt:new Date().toISOString(), status:d.status, etatAffaire:d.etatAffaire||'', total:devisTotal(d).ht, snapshot:snap };
@@ -11175,7 +11218,7 @@ function cancelDevisVersionChoice(){
 }
 function openDevisVersionChoiceModal(){
   const currentNumber = draft.number;
-  const nextVersion = nextDevisVersionNumber(currentNumber);
+  const nextVersion = nextDevisVersionNumber(draft);
   openModal(`
     <div class="modal-head"><h3>Enregistrer les modifications</h3><button class="close-x" onclick="cancelDevisVersionChoice()">✕</button></div>
     <div class="modal-body">
@@ -11203,10 +11246,12 @@ function confirmSaveDevisNewVersion(){
   const prev = state.devis.find(d=>d.id===draft.id);
   if(!prev){ finalizeSaveDraftDevis(false, devisSaveKeepOpen); return; }
   const ts = new Date().toISOString();
-  const newNumber = nextDevisVersionNumber(prev.number);
+  const base = devisVersionBase(prev);
+  const newNumber = nextDevisVersionNumber(prev);
   const changes = diffDevisForHistory(prev, draft);
   // 1) on archive la version qui était enregistrée ; 2) le même document prend le nouveau numéro
   draft.versions = (prev.versions||[]).concat([ makeDevisVersionSnapshot(prev) ]);
+  draft.versionBase = base;
   draft.number = newNumber;
   draft.numberEditedManually = false;
   draft.status = 'Brouillon';
@@ -11288,11 +11333,12 @@ function restoreDevisVersion(docId, versionId){
   const {doc, v} = findDevisVersion(docId, versionId);
   if(!doc || !v) return;
   const unsaved = draft && draft.id===docId && JSON.stringify(draft)!==draftSavedSnapshot;
-  const newNumber = nextDevisVersionNumber(doc.number);
+  const newNumber = nextDevisVersionNumber(doc);
   if(!confirm(`Restaurer le contenu de la version ${v.number} ?\n\nLe devis prendra le numéro ${newNumber} et sa version actuelle (${doc.number}) sera conservée dans les versions.${unsaved?'\n\n⚠ Les modifications non enregistrées du devis ouvert seront perdues.':''}`)) return;
   const ts = new Date().toISOString();
   const restored = JSON.parse(JSON.stringify(v.snapshot));
   restored.id = doc.id;
+  restored.versionBase = devisVersionBase(doc);
   restored.number = newNumber;
   restored.numberEditedManually = false;
   restored.status = 'Brouillon';
