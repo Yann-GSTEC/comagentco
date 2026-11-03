@@ -4280,6 +4280,35 @@ function remapMergedClientRefs(idMap){
   });
   state.devis.forEach(d=>{ if(d.installateurId && idMap[d.installateurId]) d.installateurId = idMap[d.installateurId]; });
 }
+/* ---- Commentaire d'une fiche client (texte enrichi) ---- */
+const RICH_TAGS_RE = '(?:b|i|u|s|strong|em|span|div|p|br|font|ul|ol|li|a|mark|sub|sup)';
+function clientNotesToHtml(raw){
+  // Renvoie le HTML à afficher pour un commentaire de fiche client :
+  // - HTML enregistré normalement : conservé (nettoyé) ;
+  // - HTML « échappé » par erreur (&lt;b&gt;… affiché en clair) : réparé ;
+  // - ancien texte simple : échappé, retours à la ligne conservés.
+  let s = (raw==null ? '' : String(raw));
+  if(!s) return '';
+  for(let i=0;i<4 && /&amp;(?:lt|gt|quot|amp|#39);/.test(s); i++) s = s.replace(/&amp;/g,'&');   // sur-échappement
+  if(new RegExp('&lt;/?'+RICH_TAGS_RE+'\\b','i').test(s)){
+    s = s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&');
+  }
+  if(!new RegExp('</?'+RICH_TAGS_RE+'\\b','i').test(s)){
+    // Sans balise : soit un ancien texte simple (à échapper), soit un texte déjà enregistré par l'éditeur, où « < » « & »
+    // sont écrits &lt; &amp; (à laisser tel quel, sinon ils seraient ré-échappés à chaque ouverture).
+    if(/&(?:lt|gt|amp|quot|#39|nbsp);/.test(s)) return s;
+    return escapeHtml(s).replace(/\r?\n/g,'<br>');
+  }
+  return cleanRichHtml(s);
+}
+function cleanRichHtml(html){
+  return String(html||'')
+    .replace(/<\s*(script|style|iframe|object|embed)[\s\S]*?<\s*\/\s*\1\s*>/gi,'')   // jamais de script
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi,'')                        // ni de gestionnaire d'évènement
+    .replace(/javascript:/gi,'')
+    .replace(/\sstyle=(""|'')/g,'')                                                  // style vide laissé par l'éditeur
+    .trim();
+}
 let clientDraftContacts = [];
 let clientDraftRemises = [];
 let clientDraftId = null;
@@ -4354,7 +4383,7 @@ function openClientForm(id){
         <span>Ce client accepte de recevoir des emailings <span class="helper" style="display:inline;">— décochez pour l'exclure automatiquement des extractions dans l'onglet Emailing</span></span>
       </label>
       <div class="field"><label>Commentaire</label>
-        <div class="rich-editable" contenteditable="true" id="f_notes" data-placeholder="Notes internes sur ce client…" onpaste="handleRichPaste(event)" style="border:1px solid var(--line);border-radius:7px;min-height:70px;padding:9px 11px;background:#fff;">${c?escapeHtml(c.notes||''):''}</div>
+        <div class="rich-editable" contenteditable="true" id="f_notes" data-placeholder="Notes internes sur ce client…" onpaste="handleRichPaste(event)" style="border:1px solid var(--line);border-radius:7px;min-height:70px;padding:9px 11px;background:#fff;">${c?clientNotesToHtml(c.notes):''}</div>
       </div>
 
 
@@ -4598,7 +4627,7 @@ function saveClient(id){
     typeClient: document.getElementById('f_typeClient').value.trim(),
     canalDistribution: document.getElementById('f_canalDistribution').value.trim(),
     commercialId: document.getElementById('f_commercialId').value,
-    notes: document.getElementById('f_notes').innerHTML.trim(),
+    notes: cleanRichHtml(document.getElementById('f_notes').innerHTML),
     remisesTarif: clientDraftRemises.filter(r=>r.remise1||r.remise2||r.remise3||r.brandId||r.familleArticle),
     actif: !document.getElementById('f_inactif').checked,
     contacts: clientDraftContacts.map(normalizeClientContact),
@@ -4704,7 +4733,7 @@ function openClientDetail(id, scrollToSuivi){
           return escapeHtml(scope+' : '+(pct||'0%'));
         }).join(' · ')}</div>`:''}
       </div>
-      ${c.notes?`<div class="helper" style="margin-bottom:10px;">${c.notes}</div>`:''}
+      ${c.notes?`<div class="helper" style="margin-bottom:10px;">${clientNotesToHtml(c.notes)}</div>`:''}
 
       ${contacts.length>0?`
       <div class="section-title">Personnes à contacter</div>
