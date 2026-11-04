@@ -8612,6 +8612,10 @@ function toggleDevisEtatFilter(val){
   else ui.devisFilterEtats.push(val);
   updateDevisListOnly();
 }
+function isDevisAbandoned(d){
+  return /abandon/.test(normSearch(d.etatAffaire||''));
+}
+function isDevisLostOrAbandoned(d){ return isDevisLost(d) || isDevisAbandoned(d); }
 function devisRowClass(d){
   // Couleur de toute la ligne selon l'état de l'affaire : À traiter = orange, Gagnée = vert, Perdue = rouge
   if(isEtatATraiter(d)) return 'row-a-traiter';
@@ -8619,7 +8623,7 @@ function devisRowClass(d){
   if(oc==='gagnee') return 'row-gagnee';
   if(oc==='perdue') return 'row-perdue';
   // « Abandonné(e) » : traité comme perdu pour la couleur, quel que soit le type donné à cet état dans les listes de référence
-  if(/abandon/.test(normSearch(d.etatAffaire||''))) return 'row-perdue';
+  if(isDevisAbandoned(d)) return 'row-perdue';
   return '';
 }
 function devisEtatColor(d){
@@ -12308,7 +12312,7 @@ function openRapportPdfOptionsModal(action){
           ${synRow('rpo_syn_caGagne', syn.caGagne, 'CA gagné (devis)')}
           ${synRow('rpo_syn_devisEnCours', syn.devisEnCours, 'Devis en cours (nombre + montant)')}
           ${synRow('rpo_syn_devisGagnes', syn.devisGagnes, 'Devis gagnés (nombre)')}
-          ${synRow('rpo_syn_devisPerdus', syn.devisPerdus, 'Devis perdus (nombre + montant)')}
+          ${synRow('rpo_syn_devisPerdus', syn.devisPerdus, 'Devis perdus / abandonnés (nombre + montant)')}
           ${synRow('rpo_syn_caCommissions', syn.caCommissions, 'CA (onglet Commissions)')}
           ${synRow('rpo_syn_commission', syn.commission, 'Commission calculée')}
           ${synRow('rpo_syn_rdvCount', syn.rdvCount, 'Rendez-vous effectués (nombre)')}
@@ -12322,7 +12326,7 @@ function openRapportPdfOptionsModal(action){
         <input type="checkbox" id="rpo_gagnes" style="width:auto;" ${sec.devisGagnes?'checked':''}><span>Détail des devis gagnés <span class="helper" style="display:inline;">(tableau)</span></span>
       </label>
       <label style="display:flex;align-items:center;gap:10px;padding:9px 2px;cursor:pointer;border-bottom:1px solid var(--line);">
-        <input type="checkbox" id="rpo_perdus" style="width:auto;" ${sec.devisPerdus?'checked':''}><span>Détail des devis perdus <span class="helper" style="display:inline;">(tableau)</span></span>
+        <input type="checkbox" id="rpo_perdus" style="width:auto;" ${sec.devisPerdus?'checked':''}><span>Détail des devis perdus / abandonnés <span class="helper" style="display:inline;">(tableau)</span></span>
       </label>
       <label style="display:flex;align-items:center;gap:10px;padding:9px 2px 9px 26px;cursor:pointer;border-bottom:1px solid var(--line);">
         <input type="checkbox" id="rpo_suivi" style="width:auto;" ${sec.devisSuivi!==false?'checked':''}><span>Commentaires de suivi sous chaque devis <span class="helper" style="display:inline;">(ex. raison d'un devis perdu)</span></span>
@@ -12371,9 +12375,10 @@ function confirmRapportPdfOptions(action){
 function computeRapportData(brandId, year, month){
   const devisForBrand = state.devis.filter(d=> periodMatchesReport(d.date,year,month) && (d.lines||[]).some(l=>l.brandId===brandId));
   const lineAmount = (d)=> (d.lines||[]).filter(l=>l.brandId===brandId).reduce((s,l)=>s+lineTotalHT(l, d.destinataire),0);
-  const enCours = devisForBrand.filter(d=>d.status==='Brouillon'||d.status==='Envoyé');
+  // « En cours » = brouillon ou envoyé, ET ni gagné ni perdu : sinon un devis gagné/perdu (statut « Envoyé ») figurerait aussi ici, en doublon
+  const enCours = devisForBrand.filter(d=>(d.status==='Brouillon'||d.status==='Envoyé') && !isDevisWon(d) && !isDevisLostOrAbandoned(d));
   const gagnes = devisForBrand.filter(d=>isDevisWon(d));
-  const perdus = devisForBrand.filter(d=>isDevisLost(d));
+  const perdus = devisForBrand.filter(d=>isDevisLostOrAbandoned(d));   // perdus + abandonnés
   const montantEnCours = enCours.reduce((s,d)=>s+lineAmount(d),0);
   const montantGagne = gagnes.reduce((s,d)=>s+lineAmount(d),0);
   const montantPerdu = perdus.reduce((s,d)=>s+lineAmount(d),0);
@@ -12596,12 +12601,12 @@ function renderRapport(){
     'kpi-ca': `<div class="label">CA gagné (devis)</div><div class="value num" style="color:var(--success);">${fmtMoney(data.montantGagne)}</div>`,
     'kpi-encours': `<div class="label">Devis en cours</div><div class="value num" style="color:#2F6FBD;">${data.enCours.length}</div><div class="delta">${fmtMoney(data.montantEnCours)}</div>`,
     'kpi-gagnes': `<div class="label">Devis gagnés</div><div class="value num" style="color:var(--success);">${data.gagnes.length}</div>`,
-    'kpi-perdus': `<div class="label">Devis perdus</div><div class="value num" style="color:var(--danger);">${data.perdus.length}</div><div class="delta">${fmtMoney(data.montantPerdu)}</div>`,
+    'kpi-perdus': `<div class="label">Devis perdus / abandonnés</div><div class="value num" style="color:var(--danger);">${data.perdus.length}</div><div class="delta">${fmtMoney(data.montantPerdu)}</div>`,
     'kpi-commissions': `<h3 style="margin:0 0 12px 0;font-size:14px;">Commissions</h3><div class="grid grid-2"><div><div class="label">CA (onglet Commissions)</div><div class="value num" style="color:var(--brass);">${fmtMoney(data.commissionData.ca)}</div></div><div><div class="label">Commission calculée</div><div class="value num" style="color:var(--brass);">${fmtMoney(data.commissionData.commission)}</div></div></div>`,
     'kpi-rdv': `<div class="label">Rendez-vous effectués</div><div class="value num" style="color:var(--accent);">${data.meetings.length}</div>`,
     'sec-encours': `<h3 style="margin:0 0 12px 0;font-size:15px;">Devis en cours <span class="helper" style="font-weight:400;">(${data.enCours.length})</span></h3>${rapportDevisSectionBody(data.enCours, data.lineAmount)}`,
     'sec-gagnes': `<h3 style="margin:0 0 12px 0;font-size:15px;">Devis gagnés <span class="helper" style="font-weight:400;">(${data.gagnes.length})</span></h3>${rapportDevisSectionBody(data.gagnes, data.lineAmount)}`,
-    'sec-perdus': `<h3 style="margin:0 0 12px 0;font-size:15px;">Devis perdus <span class="helper" style="font-weight:400;">(${data.perdus.length})</span></h3>${rapportDevisSectionBody(data.perdus, data.lineAmount)}`,
+    'sec-perdus': `<h3 style="margin:0 0 12px 0;font-size:15px;">Devis perdus / abandonnés <span class="helper" style="font-weight:400;">(${data.perdus.length})</span></h3>${rapportDevisSectionBody(data.perdus, data.lineAmount)}`,
     'sec-rdv': `<h3 style="margin:0 0 12px 0;font-size:15px;">Rendez-vous effectués <span class="helper" style="font-weight:400;">(${data.meetings.length})</span></h3>${rapportMeetingsSectionBody(data.meetings)}`,
   };
   const widgetCardsHtml = state.rapportLayout.order.map(id=>{
@@ -12751,7 +12756,7 @@ async function exportRapportPdf(brandId, year, month, mode, sections){
     if(sections.synthese.caGagne) synRows.push(['CA gagné (devis)', fmtMoneyPdf(data.montantGagne)]);
     if(sections.synthese.devisEnCours) synRows.push(['Devis en cours', `${data.enCours.length}  (${fmtMoneyPdf(data.montantEnCours)})`]);
     if(sections.synthese.devisGagnes) synRows.push(['Devis gagnés', String(data.gagnes.length)]);
-    if(sections.synthese.devisPerdus) synRows.push(['Devis perdus', `${data.perdus.length}  (${fmtMoneyPdf(data.montantPerdu)})`]);
+    if(sections.synthese.devisPerdus) synRows.push(['Devis perdus / abandonnés', `${data.perdus.length}  (${fmtMoneyPdf(data.montantPerdu)})`]);
     if(sections.synthese.caCommissions) synRows.push(['CA (onglet Commissions)', fmtMoneyPdf(data.commissionData.ca)]);
     if(sections.synthese.commission) synRows.push(['Commission calculée', fmtMoneyPdf(data.commissionData.commission)]);
     if(sections.synthese.rdvCount) synRows.push(['Rendez-vous effectués', String(data.meetings.length)]);
@@ -12802,7 +12807,7 @@ async function exportRapportPdf(brandId, year, month, mode, sections){
   };
   if(sections.devisEnCours) devisSection('Devis en cours', data.enCours);
   if(sections.devisGagnes) devisSection('Devis gagnés', data.gagnes);
-  if(sections.devisPerdus) devisSection('Devis perdus', data.perdus);
+  if(sections.devisPerdus) devisSection('Devis perdus / abandonnés', data.perdus);
   if(sections.rdv) addSection('Rendez-vous effectués', data.meetings.map(m=>[fmtDate(m.date), m.typeVisite||'—', clientDisplayName(m.client), historyPersonneNames(m, m.client).join(', ')||'—', historyTasks(m).map(t=>t.name+(t.comment?` (${t.comment})`:'')).join(', '), rapportNoteText(m).slice(0,600)]), ['Date','Type','Client','Personnes vues','Tâches','Compte-rendu']);
   const anySelected = Object.values(sections.synthese||{}).some(Boolean) || sections.devisEnCours || sections.devisGagnes || sections.devisPerdus || sections.rdv;
   if(!anySelected){
@@ -12836,7 +12841,7 @@ function openSendRapportModal(){
   if(sec.synthese.caGagne) summaryLines.push(`- CA gagné (devis) : ${fmtMoney(data.montantGagne)}`);
   if(sec.synthese.devisEnCours) summaryLines.push(`- Devis en cours : ${data.enCours.length} (${fmtMoney(data.montantEnCours)})`);
   if(sec.synthese.devisGagnes) summaryLines.push(`- Devis gagnés : ${data.gagnes.length}`);
-  if(sec.synthese.devisPerdus) summaryLines.push(`- Devis perdus : ${data.perdus.length} (${fmtMoney(data.montantPerdu)})`);
+  if(sec.synthese.devisPerdus) summaryLines.push(`- Devis perdus / abandonnés : ${data.perdus.length} (${fmtMoney(data.montantPerdu)})`);
   if(sec.synthese.caCommissions) summaryLines.push(`- CA (onglet Commissions) : ${fmtMoney(data.commissionData.ca)}`);
   if(sec.synthese.commission) summaryLines.push(`- Commission calculée : ${fmtMoney(data.commissionData.commission)}`);
   if(sec.synthese.rdvCount) summaryLines.push(`- Rendez-vous effectués : ${data.meetings.length}`);
