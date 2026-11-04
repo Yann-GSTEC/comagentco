@@ -884,7 +884,7 @@ label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-
 .modal.modal-screen{left:220px !important;right:0 !important;top:0 !important;bottom:0 !important;width:auto !important;max-width:none !important;height:auto !important;max-height:none !important;border-radius:0;box-shadow:none;}
 /* left/right au lieu de 100vw : 100vw inclut la barre de défilement de la page, ce qui cachait celle de la fenêtre */
 .modal,.modal-body,.autocomplete-list,.filter-details-panel{overscroll-behavior:contain;}
-html.modal-open,html.modal-open body{overflow:hidden;}
+html.modal-open{overflow:hidden;}
 .modal.modal-screen .modal-head{cursor:default;}
 .modal-head{
   display:flex;justify-content:space-between;align-items:center;
@@ -2664,6 +2664,7 @@ function openModal(html, opts){
   const overlay = document.createElement('div');
   overlay.className='modal-overlay';
   overlay.id='modalOverlay';
+  if(!document.documentElement.classList.contains('modal-open')) window._scrollBeforeModal = window.scrollY;
   document.documentElement.classList.add('modal-open'); // fige le défilement de la page en arrière-plan
   // Toutes les fenêtres s'ouvrent en plein écran, fixes (non déplaçables).
   overlay.innerHTML = `<div class="modal modal-full modal-screen" id="modalBox">${html}</div>`;
@@ -2726,6 +2727,7 @@ function closeModal(){
   if(el) el.remove();
   if(window._commissionModalOpen){ window._commissionModalOpen = false; commissionModalState = null; render(); }
   document.documentElement.classList.remove('modal-open');
+  if(window._scrollBeforeModal!=null){ const y = window._scrollBeforeModal; window._scrollBeforeModal = null; window.scrollTo(0, y); }
   document.removeEventListener('keydown', escCloseHandler);
   document.removeEventListener('keydown', devisFormKeydownHandler);
   window.removeEventListener('resize', positionModalCentered);
