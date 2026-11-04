@@ -4696,7 +4696,7 @@ function renderClientSuiviCommercialSection(c, timelineMaxHeight, showFullscreen
           <div class="timeline-item" style="align-items:flex-start;">
             <input type="checkbox" style="width:auto;margin-top:2px;" ${ui.historySelected[h.id]?'checked':''} onchange="toggleHistorySelect('${h.id}', this.checked)">
             <div class="tdot"></div>
-            <div style="flex:1;cursor:pointer;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')"><div class="tdate">${fmtDate(h.date)}${h.typeVisite?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:6px;">${escapeHtml(h.typeVisite)}</span>`:''}${h.duree?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:4px;">⏱ ${h.duree} min</span>`:''}${historyBrandIds(h).map(bid=>` <span class="chip" style="background:${brandColor(bid)};font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(brandName(bid))}</span>`).join('')}${historyTasks(h).map(t=>` <span class="chip" title="${t.comment?escapeHtml(t.comment):''}" style="background:${taskColor(t.name)};color:#fff;font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(t.name)}${t.comment?' 💬':''}</span>`).join('')}</div>${historyPersonneNames(h,c).length>0?`<div class="helper" style="margin:2px 0 2px;">👤 ${historyPersonneNames(h,c).map(escapeHtml).join(', ')}</div>`:''}<div style="white-space:pre-wrap;">${escapeHtml(h.text).replace(/\n/g,'<br>')}</div></div>
+            <div style="flex:1;cursor:pointer;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')"><div class="tdate">${fmtDate(h.date)}${h.typeVisite?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:6px;">${escapeHtml(h.typeVisite)}</span>`:''}${h.duree?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:4px;">⏱ ${h.duree} min</span>`:''}${historyBrandIds(h).map(bid=>` <span class="chip" style="background:${brandColor(bid)};font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(brandName(bid))}</span>`).join('')}${historyTasks(h).map(t=>` <span class="chip" title="${t.comment?escapeHtml(t.comment):''}" style="background:${taskColor(t.name)};color:#fff;font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(t.name)}${t.comment?' 💬':''}</span>`).join('')}</div>${historyPersonneNames(h,c).length>0?`<div class="helper" style="margin:2px 0 2px;">👤 ${historyPersonneNames(h,c).map(escapeHtml).join(', ')}</div>`:''}${historyNoteBlocksHtml(h)}</div>
             <button class="btn btn-sm btn-ghost" style="padding:2px 8px;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')">✎</button>
             <button class="btn btn-sm btn-ghost btn-danger" style="padding:2px 8px;" onclick="deleteHistoryNote('${c.id}','${h.id}')">✕</button>
           </div>
@@ -4848,6 +4848,7 @@ function toggleHistoryBrandChip(el, brandId){
   if(idx>=0){ historyNoteSelectedBrands.splice(idx,1); el.style.opacity='.5'; el.style.borderColor='transparent'; }
   else { historyNoteSelectedBrands.push(brandId); el.style.opacity='1'; el.style.borderColor='#1a1a1a'; }
   refreshHistoryBudgetSection('add');
+  refreshHistoryBrandNotes('add');
 }
 let historyNoteBudgets = {};
 let historyEditBudgets = {};
@@ -4866,6 +4867,49 @@ function renderHistoryBudgetSection(tasks, brandIds, budgets, onchangeFn){
       `).join('')}
     </div>
   </div>`;
+}
+/* ---- Note générale + une note par marque sélectionnée ----
+   h.text = note générale (valable pour toutes les marques) ; h.brandNotes = {idMarque: note propre à cette marque}.
+   Dans le rapport d'une marque : note générale + note de CETTE marque seulement. */
+let historyNoteBrandTexts = {};
+let historyEditBrandTexts = {};
+function renderHistoryBrandNotes(brandIds, texts, kind){
+  if(!brandIds.length) return '<div class="helper" style="margin-top:8px;">Sélectionnez une ou plusieurs marques : une note propre à chacune apparaîtra ici et ne figurera que dans le rapport de cette marque.</div>';
+  const prefix = kind==='add' ? 'ah_bn_' : 'eh_bn_';
+  return `<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">${brandIds.map(bid=>`
+    <div class="field" style="margin:0;padding:10px 12px;border:1px solid var(--line);border-left:4px solid ${brandColor(bid)};border-radius:8px;background:var(--surface-2);">
+      <label style="display:flex;align-items:center;gap:8px;"><span class="chip" style="background:${brandColor(bid)};font-size:10px;">${escapeHtml(brandName(bid))}</span> Note spécifique à ${escapeHtml(brandName(bid))} <span class="helper" style="display:inline;">— uniquement dans son rapport</span></label>
+      <textarea rows="3" id="${prefix}${bid}" placeholder="Ce qui concerne ${escapeHtml(brandName(bid))}…" oninput="setHistoryBrandText('${kind}','${bid}',this.value)">${escapeHtml(texts[bid]||'')}</textarea>
+    </div>`).join('')}</div>`;
+}
+function setHistoryBrandText(kind, brandId, val){ (kind==='add' ? historyNoteBrandTexts : historyEditBrandTexts)[brandId] = val; }
+function refreshHistoryBrandNotes(kind){
+  const holder = document.getElementById('historyBrandNotes_'+kind);
+  if(!holder) return;
+  holder.innerHTML = kind==='add'
+    ? renderHistoryBrandNotes(historyNoteSelectedBrands, historyNoteBrandTexts, 'add')
+    : renderHistoryBrandNotes(historyEditSelectedBrands, historyEditBrandTexts, 'edit');
+}
+function collectBrandNotes(brandIds, texts){
+  const out = {};
+  brandIds.forEach(bid=>{ const t = (texts[bid]||'').trim(); if(t) out[bid] = t; });
+  return out;
+}
+function historyNoteBlocksHtml(h){
+  // Affichage d'une note de suivi : note générale, puis la note de chaque marque précédée de sa pastille
+  const parts = [];
+  const general = (h.text||'').trim();
+  if(general) parts.push(`<div style="white-space:pre-wrap;">${escapeHtml(general).replace(/\n/g,'<br>')}</div>`);
+  const bn = h.brandNotes || {};
+  historyBrandIds(h).forEach(bid=>{
+    const t = (bn[bid]||'').trim();
+    if(t) parts.push(`<div style="white-space:pre-wrap;margin-top:4px;"><span class="chip" style="background:${brandColor(bid)};font-size:9px;padding:2px 6px;margin-right:6px;">${escapeHtml(brandName(bid))}</span>${escapeHtml(t).replace(/\n/g,'<br>')}</div>`);
+  });
+  return parts.join('') || '<span class="helper">—</span>';
+}
+function rapportNoteText(m){
+  // Texte du compte-rendu pour le rapport d'une marque : note générale + note propre à cette marque
+  return [(m.text||'').trim(), (m.brandNote||'').trim()].filter(Boolean).join('\n');
 }
 function refreshHistoryBudgetSection(which){
   if(which==='add'){
@@ -4937,6 +4981,7 @@ function commentHistoryNoteTaskChip(el, taskName){
 }
 function openAddHistoryNoteModal(clientId){
   historyNoteSelectedBrands = [];
+  historyNoteBrandTexts = {};
   historyNoteSelectedTasks = {};
   historyNoteSelectedPersonnes = [];
   historyNoteBudgets = {};
@@ -4947,7 +4992,7 @@ function openAddHistoryNoteModal(clientId){
         <label>Personnes vues</label>
         <div id="historyPersonneChips" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">${renderHistoryPersonneChips(clientId, historyNoteSelectedPersonnes, 'toggleHistoryNotePersonneChip')}</div>
       </div>
-      <div class="field"><label>Note <span class="helper" style="display:inline;">(Entrée pour aller à la ligne)</span></label><textarea id="ah_text" rows="4" style="resize:vertical;" placeholder="Ajouter une note de suivi (appel, RDV, relance…)"></textarea></div>
+      <div class="field"><label>Note générale <span class="helper" style="display:inline;">— valable pour toutes les marques (Entrée pour aller à la ligne)</span></label><textarea id="ah_text" rows="4" style="resize:vertical;" placeholder="Ajouter une note de suivi (appel, RDV, relance…)"></textarea></div>
       <div class="field-row">
         <div class="field"><label>Date</label><input type="date" id="ah_date" value="${todayStr()}"></div>
         <div class="field"><label>Type de visite</label>
@@ -4958,6 +5003,7 @@ function openAddHistoryNoteModal(clientId){
       <div class="field" style="margin-bottom:16px;">
         <label>Marque(s) présentée(s) <span class="helper" style="display:inline;">— laissez vide si non applicable</span></label>
         <div id="historyBrandChips" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">${renderHistoryBrandChips()}</div>
+        <div id="historyBrandNotes_add">${renderHistoryBrandNotes(historyNoteSelectedBrands, historyNoteBrandTexts, 'add')}</div>
       </div>
       <div class="field" style="margin-bottom:16px;">
         <label style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -4978,7 +5024,8 @@ function openAddHistoryNoteModal(clientId){
 function addHistoryNote(clientId){
   const input = document.getElementById('ah_text');
   const text = input.value.trim();
-  if(!text){ showToast('La note ne peut pas être vide.'); return; }
+  const brandNotes = collectBrandNotes(historyNoteSelectedBrands, historyNoteBrandTexts);
+  if(!text && Object.keys(brandNotes).length===0){ showToast('Saisissez une note générale ou une note pour au moins une marque.'); return; }
   const dateEl = document.getElementById('ah_date');
   const date = (dateEl && dateEl.value) ? dateEl.value : todayStr();
   const typeVisiteEl = document.getElementById('ah_typeVisite');
@@ -4990,8 +5037,9 @@ function addHistoryNote(clientId){
   const animationBudgets = taches.some(t=>t.name==='Animation commerciale') ? {...historyNoteBudgets} : {};
   const c = state.clients.find(x=>x.id===clientId);
   c.history = c.history || [];
-  c.history.push({id:uid(), date, text, brandIds, typeVisite: typeVisite||'', duree, taches, personnesVues: historyNoteSelectedPersonnes.slice(), animationBudgets});
+  c.history.push({id:uid(), date, text, brandNotes, brandIds, typeVisite: typeVisite||'', duree, taches, personnesVues: historyNoteSelectedPersonnes.slice(), animationBudgets});
   persist('clients');
+  historyNoteBrandTexts = {};
   historyNoteSelectedBrands = [];
   historyNoteSelectedTasks = {};
   historyNoteSelectedPersonnes = [];
@@ -5011,6 +5059,7 @@ function toggleHistoryEditBrandChip(el, brandId){
   if(idx>=0){ historyEditSelectedBrands.splice(idx,1); el.style.opacity='.5'; el.style.borderColor='transparent'; }
   else { historyEditSelectedBrands.push(brandId); el.style.opacity='1'; el.style.borderColor='#1a1a1a'; }
   refreshHistoryBudgetSection('edit');
+  refreshHistoryBrandNotes('edit');
 }
 let historyEditSelectedTasks = {};
 function toggleHistoryEditTaskChip(el, taskName){
@@ -5041,6 +5090,7 @@ function openEditHistoryNoteModal(clientId, noteId){
   historyEditSelectedPersonnes = (h.personnesVues||[]).slice();
   historyTasks(h).forEach(t=>{ historyEditSelectedTasks[t.name] = t.comment||''; });
   historyEditBudgets = {...(h.animationBudgets||{})};
+  historyEditBrandTexts = {...(h.brandNotes||{})};
   openModal(`
     <div class="modal-head"><h3>Modifier la note de suivi</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
@@ -5048,7 +5098,7 @@ function openEditHistoryNoteModal(clientId, noteId){
         <label>Personnes vues</label>
         <div id="historyEditPersonneChips" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">${renderHistoryPersonneChips(clientId, historyEditSelectedPersonnes, 'toggleHistoryEditPersonneChip')}</div>
       </div>
-      <div class="field"><label>Note <span class="helper" style="display:inline;">(Entrée pour aller à la ligne)</span></label><textarea id="eh_text" rows="4" style="resize:vertical;">${escapeHtml(h.text)}</textarea></div>
+      <div class="field"><label>Note générale <span class="helper" style="display:inline;">— valable pour toutes les marques (Entrée pour aller à la ligne)</span></label><textarea id="eh_text" rows="4" style="resize:vertical;">${escapeHtml(h.text||'')}</textarea></div>
       <div class="field-row">
         <div class="field"><label>Date</label><input type="date" id="eh_date" value="${h.date||todayStr()}"></div>
         <div class="field"><label>Type de visite</label>
@@ -5059,6 +5109,7 @@ function openEditHistoryNoteModal(clientId, noteId){
       <div class="field" style="margin-bottom:16px;">
         <label>Marque(s) présentée(s)</label>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">${renderHistoryEditBrandChips()}</div>
+        <div id="historyBrandNotes_edit">${renderHistoryBrandNotes(historyEditSelectedBrands, historyEditBrandTexts, 'edit')}</div>
       </div>
       <div class="field" style="margin-bottom:16px;">
         <label style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -5082,8 +5133,10 @@ function saveEditedHistoryNote(clientId, noteId){
   const h = (c.history||[]).find(x=>x.id===noteId);
   if(!h) return;
   const text = document.getElementById('eh_text').value.trim();
-  if(!text){ showToast('La note ne peut pas être vide.'); return; }
+  const brandNotes = collectBrandNotes(historyEditSelectedBrands, historyEditBrandTexts);
+  if(!text && Object.keys(brandNotes).length===0){ showToast('Saisissez une note générale ou une note pour au moins une marque.'); return; }
   h.text = text;
+  h.brandNotes = brandNotes;
   h.date = document.getElementById('eh_date').value || h.date;
   h.typeVisite = document.getElementById('eh_typeVisite').value || '';
   const dureeEl = document.getElementById('eh_duree');
@@ -12169,7 +12222,7 @@ function computeRapportData(brandId, year, month){
       const tags = historyBrandIds(h);
       if(tags.length>0){
         // Note taguée avec une ou plusieurs marques précises : ne remonte que dans le(s) rapport(s) de ces marques
-        if(tags.includes(brandId)) meetings.push({client:c, ...h});
+        if(tags.includes(brandId)) meetings.push({client:c, ...h, brandNote:(h.brandNotes||{})[brandId]||''});
       } else {
         // Note non taguée (ancienne saisie ou générale) : conserve l'ancien comportement, rattachée à toute marque déjà achetée par ce client
         if(clientIds.has(c.id)) meetings.push({client:c, ...h});
@@ -12482,7 +12535,7 @@ function rapportMeetingsSectionBody(meetings){
           <td style="font-weight:600;">${escapeHtml(clientDisplayName(m.client))}</td>
           <td>${escapeHtml(historyPersonneNames(m, m.client).join(', ')||'—')}</td>
           <td>${historyTasks(m).length===0?'':historyTasks(m).map(t=>`<span class="chip" title="${t.comment?escapeHtml(t.comment):''}" style="background:${taskColor(t.name)};color:#fff;font-size:9px;padding:2px 6px;margin:1px 2px 1px 0;display:inline-block;">${escapeHtml(t.name)}${t.comment?' 💬':''}</span>`).join('')}</td>
-          <td>${escapeHtml(m.text||'')}</td>
+          <td>${(m.text||'').trim()?`<div style="white-space:pre-wrap;">${escapeHtml(m.text)}</div>`:''}${m.brandNote?`<div style="white-space:pre-wrap;margin-top:${(m.text||'').trim()?'4px':'0'};padding-left:8px;border-left:3px solid var(--accent);"><strong>Note spécifique :</strong> ${escapeHtml(m.brandNote)}</div>`:''}${!(m.text||'').trim() && !m.brandNote?'<span class="helper">—</span>':''}</td>
         </tr>
       `).join('')}
     </tbody>
@@ -12569,7 +12622,7 @@ async function exportRapportPdf(brandId, year, month, mode, sections){
   if(sections.devisEnCours) addSection('Devis en cours', devisRows(data.enCours), ['N°','Date','Client','Objet','Statut','Montant']);
   if(sections.devisGagnes) addSection('Devis gagnés', devisRows(data.gagnes), ['N°','Date','Client','Objet','Statut','Montant']);
   if(sections.devisPerdus) addSection('Devis perdus', devisRows(data.perdus), ['N°','Date','Client','Objet','Statut','Montant']);
-  if(sections.rdv) addSection('Rendez-vous effectués', data.meetings.map(m=>[fmtDate(m.date), m.typeVisite||'—', clientDisplayName(m.client), historyPersonneNames(m, m.client).join(', ')||'—', historyTasks(m).map(t=>t.name+(t.comment?` (${t.comment})`:'')).join(', '), (m.text||'').slice(0,220)]), ['Date','Type','Client','Personnes vues','Tâches','Compte-rendu']);
+  if(sections.rdv) addSection('Rendez-vous effectués', data.meetings.map(m=>[fmtDate(m.date), m.typeVisite||'—', clientDisplayName(m.client), historyPersonneNames(m, m.client).join(', ')||'—', historyTasks(m).map(t=>t.name+(t.comment?` (${t.comment})`:'')).join(', '), rapportNoteText(m).slice(0,600)]), ['Date','Type','Client','Personnes vues','Tâches','Compte-rendu']);
   const anySelected = Object.values(sections.synthese||{}).some(Boolean) || sections.devisEnCours || sections.devisGagnes || sections.devisPerdus || sections.rdv;
   if(!anySelected){
     doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(130);
