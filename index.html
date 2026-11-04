@@ -2490,6 +2490,7 @@ function resetTabFilters(tabId){
   keys.forEach(k=>{ ui[k] = UI_FILTER_DEFAULTS[k]; });
 }
 function setTab(t){
+  modalNavReset();
   if(ui.tab && ui.tab!==t) resetTabFilters(ui.tab);
   ui.tab = t;
   render();
@@ -2658,9 +2659,66 @@ function afterRenderHook(){
 </script>
 <script>
 /* ============================= MODALES ============================= */
+/* ============ HISTORIQUE DES FENÊTRES : fermer une fenêtre ramène à la précédente ============
+   Quand une fenêtre « de page » (synthèse client, fiche contact, fiche client, devis, notes de suivi) s'ouvre depuis une
+   autre, la précédente est mémorisée ; en refermant la nouvelle, on la retrouve (rouverte avec des données à jour et à la
+   même position de défilement), jusqu'à revenir à l'onglet. Le tout sans changer les boutons existants. */
+let modalNavStack = [];            // fenêtres « en dessous » (la plus récente en dernier)
+let modalNavPending = null;        // description de la fenêtre qui va s'ouvrir (posée par l'ouvreur juste avant openModal)
+let currentModalDesc = null;       // description de la fenêtre actuellement affichée (null si inconnue)
+let lastClosedDesc = null;         // fenêtre fermée à l'instant (utile quand on enchaîne closeModal(); openX())
+let modalNavClosedFlag = false;
+let modalNavBackTimer = null;
+let modalNavInternalClose = false;
+let modalNavReopening = false;
+function modalNavLabel(name, args){
+  const a = Array.prototype.slice.call(args);
+  const ids = a.filter(x=>typeof x==='string' || typeof x==='number' || x===null);
+  const desc = { name, args:a, key: name+'|'+ids.join('|') };
+  modalNavPending = desc;
+  Promise.resolve().then(()=>{ if(modalNavPending===desc) modalNavPending = null; });   // un ouvreur qui n'ouvre rien ne laisse pas d'étiquette
+}
+function modalNavReset(){
+  modalNavStack = []; modalNavPending = null; currentModalDesc = null; lastClosedDesc = null; modalNavClosedFlag = false;
+  if(modalNavBackTimer){ clearTimeout(modalNavBackTimer); modalNavBackTimer = null; }
+}
+function modalNavCanReturnTo(desc){
+  // Un devis tout neuf, non enregistré, ne peut pas être « rouvert » tel quel
+  return !!desc && !(desc.name==='openDevisForm' && !desc.args[0]);
+}
+function modalNavBack(){
+  const desc = modalNavStack.pop();
+  if(!desc) return;
+  const fn = window[desc.name];
+  if(typeof fn!=='function') return;
+  modalNavReopening = true;
+  try{ fn.apply(null, desc.args); } catch(e){ console.warn('Retour à la fenêtre précédente impossible', e); }
+  finally{ modalNavReopening = false; }
+  const st = desc.scrollTop || 0;
+  if(st) setTimeout(()=>{ const b = document.querySelector('#modalBox .modal-body'); if(b) b.scrollTop = st; }, 40);
+}
+function modalNavOnOpen(desc, hadOverlay, replacedDesc){
+  const justClosed = modalNavClosedFlag;
+  const prev = hadOverlay ? replacedDesc : (justClosed ? lastClosedDesc : null);
+  if(modalNavBackTimer){ clearTimeout(modalNavBackTimer); modalNavBackTimer = null; }   // une fenêtre s'ouvre : plus de « retour » automatique
+  modalNavClosedFlag = false;
+  if(modalNavReopening){ currentModalDesc = desc; return; }
+  if(!desc){ if(hadOverlay) { /* fenêtre inconnue ouverte par-dessus une fenêtre connue : on garde l'état */ } return; }
+  if(!prev){ modalNavStack = []; currentModalDesc = desc; return; }                      // ouverture depuis l'onglet : on repart de zéro
+  if(prev.key===desc.key){ currentModalDesc = desc; return; }                            // même fenêtre rafraîchie
+  const top = modalNavStack[modalNavStack.length-1];
+  if(top && top.key===desc.key){ modalNavStack.pop(); currentModalDesc = desc; return; } // retour explicite à la fenêtre d'avant
+  if(modalNavCanReturnTo(prev)) modalNavStack.push(prev);
+  currentModalDesc = desc;
+}
 function openModal(html, opts){
   opts = opts || {};
-  closeModal();
+  const navDesc = modalNavPending; modalNavPending = null;
+  const hadOverlay = !!document.getElementById('modalOverlay');
+  const replacedDesc = currentModalDesc;
+  if(hadOverlay && replacedDesc){ const b = document.querySelector('#modalBox .modal-body'); replacedDesc.scrollTop = b ? b.scrollTop : 0; }
+  modalNavInternalClose = true; closeModal(); modalNavInternalClose = false;
+  modalNavOnOpen(navDesc, hadOverlay, replacedDesc);
   const overlay = document.createElement('div');
   overlay.className='modal-overlay';
   overlay.id='modalOverlay';
@@ -2724,6 +2782,13 @@ function makeModalDraggable(){
 function escCloseHandler(e){ if(e.key==='Escape') closeModal(); }
 function closeModal(){
   const el = document.getElementById('modalOverlay');
+  if(el && !modalNavInternalClose){
+    if(currentModalDesc){ const b = document.querySelector('#modalBox .modal-body'); currentModalDesc.scrollTop = b ? b.scrollTop : 0; }
+    lastClosedDesc = currentModalDesc; currentModalDesc = null; modalNavClosedFlag = true;
+    if(modalNavBackTimer) clearTimeout(modalNavBackTimer);
+    // Si aucune autre fenêtre ne s'ouvre dans la foulée, on revient à la fenêtre précédente (s'il y en a une)
+    modalNavBackTimer = setTimeout(()=>{ modalNavBackTimer = null; modalNavClosedFlag = false; if(modalNavStack.length) modalNavBack(); }, 0);
+  }
   if(el) el.remove();
   if(window._commissionModalOpen){ window._commissionModalOpen = false; commissionModalState = null; render(); }
   document.documentElement.classList.remove('modal-open');
@@ -4329,6 +4394,7 @@ function switchClientFormTab(tab){
   document.querySelectorAll('.client-form-tab').forEach(t=>{ t.classList.toggle('active', t.dataset.tab===tab); });
 }
 function openClientForm(id){
+  modalNavLabel('openClientForm', arguments);
   const c = id ? state.clients.find(x=>x.id===id) : null;
   clientDraftContacts = c && c.contacts ? JSON.parse(JSON.stringify(c.contacts)).map(normalizeClientContact) : [];
   clientDraftRemises = c ? JSON.parse(JSON.stringify(clientRemiseRules(c))) : [];
@@ -4705,6 +4771,7 @@ function renderClientSuiviCommercialSection(c, timelineMaxHeight, showFullscreen
   `;
 }
 function openClientSuiviOnlyModal(clientId){
+  modalNavLabel('openClientSuiviOnlyModal', arguments);
   suiviOnlyModalClientId = clientId;
   const c = state.clients.find(x=>x.id===clientId);
   if(!c) return;
@@ -4733,6 +4800,7 @@ function devisForContact(client, ct){
     .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
 }
 function openContactDetail(clientId, contactId){
+  modalNavLabel('openContactDetail', arguments);
   const cl = state.clients.find(x=>x.id===clientId);
   const ct = cl ? (cl.contacts||[]).find(x=>x.id===contactId) : null;
   if(!cl || !ct) return;
@@ -4790,6 +4858,7 @@ function newDevisForContact(clientId, contactId){
   if(ct && draft){ draft.attentionA = contactFullName(ct); refreshDevisModal(); }
 }
 function openClientDetail(id, scrollToSuivi){
+  modalNavLabel('openClientDetail', arguments);
   suiviOnlyModalClientId = null;
   const c = state.clients.find(x=>x.id===id);
   if(!c) return;
@@ -5067,6 +5136,7 @@ function commentHistoryNoteTaskChip(el, taskName){
   if(holder) holder.innerHTML = renderHistoryTaskChips(historyNoteSelectedTasks,'toggleHistoryNoteTaskChip','commentHistoryNoteTaskChip');
 }
 function openAddHistoryNoteModal(clientId){
+  modalNavLabel('openAddHistoryNoteModal', arguments);
   historyNoteSelectedBrands = [];
   historyNoteBrandTexts = {};
   historyNoteSelectedTasks = {};
@@ -5168,6 +5238,7 @@ function commentHistoryEditTaskChip(el, taskName){
   if(holder) holder.innerHTML = renderHistoryTaskChips(historyEditSelectedTasks,'toggleHistoryEditTaskChip','commentHistoryEditTaskChip');
 }
 function openEditHistoryNoteModal(clientId, noteId){
+  modalNavLabel('openEditHistoryNoteModal', arguments);
   const c = state.clients.find(x=>x.id===clientId);
   if(!c) return;
   const h = (c.history||[]).find(x=>x.id===noteId);
@@ -9897,6 +9968,7 @@ function renderDevisTemplates(){
   `;
 }
 function openDevisForm(id, presetClientId){
+  modalNavLabel('openDevisForm', arguments);
   if(state.clients.length===0){ showToast('Ajoutez d\'abord un client.'); return; }
   const existing = id ? state.devis.find(x=>x.id===id) : null;
   draft = existing ? JSON.parse(JSON.stringify(existing)) : {
@@ -13771,6 +13843,7 @@ function caVvaClientBreakdownHtml(year, brandId, brandTotal){
   `;
 }
 function openCaVvaModal(year, brandId, clientId){
+  modalNavLabel('openCaVvaModal', arguments);
   const bk = caVvaBK(brandId), ck = caVvaCK(clientId);
   if(bk==='all' && ck==='all'){
     showToast('Sélectionnez au moins une marque ou un client (dans les filtres du tableau de bord) avant de saisir le CA (VVA).');
@@ -14114,32 +14187,38 @@ function refreshDrillDownAfterChange(title, subtitle){
   showToast('Mise à jour enregistrée.');
 }
 function drillDownAccepted(year, cmId, brandFilter, clientFilter){
+  modalNavLabel('drillDownAccepted', arguments);
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
   const list = state.devis.filter(d=>isDevisWon(d) && yearOf(d.date)===year && inScope(d));
   openDevisDrillDownModal(`CA ${year} — devis gagnés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
 }
 function drillDownEnCours(cmId, brandFilter, clientFilter){
+  modalNavLabel('drillDownEnCours', arguments);
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
   const list = state.devis.filter(d=>(d.status==='Envoyé'||d.status==='Brouillon') && !isDevisWon(d) && !isDevisLost(d) && inScope(d));
   openDevisDrillDownModal('Devis en cours', dashScopeDescription(null, cmId, brandFilter, clientFilter), list);
 }
 function drillDownBrand(year, cmId, brandFilter, clientFilter, targetBrandId){
+  modalNavLabel('drillDownBrand', arguments);
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
   const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && (d.lines||[]).some(l=>l.brandId===targetBrandId) && isDevisWon(d));
   openDevisDrillDownModal(`${escapeHtml(brandName(targetBrandId))} — devis gagnés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
 }
 function drillDownClient(year, cmId, brandFilter, clientFilter, targetClientId){
+  modalNavLabel('drillDownClient', arguments);
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
   const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && d.clientId===targetClientId && isDevisWon(d));
   openDevisDrillDownModal(`${escapeHtml(clientSocieteLabel(targetClientId))} — devis gagnés`, dashScopeDescription(year, cmId, brandFilter, clientFilter), list);
 }
 function drillDownMonth(year, month, cmId, brandFilter, clientFilter){
+  modalNavLabel('drillDownMonth', arguments);
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
   const list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && parseInt((d.date||'').slice(5,7),10)===month);
   const monthNames = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   openDevisDrillDownModal(`${monthNames[month-1]} ${year} — devis/marchés`, dashScopeDescription(null, cmId, brandFilter, clientFilter), list);
 }
 function drillDownApporteur(year, cmId, brandFilter, clientFilter, targetBrandId, apporteur){
+  modalNavLabel('drillDownApporteur', arguments);
   const inScope = dashScopeFilter(cmId, brandFilter, clientFilter);
   let list = state.devis.filter(d=>yearOf(d.date)===year && inScope(d) && (d.lines||[]).some(l=>l.brandId===targetBrandId));
   let label = `${brandName(targetBrandId)} — tous devis/marchés`;
