@@ -12324,6 +12324,9 @@ function openRapportPdfOptionsModal(action){
       <label style="display:flex;align-items:center;gap:10px;padding:9px 2px;cursor:pointer;border-bottom:1px solid var(--line);">
         <input type="checkbox" id="rpo_perdus" style="width:auto;" ${sec.devisPerdus?'checked':''}><span>Détail des devis perdus <span class="helper" style="display:inline;">(tableau)</span></span>
       </label>
+      <label style="display:flex;align-items:center;gap:10px;padding:9px 2px 9px 26px;cursor:pointer;border-bottom:1px solid var(--line);">
+        <input type="checkbox" id="rpo_suivi" style="width:auto;" ${sec.devisSuivi!==false?'checked':''}><span>Commentaires de suivi sous chaque devis <span class="helper" style="display:inline;">(ex. raison d'un devis perdu)</span></span>
+      </label>
       <label style="display:flex;align-items:center;gap:10px;padding:9px 2px;cursor:pointer;">
         <input type="checkbox" id="rpo_rdv" style="width:auto;" ${sec.rdv?'checked':''}><span>Rendez-vous effectués <span class="helper" style="display:inline;">(tableau détaillé)</span></span>
       </label>
@@ -12354,6 +12357,7 @@ function confirmRapportPdfOptions(action){
     devisEnCours: document.getElementById('rpo_enCours').checked,
     devisGagnes: document.getElementById('rpo_gagnes').checked,
     devisPerdus: document.getElementById('rpo_perdus').checked,
+    devisSuivi: document.getElementById('rpo_suivi').checked,
     rdv: document.getElementById('rpo_rdv').checked,
   };
   const anySelected = Object.values(sections.synthese).some(Boolean) || sections.devisEnCours || sections.devisGagnes || sections.devisPerdus || sections.rdv;
@@ -12660,14 +12664,19 @@ function renderRapport(){
   <div class="dash-grid">${widgetCardsHtml}</div>
   `;
 }
+function devisSuiviNotesSorted(d){
+  return (d.suiviNotes||[]).slice().sort((a,b)=>(a.ts||'').localeCompare(b.ts||'')).filter(n=>(n.text||'').trim());
+}
 function rapportDevisSectionBody(list, lineAmount){
   if(list.length===0) return `<div class="helper">Aucun devis dans cette catégorie pour la période sélectionnée.</div>`;
+  const withNotes = list.some(d=>devisSuiviNotesSorted(d).length>0);
   return `
   <div class="table-wrap"><table>
-    <thead><tr><th>N°</th><th>Date</th><th>Client</th><th>Objet</th><th>État de l'affaire</th><th>Montant (marque)</th></tr></thead>
+    <thead><tr><th>N°</th><th>Date</th><th>Client</th><th>Objet</th><th>État de l'affaire</th><th>Montant (marque)</th>${withNotes?'<th>Commentaires de suivi</th>':''}</tr></thead>
     <tbody>
       ${list.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(d=>{
         const oc = devisEtatColor(d);
+        const notes = devisSuiviNotesSorted(d);
         return `
         <tr style="cursor:pointer;" onclick="openDevisForm('${d.id}')">
           <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(d.number)}</td>
@@ -12676,6 +12685,7 @@ function rapportDevisSectionBody(list, lineAmount){
           <td>${escapeHtml(d.objet||'—')}</td>
           <td><span class="status-pill" style="background:${oc.bg};color:${oc.fg};">${escapeHtml(d.etatAffaire||'—')}</span></td>
           <td class="num" style="font-weight:600;">${fmtMoney(lineAmount(d))}</td>
+          ${withNotes?`<td style="min-width:240px;">${notes.length?notes.map(n=>`<div style="white-space:pre-wrap;margin-bottom:3px;"><span class="helper" style="display:inline;font-weight:600;">${fmtDate((n.ts||'').slice(0,10))}</span> ${escapeHtml(n.text)}</div>`).join(''):'<span class="helper">—</span>'}</td>`:''}
         </tr>
       `;}).join('')}
     </tbody>
@@ -12758,7 +12768,7 @@ async function exportRapportPdf(brandId, year, month, mode, sections){
     }
   }
 
-  function addSection(title, rows, head){
+  function addSection(title, rows, head, columnStyles){
     if(y > 255){ doc.addPage(); y = 16; }
     doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(20);
     doc.text(title, LEFT, y); y+=5;
@@ -12771,16 +12781,28 @@ async function exportRapportPdf(brandId, year, month, mode, sections){
       styles:{fontSize:8.5, cellPadding:2.4, textColor:[40,40,40]},
       headStyles:{fillColor:[47,93,80], textColor:255, fontStyle:'bold'},
       alternateRowStyles:{fillColor:[246,245,240]},
+      columnStyles: columnStyles || {},
       margin:{left:LEFT,right:LEFT}
     });
     y = doc.lastAutoTable.finalY + 9;
   }
-  const devisRows = (list)=>list.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(d=>[
-    d.number, fmtDate(d.date), clientDisplayName(state.clients.find(c=>c.id===d.clientId)||{}), d.objet||'—', d.status, fmtMoneyPdf(data.lineAmount(d))
-  ]);
-  if(sections.devisEnCours) addSection('Devis en cours', devisRows(data.enCours), ['N°','Date','Client','Objet','Statut','Montant']);
-  if(sections.devisGagnes) addSection('Devis gagnés', devisRows(data.gagnes), ['N°','Date','Client','Objet','Statut','Montant']);
-  if(sections.devisPerdus) addSection('Devis perdus', devisRows(data.perdus), ['N°','Date','Client','Objet','Statut','Montant']);
+  const withSuivi = sections.devisSuivi!==false;
+  const noteText = d=>devisSuiviNotesSorted(d).map(n=>`${fmtDate((n.ts||'').slice(0,10))} : ${n.text.trim()}`).join('\n');
+  const devisSection = (title, list)=>{
+    const sorted = list.slice().sort((a,b)=>b.date.localeCompare(a.date));
+    const showNotes = withSuivi && sorted.some(d=>devisSuiviNotesSorted(d).length>0);
+    const rows = sorted.map(d=>{
+      const row = [d.number, fmtDate(d.date), clientDisplayName(state.clients.find(c=>c.id===d.clientId)||{}), d.objet||'—', d.status, fmtMoneyPdf(data.lineAmount(d))];
+      if(showNotes) row.push(noteText(d)||'—');
+      return row;
+    });
+    const head = ['N°','Date','Client','Objet','Statut','Montant'].concat(showNotes?['Suivi']:[]);
+    const cs = showNotes ? {0:{cellWidth:21},1:{cellWidth:24},2:{cellWidth:27},3:{cellWidth:26},4:{cellWidth:16},5:{cellWidth:21,halign:'right'},6:{cellWidth:'auto'}} : null;
+    addSection(title, rows, head, cs);
+  };
+  if(sections.devisEnCours) devisSection('Devis en cours', data.enCours);
+  if(sections.devisGagnes) devisSection('Devis gagnés', data.gagnes);
+  if(sections.devisPerdus) devisSection('Devis perdus', data.perdus);
   if(sections.rdv) addSection('Rendez-vous effectués', data.meetings.map(m=>[fmtDate(m.date), m.typeVisite||'—', clientDisplayName(m.client), historyPersonneNames(m, m.client).join(', ')||'—', historyTasks(m).map(t=>t.name+(t.comment?` (${t.comment})`:'')).join(', '), rapportNoteText(m).slice(0,600)]), ['Date','Type','Client','Personnes vues','Tâches','Compte-rendu']);
   const anySelected = Object.values(sections.synthese||{}).some(Boolean) || sections.devisEnCours || sections.devisGagnes || sections.devisPerdus || sections.rdv;
   if(!anySelected){
