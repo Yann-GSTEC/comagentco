@@ -6451,11 +6451,75 @@ function autoGrowAllTextareas(){
   toGrow.forEach(t=>{ t.dataset.ag = '1'; autoGrowTextarea(t); });
 }
 document.addEventListener('input', e=>{ if(e.target && e.target.tagName==='TEXTAREA') autoGrowTextarea(e.target); });
+/* ---- Quantités, prix, commissions et CA des tableaux : espace entre les milliers (15 522) ----
+   Le champ affiche « 15 522,5 » mais sa valeur lue par le reste de l'application reste « 15522.5 » (propriété value du champ
+   adaptée), donc tous les calculs et enregistrements existants fonctionnent sans changement. Seuls les champs marqués
+   data-nfmt sont concernés (remises, marges, durées… restent inchangés). */
+const NF_VALUE = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+function nfRaw(display){
+  let s = String(display==null?'':display).replace(/[\s\u00A0\u202F]/g,'').replace(/,/g,'.').replace(/[^0-9.\-]/g,'');
+  const neg = s.startsWith('-'); s = s.replace(/-/g,'');
+  const k = s.indexOf('.');
+  if(k>=0) s = s.slice(0,k+1) + s.slice(k+1).replace(/\./g,'');
+  return (neg?'-':'') + s;
+}
+function nfFormat(v){
+  if(v==null || v==='') return '';
+  if(typeof v==='number') v = isFinite(v) ? (String(v).includes('e') ? v.toFixed(8).replace(/0+$/,'').replace(/\.$/,'') : String(v)) : '';
+  const raw = nfRaw(v);
+  const m = /^(-?)(\d*)(?:\.(\d*))?$/.exec(raw);
+  if(!m || raw==='' ) return raw;
+  return m[1] + m[2].replace(/\B(?=(\d{3})+(?!\d))/g,'\u00A0') + (m[3]!==undefined ? ','+m[3] : '');
+}
+function nfOnInput(e){
+  const el = e.target;
+  const shown = NF_VALUE.get.call(el);
+  const caret = el.selectionStart==null ? shown.length : el.selectionStart;
+  const significant = ch => /[0-9,.\-]/.test(ch);
+  const before = shown.slice(0, caret).split('').filter(significant).length;
+  const formatted = nfFormat(shown);
+  if(formatted!==shown){
+    NF_VALUE.set.call(el, formatted);
+    let pos = 0, seen = 0;
+    while(pos<formatted.length && seen<before){ if(significant(formatted[pos])) seen++; pos++; }
+    try{ el.setSelectionRange(pos, pos); }catch(err){}
+  }
+}
+function nfEnhance(el){
+  el.dataset.nf = '1';
+  const initial = el.getAttribute('value');
+  el.type = 'text';
+  el.setAttribute('inputmode','decimal');
+  el.setAttribute('autocomplete','off');
+  Object.defineProperty(el, 'value', {
+    configurable:true,
+    get(){ return nfRaw(NF_VALUE.get.call(el)); },
+    set(v){ NF_VALUE.set.call(el, nfFormat(v)); },
+  });
+  NF_VALUE.set.call(el, nfFormat(initial));
+  el.addEventListener('input', nfOnInput);
+  el.addEventListener('focus', ()=>{ el._nfCommitted = el.value; });
+  el.addEventListener('change', ()=>{ el._nfCommitted = el.value; });
+  el.addEventListener('blur', ()=>{
+    NF_VALUE.set.call(el, nfFormat(el.value));   // « 12, » devient « 12 »
+    // Filet de sécurité pour les navigateurs qui ne déclenchent pas « change » après un reformatage. Différé d'un instant :
+    // quand le navigateur envoie son propre « change » juste après la perte du focus, on n'en ajoute pas un second.
+    setTimeout(()=>{
+      if(el.isConnected && el._nfCommitted!==undefined && el.value!==el._nfCommitted){ el._nfCommitted = el.value; el.dispatchEvent(new Event('change', {bubbles:true})); }
+    }, 0);
+  });
+}
+function enhanceNumberInputs(){
+  // Uniquement les quantités, prix, commissions et CA (champs marqués data-nfmt), dans les tableaux
+  document.querySelectorAll('table input[data-nfmt]:not([data-nf])').forEach(el=>{
+    if(el.type==='number') nfEnhance(el);
+  });
+}
 let rzScheduled = false;
 new MutationObserver(()=>{
   if(rzScheduled) return;
   rzScheduled = true;
-  requestAnimationFrame(()=>{ rzScheduled = false; enhanceResizableTables(); autoGrowAllTextareas(); });
+  requestAnimationFrame(()=>{ rzScheduled = false; enhanceResizableTables(); autoGrowAllTextareas(); enhanceNumberInputs(); });
 }).observe(document.body, {childList:true, subtree:true, attributes:true, attributeFilter:['style','class']});
 
 /* ---- Réordonnancement (glisser-déposer un en-tête entier) ---- */
@@ -9096,8 +9160,8 @@ function renderCommissionsTableInner(){
       });
     return renderCustomizableTable('commissionsMonth', [
         {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
-        {key:'ca', label:`CA (${MOIS_LABELS[month-1]} ${year})`, defaultWidth:150, cell:r=>`<input type="number" step="0.01" min="0" value="${r.entry.ca||''}" placeholder="0" style="max-width:140px;" onchange="setCommissionEntry('${r.b.id}',${year},${month},'ca',this.value); render();">`},
-        {key:'commission', label:'Montant commission', defaultWidth:170, cell:r=>`<input type="number" step="0.01" min="0" value="${r.entry.commission||''}" placeholder="0" style="max-width:140px;font-weight:700;color:var(--success);" onchange="setCommissionEntry('${r.b.id}',${year},${month},'commission',this.value); render();">`},
+        {key:'ca', label:`CA (${MOIS_LABELS[month-1]} ${year})`, defaultWidth:150, cell:r=>`<input type="number" data-nfmt="1" step="0.01" min="0" value="${r.entry.ca||''}" placeholder="0" style="max-width:140px;" onchange="setCommissionEntry('${r.b.id}',${year},${month},'ca',this.value); render();">`},
+        {key:'commission', label:'Montant commission', defaultWidth:170, cell:r=>`<input type="number" data-nfmt="1" step="0.01" min="0" value="${r.entry.commission||''}" placeholder="0" style="max-width:140px;font-weight:700;color:var(--success);" onchange="setCommissionEntry('${r.b.id}',${year},${month},'commission',this.value); render();">`},
         {key:'commentaire', label:'Commentaire', defaultWidth:260, cell:r=>`<textarea rows="1" placeholder="—" onchange="setCommissionComment('${r.b.id}',${year},${month},this.value);">${escapeHtml(r.entry.commentaire||'')}</textarea>`},
       ], rows);
   }
@@ -9193,8 +9257,8 @@ function commissionYearModalHtml(){
             const e = getCommissionEntry(b.id, year, m);
             return `<tr>
               <td style="font-weight:600;">${label}</td>
-              <td><input type="number" step="0.01" min="0" id="cm_ca_${m}" value="${e.ca||''}" placeholder="0" style="text-align:right;" onchange="commissionModalSet(${m},'ca',this.value)"></td>
-              <td><input type="number" step="0.01" min="0" id="cm_com_${m}" value="${e.commission||''}" placeholder="0" style="text-align:right;font-weight:700;color:var(--success);" onchange="commissionModalSet(${m},'commission',this.value)"></td>
+              <td><input type="number" data-nfmt="1" step="0.01" min="0" id="cm_ca_${m}" value="${e.ca||''}" placeholder="0" style="text-align:right;" onchange="commissionModalSet(${m},'ca',this.value)"></td>
+              <td><input type="number" data-nfmt="1" step="0.01" min="0" id="cm_com_${m}" value="${e.commission||''}" placeholder="0" style="text-align:right;font-weight:700;color:var(--success);" onchange="commissionModalSet(${m},'commission',this.value)"></td>
               <td class="num helper" id="cm_rate_${m}"></td>
               <td><textarea rows="1" placeholder="—" onchange="setCommissionComment('${b.id}',${year},${m},this.value);">${escapeHtml(e.commentaire||'')}</textarea></td>
             </tr>`;
@@ -9248,8 +9312,8 @@ function renderCommissionMonthlyDetail(b, year){
             const e = getCommissionEntry(b.id, year, m);
             return `<tr>
               <td>${label}</td>
-              <td><input type="number" step="0.01" min="0" value="${e.ca||''}" placeholder="0" style="max-width:130px;" onchange="setCommissionEntry('${b.id}',${year},${m},'ca',this.value); render();"></td>
-              <td><input type="number" step="0.01" min="0" value="${e.commission||''}" placeholder="0" style="max-width:130px;font-weight:700;color:var(--success);" onchange="setCommissionEntry('${b.id}',${year},${m},'commission',this.value); render();"></td>
+              <td><input type="number" data-nfmt="1" step="0.01" min="0" value="${e.ca||''}" placeholder="0" style="max-width:130px;" onchange="setCommissionEntry('${b.id}',${year},${m},'ca',this.value); render();"></td>
+              <td><input type="number" data-nfmt="1" step="0.01" min="0" value="${e.commission||''}" placeholder="0" style="max-width:130px;font-weight:700;color:var(--success);" onchange="setCommissionEntry('${b.id}',${year},${m},'commission',this.value); render();"></td>
               <td><textarea rows="1" placeholder="—" onchange="setCommissionComment('${b.id}',${year},${m},this.value);">${escapeHtml(e.commentaire||'')}</textarea></td>
             </tr>`;
           }).join('')}
@@ -10460,6 +10524,7 @@ function devisLinesEditorHtml(){
             <th style="width:40px;"></th>
           </tr></thead>
           <tbody id="d_linesBody">${devisLinesRowsHtml()}</tbody>
+          ${(draft.lines||[]).some(l=>!l.isTitleLine)?`<tfoot id="d_linesFoot">${devisLinesFooterHtml()}</tfoot>`:''}
         </table>
       </div>
       <button type="button" class="btn btn-sm btn-ghost" style="margin-top:6px;" onclick="resetColumnPrefs('devisLines')">↺ Réinitialiser la largeur des colonnes</button>
@@ -10652,6 +10717,33 @@ function devisLinesColWidths(){
   cols.forEach(c=>{ map[c.key] = c.width; });
   return map;
 }
+function devisLinesTotals(){
+  // Totaux des colonnes « Prix d'achat HT » et « Prix de vente conseillé HT » (quantité × prix, titres exclus)
+  let achat = 0, vente = 0, achatSurLignesPrixees = 0, nLignes = 0, nPrixees = 0;
+  (draft.lines||[]).forEach(l=>{
+    if(l.isTitleLine) return;
+    nLignes++;
+    const tot = lineTotalHT(l, draft.destinataire);
+    achat += tot;
+    if(l.prixClient>0){ vente += (l.qty||0) * l.prixClient; achatSurLignesPrixees += tot; nPrixees++; }
+  });
+  const marge = vente>0 ? (vente - achatSurLignesPrixees)/vente*100 : null;
+  return { achat, vente, marge, nLignes, nPrixees };
+}
+function devisLinesFooterHtml(){
+  const t = devisLinesTotals();
+  const cellBase = 'background:var(--surface-2);font-weight:700;padding:8px 10px;border-top:2px solid var(--line);white-space:nowrap;';
+  const cell = key=>{
+    switch(key){
+      case 'desig': return `<td style="${cellBase}text-align:center;">Totaux HT</td>`;
+      case 'pudistri': return `<td class="num" style="${cellBase}" title="Somme des lignes : quantité × prix d'achat HT">${fmtMoney(t.achat)}</td>`;
+      case 'marge': return `<td class="num" style="${cellBase}font-weight:600;" title="Marge sur les lignes ayant un prix de vente conseillé">${t.marge==null?'':t.marge.toFixed(1).replace('.',',')+' %'}</td>`;
+      case 'puclient': return `<td class="num" style="${cellBase}" title="Somme des lignes : quantité × prix de vente conseillé HT">${t.vente>0?fmtMoney(t.vente):'—'}${t.vente>0 && t.nPrixees<t.nLignes?`<div class="helper" style="font-weight:400;font-size:10.5px;">${t.nPrixees} ligne(s) sur ${t.nLignes}</div>`:''}</td>`;
+      default: return `<td style="${cellBase}"></td>`;
+    }
+  };
+  return `<tr><td style="${cellBase}"></td>${DEVIS_LINES_COLUMNS.map(cl=>cell(cl.key)).join('')}<td style="${cellBase}"></td></tr>`;
+}
 function devisLinesColgroupHtml(){
   const w = devisLinesColWidths();
   return `<colgroup><col style="width:26px;">${DEVIS_LINES_COLUMNS.map(c=>`<col style="width:${w[c.key]}px;">`).join('')}<col style="width:40px;"></colgroup>`;
@@ -10689,14 +10781,14 @@ function devisLinesRowsHtml(){
         <div id="inlineRefResults_${i}" class="autocomplete-list" style="position:absolute;top:100%;left:0;z-index:80;min-width:260px;"></div>
       </td>
       <td><div class="rich-editable" contenteditable="true" data-line-desig="${i}" data-placeholder="Désignation…" title="F3 historique prix (ce client) · F4 (département) · F5 (tous les clients) · F6 (famille / sous-famille)" oninput="draft.lines[${i}].designation=this.innerHTML;" onpaste="handleRichPaste(event)">${l.designation||''}</div>${l.complementInfo?`<div style="color:var(--brass);font-weight:600;font-size:11px;margin-top:2px;" title="Complément info du tarif — n'apparaît jamais sur le PDF">⚠ ${escapeHtml(l.complementInfo)}</div>`:''}</td>
-      <td><input type="number" min="0" step="1" value="${l.qty}" style="font-weight:700;text-align:center;" onchange="devisLineSetQty(${i}, this.value)"></td>
-      <td><input type="number" min="0" step="0.01" value="${l.prixUnitaire?l.prixUnitaire:''}" placeholder="0" onchange="draft.lines[${i}].prixUnitaire=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
+      <td><input type="number" data-nfmt="1" min="0" step="1" value="${l.qty}" style="font-weight:700;text-align:center;" onchange="devisLineSetQty(${i}, this.value)"></td>
+      <td><input type="number" data-nfmt="1" min="0" step="0.01" value="${l.prixUnitaire?l.prixUnitaire:''}" placeholder="0" onchange="draft.lines[${i}].prixUnitaire=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
       <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct1?l.remisePct1:''}" placeholder="0" onchange="draft.lines[${i}].remisePct1=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
       <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct2?l.remisePct2:''}" placeholder="0" onchange="draft.lines[${i}].remisePct2=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
       <td><input type="number" min="0" max="100" step="0.01" value="${l.remisePct3?l.remisePct3:''}" placeholder="0" onchange="draft.lines[${i}].remisePct3=parseFloat(this.value)||0; draft.lines[${i}].margeTarget=null; draft.lines[${i}].distribOverride=null; draft.lines[${i}].distribManuallySet=false; if(draft.lines[${i}].prixNetTarget==='distri'){ draft.lines[${i}].prixNetTarget=null; draft.lines[${i}].netPriceOverride=null; } checkFreeProductMention(draft.lines[${i}]); refreshDevisModal();"></td>
-      <td><input type="number" min="0" step="0.01" value="${(+lineDistribUnit(l))?(+lineDistribUnit(l)).toFixed(2):''}" placeholder="0.00" style="font-weight:600;${netOnDistri?'color:var(--info, #2F6FBD);font-weight:700;':(l.distribManuallySet?'color:var(--ink);font-weight:700;':'color:var(--ink-soft);')}" title="${netOnDistri?'Prix repris de la liste de prix nets du client (modifiable ici si besoin)':(l.distribManuallySet?'Prix d\'achat modifié manuellement — Remise 1 recalculée en conséquence':'Calculé à partir du PU Tarif et des remises — modifiable directement si besoin')}" onchange="devisLineSetDistrib(${i}, this.value)"></td>
+      <td><input type="number" data-nfmt="1" min="0" step="0.01" value="${(+lineDistribUnit(l))?(+lineDistribUnit(l)).toFixed(2):''}" placeholder="0.00" style="font-weight:600;${netOnDistri?'color:var(--info, #2F6FBD);font-weight:700;':(l.distribManuallySet?'color:var(--ink);font-weight:700;':'color:var(--ink-soft);')}" title="${netOnDistri?'Prix repris de la liste de prix nets du client (modifiable ici si besoin)':(l.distribManuallySet?'Prix d\'achat modifié manuellement — Remise 1 recalculée en conséquence':'Calculé à partir du PU Tarif et des remises — modifiable directement si besoin')}" onchange="devisLineSetDistrib(${i}, this.value)"></td>
       <td><input type="number" step="0.01" value="${Math.abs(displayMarge)<0.005?'':(+displayMarge).toFixed(2)}" placeholder="0" title="${l.margeTarget!=null?'Marge cible demandée — peut différer de quelques centièmes du calcul réel après arrondi du Prix de vente conseillé HT à la centime.':''}" style="color:${displayMarge>=0?'var(--success)':'var(--danger)'};font-weight:800;font-size:12.5px;text-align:center;background:${displayMarge>=0?'rgba(63,138,123,.12)':'rgba(179,57,44,.1)'};border:1.5px solid ${displayMarge>=0?'var(--success)':'var(--danger)'};border-radius:6px;" onchange="devisLineSetMarge(${i}, this.value)"></td>
-      <td><input type="number" min="0" step="0.01" value="${l.prixClient?l.prixClient:''}" placeholder="0" style="font-weight:600;${(netOnClient||l.prixClientAuto)?'color:var(--info, #2F6FBD);font-weight:700;':''}" title="${l.prixClientAuto?`Prix net de l'installateur${l.prixClientListe?' — liste « '+escapeHtml(l.prixClientListe)+' »':''}`:(netOnClient?'Prix repris de la liste de prix nets du client':'')}" onchange="devisLineSetClient(${i}, this.value)"></td>
+      <td><input type="number" data-nfmt="1" min="0" step="0.01" value="${l.prixClient?l.prixClient:''}" placeholder="0" style="font-weight:600;${(netOnClient||l.prixClientAuto)?'color:var(--info, #2F6FBD);font-weight:700;':''}" title="${l.prixClientAuto?`Prix net de l'installateur${l.prixClientListe?' — liste « '+escapeHtml(l.prixClientListe)+' »':''}`:(netOnClient?'Prix repris de la liste de prix nets du client':'')}" onchange="devisLineSetClient(${i}, this.value)"></td>
       <td class="num" style="font-weight:700;">${fmtMoney(lineTotalHT(l, draft.destinataire))}</td>
       <td><button class="btn btn-sm btn-ghost btn-danger" onclick="removeDevisLine(${i})">✕</button></td>
     </tr>
@@ -13283,8 +13375,8 @@ function openBrandTempsGainsModal(brandId){
             const entry = getCommissionEntry(brandId, year, m);
             return `<tr>
               <td>${escapeHtml(MOIS_LABELS[m-1])}</td>
-              <td><input type="number" step="0.01" value="${entry.ca||''}" placeholder="0" onchange="setCommissionEntry('${brandId}', ${year}, ${m}, 'ca', this.value);"></td>
-              <td><input type="number" step="0.01" value="${entry.commission||''}" placeholder="0" onchange="setCommissionEntry('${brandId}', ${year}, ${m}, 'commission', this.value);"></td>
+              <td><input type="number" data-nfmt="1" step="0.01" value="${entry.ca||''}" placeholder="0" onchange="setCommissionEntry('${brandId}', ${year}, ${m}, 'ca', this.value);"></td>
+              <td><input type="number" data-nfmt="1" step="0.01" value="${entry.commission||''}" placeholder="0" onchange="setCommissionEntry('${brandId}', ${year}, ${m}, 'commission', this.value);"></td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -13792,7 +13884,7 @@ function caVvaModalHtml(year, brandId, clientId){
         <thead><tr><th>Mois</th><th class="num">CA (VVA) HT</th></tr></thead>
         <tbody>
           ${effectiveRows.map(r=>{
-            return `<tr><td>${r.mn}${r.auto?' <span class="helper" style="display:inline;font-style:italic;">(auto Commissions)</span>':''}</td><td class="num"><input type="number" step="0.01" min="0" style="max-width:140px;text-align:right;${r.auto?'font-style:italic;color:var(--ink-soft);':''}" value="${r.value?r.value:''}" placeholder="0" onchange="setCaVvaMonth(${year}, '${bk}', '${ck}', ${r.m}, this.value)"></td></tr>`;
+            return `<tr><td>${r.mn}${r.auto?' <span class="helper" style="display:inline;font-style:italic;">(auto Commissions)</span>':''}</td><td class="num"><input type="number" data-nfmt="1" step="0.01" min="0" style="max-width:140px;text-align:right;${r.auto?'font-style:italic;color:var(--ink-soft);':''}" value="${r.value?r.value:''}" placeholder="0" onchange="setCaVvaMonth(${year}, '${bk}', '${ck}', ${r.m}, this.value)"></td></tr>`;
           }).join('')}
         </tbody>
         <tfoot><tr><td style="font-weight:700;">Total ${year}</td><td class="num" style="font-weight:700;" id="caVvaModalTotal">${fmtMoney(total)}</td></tr></tfoot>
