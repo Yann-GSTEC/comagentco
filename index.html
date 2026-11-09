@@ -1880,6 +1880,7 @@ async function loadAll(){
   ensurePrixNetListes();
   ensureClientContactsMigrated();
   repairMangledVersionNumbers();
+  migrateLowercaseEmails();
   render();
 }
 /* ---- Performance : clé de recherche pré-calculée + cache trié pour les grands catalogues ---- */
@@ -4249,8 +4250,20 @@ function formatPhoneFr(s){
   if(digits.length===10 && digits.startsWith('0')) return pairs(digits);
   return raw;
 }
+function formatEmail(s){ return (s==null ? '' : String(s)).trim().toLowerCase(); }   // les adresses e-mail sont toujours enregistrées en minuscules
+function migrateLowercaseEmails(){
+  // Met en minuscules les adresses déjà enregistrées (clients, contacts, commerciaux, marques, coordonnées)
+  let cl=false, cm=false, br=false, st=false;
+  const low = (o,k)=>{ if(o && typeof o[k]==='string' && o[k] && o[k]!==o[k].trim().toLowerCase()){ o[k]=o[k].trim().toLowerCase(); return true; } return false; };
+  (state.clients||[]).forEach(c=>{ if(low(c,'emailPrincipal')) cl=true; (c.contacts||[]).forEach(p=>{ if(low(p,'email')) cl=true; }); });
+  (state.commerciaux||[]).forEach(x=>{ if(low(x,'email')) cm=true; });
+  (state.brands||[]).forEach(b=>{ ['email','emailCopieDevis','emailExportDevis'].forEach(k=>{ if(low(b,k)) br=true; }); });
+  if(low(state.settings,'companyEmail')) st=true;
+  if(cl) persist('clients'); if(cm) persist('commerciaux'); if(br) persist('brands'); if(st) persist('settings');
+  return cl||cm||br||st;
+}
 function normalizeClientContact(p){
-  p.nom = formatLastName(p.nom); p.prenom = formatFirstName(p.prenom);
+  p.nom = formatLastName(p.nom); p.prenom = formatFirstName(p.prenom); p.email = formatEmail(p.email);
   p.telephone = formatPhoneFr(p.telephone); p.portable = formatPhoneFr(p.portable);
   return p;
 }
@@ -5482,7 +5495,7 @@ function confirmClientImport(){
     const contactFonction = get('fonction');
     const contactTelephone = get('telephone');
     const contactPortable = get('portable');
-    const contactEmail = get('email');
+    const contactEmail = formatEmail(get('email'));
     const hasContactInfo = !!(contactCivilite || contactPrenom || contactFonction || contactTelephone || contactPortable || contactEmail);
     const data = {
       name,
@@ -6515,11 +6528,33 @@ function enhanceNumberInputs(){
     if(el.type==='number') nfEnhance(el);
   });
 }
+/* ---- Adresses e-mail : toujours en minuscules (saisie, collage, champs de tous les écrans) ----
+   La valeur lue et enregistrée est en minuscules ; l'affichage est corrigé immédiatement, sans déplacer le curseur. */
+function emailEnhance(el){
+  el.dataset.em = '1';
+  if(el.type==='email') el.type = 'text';
+  el.setAttribute('inputmode','email'); el.setAttribute('autocapitalize','off'); el.setAttribute('autocomplete','off'); el.spellcheck = false;
+  Object.defineProperty(el, 'value', {
+    configurable:true,
+    get(){ return NF_VALUE.get.call(el).trim().toLowerCase(); },
+    set(v){ NF_VALUE.set.call(el, (v==null?'':String(v)).toLowerCase()); },
+  });
+  NF_VALUE.set.call(el, (el.getAttribute('value')||'').toLowerCase());
+  const lower = ()=>{
+    const shown = NF_VALUE.get.call(el), low = shown.toLowerCase();
+    if(shown!==low){ const pos = el.selectionStart; NF_VALUE.set.call(el, low); try{ if(pos!=null) el.setSelectionRange(pos,pos); }catch(e){} }
+  };
+  el.addEventListener('input', lower);
+  el.addEventListener('blur', ()=>{ NF_VALUE.set.call(el, NF_VALUE.get.call(el).trim().toLowerCase()); });
+}
+function enhanceEmailInputs(){
+  document.querySelectorAll('input[type=email]:not([data-em]), input[data-email]:not([data-em])').forEach(emailEnhance);
+}
 let rzScheduled = false;
 new MutationObserver(()=>{
   if(rzScheduled) return;
   rzScheduled = true;
-  requestAnimationFrame(()=>{ rzScheduled = false; enhanceResizableTables(); autoGrowAllTextareas(); enhanceNumberInputs(); });
+  requestAnimationFrame(()=>{ rzScheduled = false; enhanceResizableTables(); autoGrowAllTextareas(); enhanceNumberInputs(); enhanceEmailInputs(); });
 }).observe(document.body, {childList:true, subtree:true, attributes:true, attributeFilter:['style','class']});
 
 /* ---- Réordonnancement (glisser-déposer un en-tête entier) ---- */
@@ -12272,8 +12307,8 @@ function openSendDevisModal(id){
           <br><br>Pour un envoi entièrement automatique (pièce jointe incluse, sans rien glisser<strong>${hasCustomSignature?', signature identique avec ses images':''}</strong>), vous pouvez connecter Outlook gratuitement depuis <a href="#" onclick="closeModal(); setTab('parametres'); return false;">Paramètres</a> — cela reste optionnel.
         </div>
       `}
-      <div class="field"><label>Destinataire(s) *</label><input type="text" id="sendmail_to" value="${escapeHtml(clientEmail)}" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
-      <div class="field"><label>Copie (CC) <span class="helper" style="display:inline;">— reprise automatiquement du champ "Email copie devis" de la marque, modifiable ici au cas par cas</span></label><input type="text" id="sendmail_cc" value="${escapeHtml(defaultCc)}" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
+      <div class="field"><label>Destinataire(s) *</label><input type="text" data-email="1" id="sendmail_to" value="${escapeHtml(clientEmail)}" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
+      <div class="field"><label>Copie (CC) <span class="helper" style="display:inline;">— reprise automatiquement du champ "Email copie devis" de la marque, modifiable ici au cas par cas</span></label><input type="text" data-email="1" id="sendmail_cc" value="${escapeHtml(defaultCc)}" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
       <div class="field"><label>Objet</label><input type="text" id="sendmail_subject" value="${escapeHtml(defaultSubject)}"></div>
       <div class="field-row" style="align-items:flex-end;">
         <div class="field" style="max-width:220px;">
@@ -12951,7 +12986,7 @@ function openSendRapportModal(){
           <br><br>Pour un envoi entièrement automatique (pièce jointe incluse), vous pouvez connecter Outlook gratuitement depuis <a href="#" onclick="closeModal(); ui.tab='parametres'; render(); return false;">Paramètres</a> — cela reste optionnel.
         </div>
       `}
-      <div class="field"><label>Destinataire(s) *</label><input type="text" id="sendmail_to" value="" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
+      <div class="field"><label>Destinataire(s) *</label><input type="text" data-email="1" id="sendmail_to" value="" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
       <div class="field"><label>Objet</label><input type="text" id="sendmail_subject" value="${escapeHtml(defaultSubject)}"></div>
       <div class="field"><label>Message</label><textarea id="sendmail_body" rows="10">${escapeHtml(defaultBody)}</textarea></div>
     </div>
