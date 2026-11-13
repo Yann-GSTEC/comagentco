@@ -1685,8 +1685,8 @@ function paramListItems(key){
 function datalistHtml(id, listKey, brandId){
   let items = paramListItems(listKey);
   if(listKey==='famillesArticles'){
-    // Les familles articles peuvent être rattachées à une marque : si une marque est précisée,
-    // on ne propose que les familles de cette marque (+ celles valables pour toutes les marques).
+    // Les familles articles peuvent être rattachées à un fournisseur : si un fournisseur est précisé,
+    // on ne propose que les familles de ce fournisseur (+ celles valables pour tous les fournisseurs).
     if(brandId){
       items = items.filter(it=>!it.brandId || it.brandId===brandId);
     }
@@ -1957,7 +1957,7 @@ const debouncedUpdateTarifsTableOnly = debounce(()=>updateTarifsTableOnly(), 150
 const debouncedUpdateListesPrixNetsTableOnly = debounce(()=>updateListesPrixNetsTableOnly(), 150);
 const debouncedRenderRechercheResults = debounce(()=>renderRechercheResults(), 150);
 const debouncedDevisSearchRefs = debounce((q)=>devisSearchRefsRun(q), 120);
-/* ---- Migration : plusieurs listes de prix nets nommées par marque ---- */
+/* ---- Migration : plusieurs listes de prix nets nommées par fournisseur ---- */
 function ensurePrixNetListes(){
   state.prixNetListes = state.prixNetListes || [];
   let changed = false;
@@ -1971,7 +1971,7 @@ function ensurePrixNetListes(){
     }
     return liste;
   };
-  // Réfs existantes sans liste assignée -> rattachées à la liste par défaut de leur marque
+  // Réfs existantes sans liste assignée -> rattachées à la liste par défaut de leur fournisseur
   state.listesPrixNets.forEach(t=>{
     if(!t.listeId){
       const liste = getOrCreateDefaultListe(t.brandId);
@@ -1979,7 +1979,7 @@ function ensurePrixNetListes(){
       changed = true;
     }
   });
-  // Anciennes associations client<->marque -> converties en client<->liste (liste par défaut de la marque)
+  // Anciennes associations client<->fournisseur -> converties en client<->liste (liste par défaut du fournisseur)
   state.clients.forEach(c=>{
     if(c.netPriceBrandIds && c.netPriceBrandIds.length){
       c.netPriceListeIds = c.netPriceListeIds || [];
@@ -2524,7 +2524,7 @@ function renderBackupPermissionBanner(){
 
 const NAV_ITEMS_DEFAULT = [
   {id:'dashboard', label:'Tableau de bord', ic:'◈'},
-  {id:'marques', label:'Marques', ic:'◆'},
+  {id:'marques', label:'Fournisseurs', ic:'◆'},
   {id:'clients', label:'Clients (CRM)', ic:'◉'},
   {id:'emailing', label:'Emailing', ic:'✉'},
   {id:'commerciaux', label:'Commerciaux', ic:'♟'},
@@ -2600,7 +2600,7 @@ function renderSidebar(){
         </button>
       `).join('')}
     </div>
-    <div class="sidebar-foot">${state.brands.length} marques · ${state.clients.length} clients<br>${state.tarifs.length} références
+    <div class="sidebar-foot">${state.brands.length} fournisseurs · ${state.clients.length} clients<br>${state.tarifs.length} références
       <button class="layout-toggle" onclick="openSecondWindow()" title="Ouvre une vraie deuxième fenêtre de navigateur, que vous pouvez glisser sur votre second écran — les deux fenêtres restent synchronisées">
         ⧉ Ouvrir une 2ᵉ fenêtre
       </button>
@@ -2814,12 +2814,12 @@ function renderMarques(){
   return `
   <div class="topbar">
     <div>
-      <h1>Marques &amp; fournisseurs</h1>
-      <div class="sub">${state.brands.length} marque(s) référencée(s)</div>
+      <h1>Fournisseurs</h1>
+      <div class="sub">${state.brands.length} fournisseur(s) référencé(s)</div>
     </div>
-    <button class="btn btn-primary" onclick="openBrandForm()">+ Ajouter une marque</button>
+    <button class="btn btn-primary" onclick="openBrandForm()">+ Ajouter un fournisseur</button>
   </div>
-  ${state.brands.length===0 ? emptyState('◆','Aucune marque pour le moment','Ajoutez les marques que vous représentez pour commencer.') : `
+  ${state.brands.length===0 ? emptyState('◆','Aucun fournisseur pour le moment','Ajoutez les fournisseurs que vous représentez pour commencer.') : `
   <div class="grid grid-4">
     ${(()=>{ const tarifCounts = tarifCountsByBrand(); return state.brands.map(b=>{
       const ca = caForBrand(b.id, null);
@@ -2849,7 +2849,7 @@ function switchBrandFormTab(tab){
     t.classList.toggle('active', t.dataset.tab===tab);
   });
 }
-/* ---- Contacts d'une marque : nom, prénom, fonction, portable, téléphone, mail, commentaires ---- */
+/* ---- Contacts d'un fournisseur : nom, prénom, fonction, portable, téléphone, mail, commentaires ---- */
 let brandDraftContacts = [];
 function normalizeBrandContact(p){
   p.nom = formatLastName(p.nom); p.prenom = formatFirstName(p.prenom);
@@ -2857,7 +2857,7 @@ function normalizeBrandContact(p){
   return p;
 }
 function brandContactsRowsHtml(){
-  if(brandDraftContacts.length===0) return `<tr><td colspan="8" class="helper" style="text-align:center;padding:14px;">Aucun contact ajouté pour cette marque.</td></tr>`;
+  if(brandDraftContacts.length===0) return `<tr><td colspan="8" class="helper" style="text-align:center;padding:14px;">Aucun contact ajouté pour ce fournisseur.</td></tr>`;
   return brandDraftContacts.map((p,i)=>`
     <tr class="${i%2===0?'row-a':'row-b'}">
       <td><input type="text" style="text-transform:uppercase;" value="${escapeHtml(p.nom||'')}" onchange="brandDraftContacts[${i}].nom=this.value=formatLastName(this.value);"></td>
@@ -2884,7 +2884,7 @@ function openBrandForm(id){
   brandDraftContacts = b && b.contacts ? JSON.parse(JSON.stringify(b.contacts)).map(normalizeBrandContact) : [];
   const civOpts = civiliteOptions();
   openModal(`
-    <div class="modal-head"><h3>${b?'Modifier la marque / fournisseur':'Nouvelle marque / fournisseur'}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-head"><h3>${b?'Modifier le fournisseur':'Nouveau fournisseur'}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="tabs-sub" style="padding:0 22px;margin:0;">
       <button type="button" class="brand-form-tab active" data-tab="identification" onclick="switchBrandFormTab('identification')">Identification</button>
       <button type="button" class="brand-form-tab" data-tab="contacts" onclick="switchBrandFormTab('contacts')">Contacts</button>
@@ -2898,7 +2898,7 @@ function openBrandForm(id){
       <div class="brand-form-panel" data-panel="identification" style="display:block;">
         <div class="field-row">
           <div class="field" style="max-width:160px;"><label>Code</label><input type="text" id="f_code" value="${b?escapeHtml(b.code||''):''}" placeholder="Ex. FRN001"></div>
-          <div class="field"><label>Nom de la marque *</label><input type="text" id="f_name" value="${b?escapeHtml(b.name):''}" placeholder="Ex. Nordik Design"></div>
+          <div class="field"><label>Nom du fournisseur *</label><input type="text" id="f_name" value="${b?escapeHtml(b.name):''}" placeholder="Ex. Nordik Design"></div>
           <div class="field" style="max-width:140px;"><label>Commission (%)</label><input type="number" id="f_tauxCommission" min="0" max="100" step="0.01" value="${b&&b.tauxCommission!==undefined?b.tauxCommission:''}" placeholder="Ex. 5"></div>
         </div>
         <div class="field-row">
@@ -2922,14 +2922,14 @@ function openBrandForm(id){
           <div class="field"><label>Email</label><input type="email" id="f_email" value="${b?escapeHtml(b.email||''):''}"></div>
           <div class="field"><label>Site Internet</label><input type="text" id="f_site" value="${b?escapeHtml(b.siteInternet||''):''}"></div>
         </div>
-        <div class="field"><label>Email copie devis <span class="helper" style="display:inline;">(reçoit une copie des devis envoyés pour cette marque)</span></label><input type="email" id="f_emailCopie" value="${b?escapeHtml(b.emailCopieDevis||''):''}"></div>
+        <div class="field"><label>Email copie devis <span class="helper" style="display:inline;">(reçoit une copie des devis envoyés pour ce fournisseur)</span></label><input type="email" id="f_emailCopie" value="${b?escapeHtml(b.emailCopieDevis||''):''}"></div>
         <div class="field"><label>Email export devis</label><input type="email" id="f_emailExport" value="${b?escapeHtml(b.emailExportDevis||''):''}"></div>
-        <div class="field"><label>Commentaire <span class="helper" style="display:inline;">(note interne sur cette marque / ce fournisseur)</span></label><textarea id="f_commentaireId" rows="3" placeholder="Ex. conditions d'achat, contact privilégié, remarques internes…">${b?escapeHtml(b.commentaireIdentification||''):''}</textarea></div>
+        <div class="field"><label>Commentaire <span class="helper" style="display:inline;">(note interne sur ce fournisseur)</span></label><textarea id="f_commentaireId" rows="3" placeholder="Ex. conditions d'achat, contact privilégié, remarques internes…">${b?escapeHtml(b.commentaireIdentification||''):''}</textarea></div>
       </div>
 
       <div class="brand-form-panel" data-panel="devis" style="display:none;">
         <div class="field">
-          <label>Logo de la marque <span class="helper" style="display:inline;">(affiché sur les devis de cette marque)</span></label>
+          <label>Logo du fournisseur <span class="helper" style="display:inline;">(affiché sur les devis de ce fournisseur)</span></label>
           <div id="logoPreviewWrap" style="margin-bottom:10px;">${renderLogoPreview()}</div>
           <div class="upload-zone" onclick="document.getElementById('f_logo').click()">
             <input type="file" id="f_logo" accept="image/*" onchange="handleLogoFile(event)">
@@ -2937,13 +2937,13 @@ function openBrandForm(id){
           </div>
         </div>
         <div class="field" style="margin-top:16px;">
-          <label>Commentaire à intégrer dans les devis <span class="helper" style="display:inline;">(imprimé sur les devis de cette marque, sous les lignes)</span></label>
-          <textarea id="f_commentaire" rows="4" placeholder="Ex. conditions de garantie, délais de livraison, mentions spécifiques à la marque…">${b?escapeHtml(b.commentaire||''):''}</textarea>
+          <label>Commentaire à intégrer dans les devis <span class="helper" style="display:inline;">(imprimé sur les devis de ce fournisseur, sous les lignes)</span></label>
+          <textarea id="f_commentaire" rows="4" placeholder="Ex. conditions de garantie, délais de livraison, mentions spécifiques au fournisseur…">${b?escapeHtml(b.commentaire||''):''}</textarea>
         </div>
       </div>
 
       <div class="brand-form-panel" data-panel="contacts" style="display:none;">
-        <div class="helper" style="margin-bottom:10px;">Les personnes à contacter chez cette marque (responsable commercial, ADV, technique…). Ajoutez-en autant que nécessaire.</div>
+        <div class="helper" style="margin-bottom:10px;">Les personnes à contacter chez ce fournisseur (responsable commercial, ADV, technique…). Ajoutez-en autant que nécessaire.</div>
         ${datalistHtml('dl_fonctionsContacts','fonctionsContacts')}
         <div class="table-wrap lines-table">
           <table class="contacts-sheet">
@@ -2965,8 +2965,8 @@ function openBrandForm(id){
       </div>
 
       <div class="brand-form-panel" data-panel="departements" style="display:none;">
-        <div class="helper" style="margin-bottom:10px;">Laissez tout décoché si vous représentez cette marque partout.</div>
-        <div class="helper" style="margin-bottom:8px;">Cochez uniquement les départements où vous représentez effectivement cette marque. Utilisé pour affiner le ciblage dans l'Emailing.</div>
+        <div class="helper" style="margin-bottom:10px;">Laissez tout décoché si vous représentez ce fournisseur partout.</div>
+        <div class="helper" style="margin-bottom:8px;">Cochez uniquement les départements où vous représentez effectivement ce fournisseur. Utilisé pour affiner le ciblage dans l'Emailing.</div>
         <div style="max-height:160px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 10px;">
           ${['03','18','28','36','37','41','45','86'].map(code=>`
             <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;">
@@ -2979,10 +2979,10 @@ function openBrandForm(id){
 
       <div class="brand-form-panel" data-panel="signature" style="display:none;">
         <div class="helper" style="margin-bottom:12px;">
-          Si elle est renseignée, cette signature remplace automatiquement votre signature habituelle dans l'email envoyé pour un devis <strong>ne concernant que cette marque</strong> (bouton "Enregistrer et envoyer"). Laissez ce champ vide pour continuer à utiliser votre signature par défaut (Paramètres → Société).
+          Si elle est renseignée, cette signature remplace automatiquement votre signature habituelle dans l'email envoyé pour un devis <strong>ne concernant que ce fournisseur</strong> (bouton "Enregistrer et envoyer"). Laissez ce champ vide pour continuer à utiliser votre signature par défaut (Paramètres → Société).
         </div>
         <div class="field">
-          <label>Signature pour les emails de devis de cette marque <span class="helper" style="display:inline;">(collez directement votre signature Outlook — Ctrl+V — images comprises)</span></label>
+          <label>Signature pour les emails de devis de ce fournisseur <span class="helper" style="display:inline;">(collez directement votre signature Outlook — Ctrl+V — images comprises)</span></label>
           <div id="f_emailSignatureRich" contenteditable="true" class="signature-editor"
             onpaste="setTimeout(()=>{cleanupSignaturePaste(document.getElementById('f_emailSignatureRich')); persistifySignatureImages(document.getElementById('f_emailSignatureRich'));},60)"
           >${b&&b.emailSignatureHtml ? b.emailSignatureHtml : (b&&b.emailSignature ? escapeHtml(b.emailSignature).replace(/\n/g,'<br>') : '')}</div>
@@ -3071,7 +3071,7 @@ function persistifySignatureImages(container){
 }
 function saveBrand(id){
   const name = document.getElementById('f_name').value.trim();
-  if(!name){ showToast('Le nom de la marque est requis.'); switchBrandFormTab('identification'); return; }
+  if(!name){ showToast('Le nom du fournisseur est requis.'); switchBrandFormTab('identification'); return; }
   const data = {
     code: document.getElementById('f_code').value.trim(),
     name,
@@ -3109,13 +3109,13 @@ function saveBrand(id){
   persist('brands');
   closeModal();
   render();
-  showToast('Marque enregistrée.');
+  showToast('Fournisseur enregistré.');
 }
 const TRASH_TYPE_LABELS = {
   client:'Client', devis:'Devis', marche:'Marché', devisTemplate:'Modèle de devis',
-  tarif:'Référence tarif', brand:'Marque', commercial:'Commercial',
+  tarif:'Référence tarif', brand:'Fournisseur', commercial:'Commercial',
   historyNote:'Note de suivi', prixNetListe:'Liste de prix nets', prixNet:'Référence liste de prix nets',
-  paramItem:'Élément de liste', brandHistory:'RDV marque', suiviNote:'Commentaire de suivi devis', devisVersion:'Ancienne version de devis', tarifsBulk:'Tarifs (bloc)', prixNetBulk:'Liste de prix nets (bloc)',
+  paramItem:'Élément de liste', brandHistory:'RDV fournisseur', suiviNote:'Commentaire de suivi devis', devisVersion:'Ancienne version de devis', tarifsBulk:'Tarifs (bloc)', prixNetBulk:'Liste de prix nets (bloc)',
 };
 function moveToTrash(type, label, data){
   state.trash = state.trash || [];
@@ -3173,7 +3173,7 @@ function restoreFromTrash(trashId){
     }
     case 'brandHistory': {
       const b = state.brands.find(x=>x.id===entry.data.brandId);
-      if(!b){ showToast('La marque correspondante n\'existe plus.'); return; }
+      if(!b){ showToast('Le fournisseur correspondant n\'existe plus.'); return; }
       b.history = b.history || [];
       b.history.push(entry.data.entry);
       persist('brands');
@@ -3425,7 +3425,7 @@ function renderBudgetCommercial(){
   const totalBudgetAll = rows.reduce((s,r)=>s+r.totalBudget,0);
   const totalCaAll = rows.reduce((s,r)=>s+r.ca,0);
 
-  // Vue par marque : total du budget d'animation alloué, tous clients confondus, pour l'année sélectionnée.
+  // Vue par fournisseur : total du budget d'animation alloué, tous clients confondus, pour l'année sélectionnée.
   const budgetByBrand = {};
   rows.forEach(r=>{
     Object.keys(r.perBrand).forEach(bid=>{
@@ -3450,11 +3450,11 @@ function renderBudgetCommercial(){
     <div class="card kpi"><div class="label">CA total (clients concernés)</div><div class="value num" style="color:var(--success);">${fmtMoney(totalCaAll)}</div></div>
     <div class="card kpi"><div class="label">Ratio global</div><div class="value num">${totalCaAll>0?(totalBudgetAll/totalCaAll*100).toFixed(1)+' %':'—'}</div></div>
   </div>
-  ${rows.length===0?emptyState('💰',"Aucune animation commerciale sur cette année","Cochez la tâche \"Animation commerciale\" (avec un budget par marque) sur une note de suivi client pour la voir apparaître ici."):`
-  <div class="section-title">Budget annuel par marque ${year}</div>
-  <div class="helper" style="margin-bottom:10px;">Total alloué aux animations commerciales, toutes marques confondues sur l'année, tous clients cumulés.</div>
+  ${rows.length===0?emptyState('💰',"Aucune animation commerciale sur cette année","Cochez la tâche \"Animation commerciale\" (avec un budget par fournisseur) sur une note de suivi client pour la voir apparaître ici."):`
+  <div class="section-title">Budget annuel par fournisseur ${year}</div>
+  <div class="helper" style="margin-bottom:10px;">Total alloué aux animations commerciales, tous fournisseurs confondus sur l'année, tous clients cumulés.</div>
   <div class="table-wrap card" style="margin-bottom:24px;"><table>
-    <thead><tr><th>Marque</th><th class="num">Nb clients concernés</th><th class="num">Budget total ${year}</th></tr></thead>
+    <thead><tr><th>Fournisseur</th><th class="num">Nb clients concernés</th><th class="num">Budget total ${year}</th></tr></thead>
     <tbody>
       ${brandRows.map(br=>`
         <tr>
@@ -3474,7 +3474,7 @@ function renderBudgetCommercial(){
   <div class="section-title">Détail par animation</div>
   <div class="helper" style="margin-bottom:10px;">Une ligne par animation commerciale. Certaines animations regroupent plusieurs agences d'une même enseigne : cliquez sur ✎ pour donner un titre à l'animation et ajouter les agences concernées — leur CA sera alors additionné pour le ratio, mais le budget reste celui saisi sur l'agence principale.</div>
   <div class="table-wrap card"><table>
-    <thead><tr><th>Animation</th><th>Client principal</th><th>Agences groupées</th><th>Marques (budget)</th><th class="num">Budget</th><th class="num">CA cumulé ${year}</th><th class="num">Ratio</th><th></th></tr></thead>
+    <thead><tr><th>Animation</th><th>Client principal</th><th>Agences groupées</th><th>Fournisseurs (budget)</th><th class="num">Budget</th><th class="num">CA cumulé ${year}</th><th class="num">Ratio</th><th></th></tr></thead>
     <tbody>
       ${animRows.map(r=>`
         <tr>
@@ -3569,7 +3569,7 @@ function renderTrash(){
     <div><h1>Corbeille</h1><div class="sub">${items.length} élément(s) supprimé(s)</div></div>
     ${items.length>0?`<button class="btn btn-danger" onclick="emptyTrash()">🗑 Vider la corbeille</button>`:''}
   </div>
-  ${items.length===0?emptyState('🗑','Corbeille vide','Les clients, devis, modèles, tarifs, marques et commerciaux supprimés apparaîtront ici, le temps que vous les récupériez si besoin.'):`
+  ${items.length===0?emptyState('🗑','Corbeille vide','Les clients, devis, modèles, tarifs, fournisseurs et commerciaux supprimés apparaîtront ici, le temps que vous les récupériez si besoin.'):`
   <div class="table-wrap card"><table>
     <thead><tr><th>Type</th><th>Élément</th><th>Supprimé le</th><th></th></tr></thead>
     <tbody>
@@ -3590,7 +3590,7 @@ function renderTrash(){
   `;
 }
 function deleteBrand(id){
-  if(!confirm('Supprimer cette marque ? Les tarifs associés seront aussi supprimés. Retrouvable dans la Corbeille (les tarifs associés, eux, sont supprimés définitivement).')) return;
+  if(!confirm('Supprimer ce fournisseur ? Les tarifs associés seront aussi supprimés. Retrouvable dans la Corbeille (les tarifs associés, eux, sont supprimés définitivement).')) return;
   const b = state.brands.find(x=>x.id===id);
   if(b) moveToTrash('brand', b.name||'(sans nom)', b);
   state.brands = state.brands.filter(b=>b.id!==id);
@@ -3598,7 +3598,7 @@ function deleteBrand(id){
   persist('brands'); persist('tarifs');
   closeModal();
   render();
-  showToast('Marque déplacée dans la Corbeille.');
+  showToast('Fournisseur déplacé dans la Corbeille.');
 }
 
 /* ============================= CLIENTS (CRM) ============================= */
@@ -3741,11 +3741,11 @@ function openBulkRemiseModal(){
   openModal(`
     <div class="modal-head"><h3>Remise tarif — ${ids.length} client(s)</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
-      <div class="helper" style="margin-bottom:12px;">Cette remise sera appliquée automatiquement aux lignes de devis pour ces clients (sauf si une liste de prix nets s'applique à la référence). Limitez-la à une marque et/ou une famille d'articles si besoin, ou laissez sur « Toutes » pour une remise générale. Laissez les remises à 0 pour ne rien appliquer.</div>
+      <div class="helper" style="margin-bottom:12px;">Cette remise sera appliquée automatiquement aux lignes de devis pour ces clients (sauf si une liste de prix nets s'applique à la référence). Limitez-la à un fournisseur et/ou une famille d'articles si besoin, ou laissez sur « Toutes » pour une remise générale. Laissez les remises à 0 pour ne rien appliquer.</div>
       <div class="field-row">
-        <div class="field"><label>Marque</label>
+        <div class="field"><label>Fournisseur</label>
           <select id="bulk_remise_brand" onchange="refreshBulkRemiseFamilleDatalist()">
-            <option value="">Toutes les marques</option>
+            <option value="">Tous les fournisseurs</option>
             ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('')}
           </select>
         </div>
@@ -3768,7 +3768,7 @@ function refreshBulkRemiseFamilleDatalist(){
   const brandId = document.getElementById('bulk_remise_brand').value;
   const wrap = document.getElementById('dl_bulk_famillesArticles_wrap');
   if(wrap) wrap.innerHTML = datalistHtml('dl_bulk_famillesArticles','famillesArticles',brandId);
-  // La marque ayant changé, on efface la famille déjà saisie si elle ne correspond plus
+  // Le fournisseur ayant changé, on efface la famille déjà saisie si elle ne correspond plus
   const famEl = document.getElementById('bulk_remise_famille');
   if(famEl && brandId){
     const items = paramListItems('famillesArticles').filter(it=>!it.brandId || it.brandId===brandId);
@@ -3800,7 +3800,7 @@ function applyBulkRemise(){
   persist('clients');
   closeModal();
   render();
-  const scopeLabel = [brandId?brandName(brandId):null, familleArticle||null].filter(Boolean).join(' / ') || 'toutes marques/familles';
+  const scopeLabel = [brandId?brandName(brandId):null, familleArticle||null].filter(Boolean).join(' / ') || 'tous fournisseurs/familles';
   showToast(`Remise tarif (${scopeLabel}) appliquée à ${ids.length} client(s).`);
 }
 const FR_DEPARTEMENTS = {
@@ -3880,7 +3880,7 @@ function visibleEmailingList(){
   if(ui.emailingBrandFilter && ui.emailingBrandFilter!=='all'){
     const brand = state.brands.find(b=>b.id===ui.emailingBrandFilter);
     const depts = brand ? (brand.departementsRepresentes||[]) : [];
-    // Si la marque n'a aucun département coché, elle est considérée comme représentée partout (pas de filtre).
+    // Si le fournisseur n'a aucun département coché, elle est considérée comme représentée partout (pas de filtre).
     if(depts.length>0) list = list.filter(c=>depts.includes(clientDepartement(c)));
   }
   list.sort((a,b)=>(a.company||a.name).localeCompare(b.company||b.name) || a.name.localeCompare(b.name));
@@ -3962,8 +3962,8 @@ function renderEmailing(){
       </select>
     </div>
     <div class="field" style="margin-bottom:0;max-width:220px;">
-      <select onchange="ui.emailingBrandFilter=this.value; render();" title="Ne montre que les clients situés dans un département où vous représentez cette marque">
-        <option value="all">Toutes les marques</option>
+      <select onchange="ui.emailingBrandFilter=this.value; render();" title="Ne montre que les clients situés dans un département où vous représentez ce fournisseur">
+        <option value="all">Tous les fournisseurs</option>
         ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.emailingBrandFilter===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select>
     </div>
@@ -4315,7 +4315,7 @@ function contactFunctionCheck(value){
 }
 function formatEmail(s){ return (s==null ? '' : String(s)).trim().toLowerCase(); }   // les adresses e-mail sont toujours enregistrées en minuscules
 function migrateLowercaseEmails(){
-  // Met en minuscules les adresses déjà enregistrées (clients, contacts, commerciaux, marques, coordonnées)
+  // Met en minuscules les adresses déjà enregistrées (clients, contacts, commerciaux, fournisseurs, coordonnées)
   let cl=false, cm=false, br=false, st=false;
   const low = (o,k)=>{ if(o && typeof o[k]==='string' && o[k] && o[k]!==o[k].trim().toLowerCase()){ o[k]=o[k].trim().toLowerCase(); return true; } return false; };
   (state.clients||[]).forEach(c=>{ if(low(c,'emailPrincipal')) cl=true; (c.contacts||[]).forEach(p=>{ if(low(p,'email')) cl=true; }); });
@@ -4556,7 +4556,7 @@ function openClientForm(id){
       <div class="helper" style="margin-bottom:10px;">Remise appliquée automatiquement aux lignes de devis pour ce client, sauf si une liste de prix nets s'applique.</div>
       <div class="table-wrap lines-table">
         <table>
-          <thead><tr><th style="width:180px;">Marque</th><th style="width:180px;">Famille article</th><th>Remise 1 (%)</th><th>Remise 2 (%)</th><th>Remise 3 (%)</th><th></th></tr></thead>
+          <thead><tr><th style="width:180px;">Fournisseur</th><th style="width:180px;">Famille article</th><th>Remise 1 (%)</th><th>Remise 2 (%)</th><th>Remise 3 (%)</th><th></th></tr></thead>
           <tbody id="clientRemisesBody">${clientRemisesRowsHtml()}</tbody>
         </table>
       </div>
@@ -4744,7 +4744,7 @@ function clientRemisesRowsHtml(){
   return clientDraftRemises.map((r,i)=>`
     <tr>
       <td><select onchange="clientDraftRemises[${i}].brandId=this.value; refreshClientRemisesTable();">
-        <option value="" ${!r.brandId?'selected':''}>Toutes les marques</option>
+        <option value="" ${!r.brandId?'selected':''}>Tous les fournisseurs</option>
         ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${r.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select></td>
       <td><input type="text" list="dl_famillesArticles_${i}" value="${escapeHtml(r.familleArticle||'')}" placeholder="Toutes les familles" onchange="clientDraftRemises[${i}].familleArticle=this.value;">${datalistHtml('dl_famillesArticles_'+i,'famillesArticles',r.brandId)}</td>
@@ -4902,7 +4902,7 @@ function openContactDetail(clientId, contactId){
       <div class="section-title">Devis et marchés à son attention</div>
       ${list.length===0?'<div class="helper">Aucun devis n\'est adressé à son attention pour l\'instant. Choisissez-le dans « À l\'attention de » lors de la saisie d\'un devis.</div>':`
       <div class="table-wrap card"><table class="no-col-resize">
-        <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Objet</th><th>Marque(s)</th><th class="num">Total HT</th><th>Statut devis</th><th>État de l'affaire</th></tr></thead>
+        <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Objet</th><th>Fournisseur(s)</th><th class="num">Total HT</th><th>Statut devis</th><th>État de l'affaire</th></tr></thead>
         <tbody>${list.map(d=>{
           const brandIds = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean);
           const oc = devisEtatColor(d);
@@ -4971,7 +4971,7 @@ function openClientDetail(id, scrollToSuivi){
         ${(c.typeClient||c.canalDistribution)?`<div>▤ ${escapeHtml([c.typeClient,c.canalDistribution].filter(Boolean).join(' · '))}</div>`:''}
         ${c.commercialId?(()=>{ const cm = state.commerciaux.find(x=>x.id===c.commercialId); return cm?`<div>♟ Commercial : ${escapeHtml(commercialDisplayName(cm))}</div>`:''; })():''}
         ${clientRemiseRules(c).length>0?`<div>％ Remise tarif : ${clientRemiseRules(c).map(r=>{
-          const scope = [r.brandId?brandName(r.brandId):null, r.familleArticle||null].filter(Boolean).join(' / ') || 'Toutes marques/familles';
+          const scope = [r.brandId?brandName(r.brandId):null, r.familleArticle||null].filter(Boolean).join(' / ') || 'Tous fournisseurs/familles';
           const pct = [r.remise1,r.remise2,r.remise3].map(x=>x?(x+'%'):null).filter(Boolean).join('+');
           return escapeHtml(scope+' : '+(pct||'0%'));
         }).join(' · ')}</div>`:''}
@@ -5014,7 +5014,7 @@ function openClientDetail(id, scrollToSuivi){
       <div class="section-title">Devis</div>
       ${devisList.length===0?'<div class="helper">Aucun devis pour ce client.</div>':`
       <div class="table-wrap"><table>
-        <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Marque(s)</th><th class="num">Total HT</th><th>Apporteur</th><th>Statut devis</th><th>État de l'affaire</th><th>Suivi</th></tr></thead>
+        <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Fournisseur(s)</th><th class="num">Total HT</th><th>Apporteur</th><th>Statut devis</th><th>État de l'affaire</th><th>Suivi</th></tr></thead>
         <tbody>${devisList.map(d=>{
           const t = devisTotal(d);
           const brandIds = [...new Set((d.lines||[]).map(l=>l.brandId))].filter(Boolean);
@@ -5086,10 +5086,10 @@ let historyNoteBudgets = {};
 let historyEditBudgets = {};
 function renderHistoryBudgetSection(tasks, brandIds, budgets, onchangeFn){
   if(!Object.prototype.hasOwnProperty.call(tasks||{}, 'Animation commerciale')) return '';
-  if(!brandIds || brandIds.length===0) return '<div class="helper" style="margin-top:8px;">Sélectionnez au moins une marque pour saisir le budget de cette animation commerciale.</div>';
+  if(!brandIds || brandIds.length===0) return '<div class="helper" style="margin-top:8px;">Sélectionnez au moins un fournisseur pour saisir le budget de cette animation commerciale.</div>';
   return `
   <div class="field" style="margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);">
-    <label style="margin-bottom:8px;">💰 Budget animation commerciale <span class="helper" style="display:inline;">— par marque, visible dans l'onglet Budget commercial</span></label>
+    <label style="margin-bottom:8px;">💰 Budget animation commerciale <span class="helper" style="display:inline;">— par fournisseur, visible dans l'onglet Budget commercial</span></label>
     <div style="display:flex;flex-wrap:wrap;gap:10px;">
       ${brandIds.map(bid=>`
         <div style="display:flex;align-items:center;gap:6px;">
@@ -5100,13 +5100,13 @@ function renderHistoryBudgetSection(tasks, brandIds, budgets, onchangeFn){
     </div>
   </div>`;
 }
-/* ---- Note générale + une note par marque sélectionnée ----
-   h.text = note générale (valable pour toutes les marques) ; h.brandNotes = {idMarque: note propre à cette marque}.
-   Dans le rapport d'une marque : note générale + note de CETTE marque seulement. */
+/* ---- Note générale + une note par fournisseur sélectionné ----
+   h.text = note générale (valable pour tous les fournisseurs) ; h.brandNotes = {idMarque: note propre à ce fournisseur}.
+   Dans le rapport d'un fournisseur : note générale + note de CE fournisseur seulement. */
 let historyNoteBrandTexts = {};
 let historyEditBrandTexts = {};
 function renderHistoryBrandNotes(brandIds, texts, kind){
-  if(!brandIds.length) return '<div class="helper" style="margin-top:8px;">Sélectionnez une ou plusieurs marques : une note propre à chacune apparaîtra ici et ne figurera que dans le rapport de cette marque.</div>';
+  if(!brandIds.length) return '<div class="helper" style="margin-top:8px;">Sélectionnez un ou plusieurs fournisseurs : une note propre à chacun apparaîtra ici et ne figurera que dans le rapport de ce fournisseur.</div>';
   const prefix = kind==='add' ? 'ah_bn_' : 'eh_bn_';
   return `<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">${brandIds.map(bid=>`
     <div class="field" style="margin:0;padding:10px 12px;border:1px solid var(--line);border-left:4px solid ${brandColor(bid)};border-radius:8px;background:var(--surface-2);">
@@ -5128,7 +5128,7 @@ function collectBrandNotes(brandIds, texts){
   return out;
 }
 function historyNoteBlocksHtml(h){
-  // Affichage d'une note de suivi : note générale, puis la note de chaque marque précédée de sa pastille
+  // Affichage d'une note de suivi : note générale, puis la note de chaque fournisseur précédée de sa pastille
   const parts = [];
   const general = (h.text||'').trim();
   if(general) parts.push(`<div style="white-space:pre-wrap;">${escapeHtml(general).replace(/\n/g,'<br>')}</div>`);
@@ -5140,7 +5140,7 @@ function historyNoteBlocksHtml(h){
   return parts.join('') || '<span class="helper">—</span>';
 }
 function rapportNoteText(m){
-  // Texte du compte-rendu pour le rapport d'une marque : note générale + note propre à cette marque
+  // Texte du compte-rendu pour le rapport d'un fournisseur : note générale + note propre à ce fournisseur
   return [(m.text||'').trim(), (m.brandNote||'').trim()].filter(Boolean).join('\n');
 }
 function refreshHistoryBudgetSection(which){
@@ -5225,7 +5225,7 @@ function openAddHistoryNoteModal(clientId){
         <label>Personnes vues</label>
         <div id="historyPersonneChips" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">${renderHistoryPersonneChips(clientId, historyNoteSelectedPersonnes, 'toggleHistoryNotePersonneChip')}</div>
       </div>
-      <div class="field"><label>Note générale <span class="helper" style="display:inline;">— valable pour toutes les marques (Entrée pour aller à la ligne)</span></label><textarea id="ah_text" rows="4" style="resize:vertical;" placeholder="Ajouter une note de suivi (appel, RDV, relance…)"></textarea></div>
+      <div class="field"><label>Note générale <span class="helper" style="display:inline;">— valable pour tous les fournisseurs (Entrée pour aller à la ligne)</span></label><textarea id="ah_text" rows="4" style="resize:vertical;" placeholder="Ajouter une note de suivi (appel, RDV, relance…)"></textarea></div>
       <div class="field-row">
         <div class="field"><label>Date</label><input type="date" id="ah_date" value="${todayStr()}"></div>
         <div class="field"><label>Type de visite</label>
@@ -5234,7 +5234,7 @@ function openAddHistoryNoteModal(clientId){
         <div class="field" style="max-width:150px;"><label>Durée (minutes)</label><input type="number" min="0" step="5" id="ah_duree" placeholder="Ex. 45"></div>
       </div>
       <div class="field" style="margin-bottom:16px;">
-        <label>Marque(s) présentée(s) <span class="helper" style="display:inline;">— laissez vide si non applicable</span></label>
+        <label>Fournisseur(s) présenté(s) <span class="helper" style="display:inline;">— laissez vide si non applicable</span></label>
         <div id="historyBrandChips" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">${renderHistoryBrandChips()}</div>
         <div id="historyBrandNotes_add">${renderHistoryBrandNotes(historyNoteSelectedBrands, historyNoteBrandTexts, 'add')}</div>
       </div>
@@ -5258,7 +5258,7 @@ function addHistoryNote(clientId){
   const input = document.getElementById('ah_text');
   const text = input.value.trim();
   const brandNotes = collectBrandNotes(historyNoteSelectedBrands, historyNoteBrandTexts);
-  if(!text && Object.keys(brandNotes).length===0){ showToast('Saisissez une note générale ou une note pour au moins une marque.'); return; }
+  if(!text && Object.keys(brandNotes).length===0){ showToast('Saisissez une note générale ou une note pour au moins un fournisseur.'); return; }
   const dateEl = document.getElementById('ah_date');
   const date = (dateEl && dateEl.value) ? dateEl.value : todayStr();
   const typeVisiteEl = document.getElementById('ah_typeVisite');
@@ -5332,7 +5332,7 @@ function openEditHistoryNoteModal(clientId, noteId){
         <label>Personnes vues</label>
         <div id="historyEditPersonneChips" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">${renderHistoryPersonneChips(clientId, historyEditSelectedPersonnes, 'toggleHistoryEditPersonneChip')}</div>
       </div>
-      <div class="field"><label>Note générale <span class="helper" style="display:inline;">— valable pour toutes les marques (Entrée pour aller à la ligne)</span></label><textarea id="eh_text" rows="4" style="resize:vertical;">${escapeHtml(h.text||'')}</textarea></div>
+      <div class="field"><label>Note générale <span class="helper" style="display:inline;">— valable pour tous les fournisseurs (Entrée pour aller à la ligne)</span></label><textarea id="eh_text" rows="4" style="resize:vertical;">${escapeHtml(h.text||'')}</textarea></div>
       <div class="field-row">
         <div class="field"><label>Date</label><input type="date" id="eh_date" value="${h.date||todayStr()}"></div>
         <div class="field"><label>Type de visite</label>
@@ -5341,7 +5341,7 @@ function openEditHistoryNoteModal(clientId, noteId){
         <div class="field" style="max-width:150px;"><label>Durée (minutes)</label><input type="number" min="0" step="5" id="eh_duree" value="${h.duree||''}" placeholder="Ex. 45"></div>
       </div>
       <div class="field" style="margin-bottom:16px;">
-        <label>Marque(s) présentée(s)</label>
+        <label>Fournisseur(s) présenté(s)</label>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">${renderHistoryEditBrandChips()}</div>
         <div id="historyBrandNotes_edit">${renderHistoryBrandNotes(historyEditSelectedBrands, historyEditBrandTexts, 'edit')}</div>
       </div>
@@ -5368,7 +5368,7 @@ function saveEditedHistoryNote(clientId, noteId){
   if(!h) return;
   const text = document.getElementById('eh_text').value.trim();
   const brandNotes = collectBrandNotes(historyEditSelectedBrands, historyEditBrandTexts);
-  if(!text && Object.keys(brandNotes).length===0){ showToast('Saisissez une note générale ou une note pour au moins une marque.'); return; }
+  if(!text && Object.keys(brandNotes).length===0){ showToast('Saisissez une note générale ou une note pour au moins un fournisseur.'); return; }
   h.text = text;
   h.brandNotes = brandNotes;
   h.date = document.getElementById('eh_date').value || h.date;
@@ -6255,13 +6255,13 @@ function renderTarifs(){
   }
   return `
   <div class="topbar">
-    <div><h1>Tarifs</h1><div class="sub">${state.tarifs.length} référence(s) sur ${state.brands.length} marque(s)</div></div>
+    <div><h1>Tarifs</h1><div class="sub">${state.tarifs.length} référence(s) sur ${state.brands.length} fournisseur(s)</div></div>
     <div style="display:flex;gap:8px;">
       <button class="btn" onclick="openImportModal()">⇪ Importer (Excel / CSV)</button>
       <button class="btn btn-primary" onclick="openTarifForm()">+ Ajouter une référence</button>
     </div>
   </div>
-  ${state.brands.length===0?emptyState('▤','Ajoutez d\'abord une marque','Les tarifs sont rattachés à une marque. Créez vos marques dans l\'onglet dédié.'):`
+  ${state.brands.length===0?emptyState('▤','Ajoutez d\'abord un fournisseur','Les tarifs sont rattachés à un fournisseur. Créez vos fournisseurs dans l\'onglet dédié.'):`
   ${backupRiskBannerHtml()}
   <div class="grid grid-3">
     ${(()=>{ const tarifCounts = tarifCountsByBrand(); return state.brands.map(b=>{
@@ -6286,12 +6286,12 @@ function renderTarifsDetail(){
   return `
   <div class="topbar">
     <div>
-      <button class="btn btn-sm btn-ghost" style="margin-bottom:8px;" onclick="ui.tarifsView='brands'; ui.tarifsBrandFilter='all'; render();">← Retour aux marques</button>
+      <button class="btn btn-sm btn-ghost" style="margin-bottom:8px;" onclick="ui.tarifsView='brands'; ui.tarifsBrandFilter='all'; render();">← Retour aux fournisseurs</button>
       <h1 style="display:flex;align-items:center;gap:10px;">
         ${b&&b.logo?`<img src="${b.logo}" alt="" style="width:30px;height:30px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff;flex-shrink:0;">`:''}
         <span>Tarifs — ${escapeHtml(b?b.name:'')}</span>
       </h1>
-      <div class="sub">${filteredTarifs().length} référence(s) pour cette marque</div>
+      <div class="sub">${filteredTarifs().length} référence(s) pour ce fournisseur</div>
     </div>
     <div style="display:flex;gap:8px;">
       <button class="btn" onclick="openImportModal()">⇪ Importer (Excel / CSV)</button>
@@ -6307,7 +6307,7 @@ function renderTarifsDetail(){
         <option value="100" ${ui.tarifsPageSize===100?'selected':''}>100</option>
       </select>
     </div>
-    <button class="btn btn-sm btn-ghost btn-danger" onclick="clearBrandTarifs('${ui.tarifsBrandFilter}')">Vider les tarifs de cette marque</button>
+    <button class="btn btn-sm btn-ghost btn-danger" onclick="clearBrandTarifs('${ui.tarifsBrandFilter}')">Vider les tarifs de ce fournisseur</button>
   </div>
   <div class="search-box" style="margin-bottom:14px;">
     <span class="ic">⌕</span>
@@ -6695,7 +6695,7 @@ function renderTarifsTableInner(){
     ${pager}
     <div class="table-wrap"><table>
       <thead><tr>
-        ${showBrandCol?'<th>Marque</th>':''}
+        ${showBrandCol?'<th>Fournisseur</th>':''}
         <th>Référence</th><th>Désignation</th><th>Prix Catalogue</th>
         <th>Code famille article</th><th>Code sous-famille article</th><th>Complément info</th><th>Éco-part.</th><th></th>
       </tr></thead>
@@ -6757,13 +6757,13 @@ function renderListesPrixNets(){
   }
   return `
   <div class="topbar">
-    <div><h1>Liste de prix nets</h1><div class="sub">${state.listesPrixNets.length} référence(s) sur ${state.brands.length} marque(s) — liste indépendante des Tarifs</div></div>
+    <div><h1>Liste de prix nets</h1><div class="sub">${state.listesPrixNets.length} référence(s) sur ${state.brands.length} fournisseur(s) — liste indépendante des Tarifs</div></div>
     <div style="display:flex;gap:8px;">
       <button class="btn" onclick="openImportModalPN()">⇪ Importer (Excel / CSV)</button>
       <button class="btn btn-primary" onclick="openPrixNetForm()">+ Ajouter une référence</button>
     </div>
   </div>
-  ${state.brands.length===0?emptyState('▥','Ajoutez d\'abord une marque','Cette liste est rattachée à une marque. Créez vos marques dans l\'onglet dédié.'):`
+  ${state.brands.length===0?emptyState('▥','Ajoutez d\'abord un fournisseur','Cette liste est rattachée à un fournisseur. Créez vos fournisseurs dans l\'onglet dédié.'):`
   ${backupRiskBannerHtml()}
   <div class="grid grid-3">
     ${(()=>{
@@ -6778,14 +6778,14 @@ function renderListesPrixNets(){
       const assigned = pnAssignedClientsForBrand(b.id);
       const defaultListeId = listes[0] ? listes[0].id : null;
       return `
-      <div class="card card-pad" style="cursor:pointer;" onclick="ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${defaultListeId}'; ui.pnSearch=''; render();" title="Cliquer pour ouvrir cette marque">
+      <div class="card card-pad" style="cursor:pointer;" onclick="ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${defaultListeId}'; ui.pnSearch=''; render();" title="Cliquer pour ouvrir ce fournisseur">
         <div style="display:flex;align-items:center;gap:8px;">
           ${b.logo?`<img src="${b.logo}" alt="" style="width:28px;height:28px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff;flex-shrink:0;">`:''}
           <div class="chip" style="background:${brandColor(b.id)}"><span class="sq"></span>${escapeHtml(b.name)}</div>
           <div style="margin-left:auto;font-size:11.5px;color:var(--ink-soft);white-space:nowrap;">${totalRefs} réf. · ${assigned.length} client(s)</div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;">
-          ${listes.length===0?'<span class="helper">Aucune liste pour cette marque — cliquez pour en créer une.</span>':listes.map(l=>{
+          ${listes.length===0?'<span class="helper">Aucune liste pour ce fournisseur — cliquez pour en créer une.</span>':listes.map(l=>{
             const nb = countsByListe.get(l.id)||0;
             const nbC = pnAssignedClientsForListe(l.id).length;
             return `<span class="chip" style="background:var(--surface-2);color:var(--ink-soft);border:1px solid var(--line);cursor:pointer;" onclick="event.stopPropagation(); ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();" title="${nb} référence(s) · ${nbC} client(s)${listeDatesRangeLabel(l)?' · '+listeDatesRangeLabel(l):''}"><span class="sq" style="background:${brandColor(b.id)};"></span>${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</span>`;
@@ -6805,7 +6805,7 @@ function renderListesPrixNetsDetail(){
   return `
   <div class="topbar">
     <div>
-      <button class="btn btn-sm btn-ghost" style="margin-bottom:8px;" onclick="ui.pnView='brands'; ui.pnBrandFilter='all'; ui.pnListeFilter=null; render();">← Retour aux marques</button>
+      <button class="btn btn-sm btn-ghost" style="margin-bottom:8px;" onclick="ui.pnView='brands'; ui.pnBrandFilter='all'; ui.pnListeFilter=null; render();">← Retour aux fournisseurs</button>
       <h1 style="display:flex;align-items:center;gap:10px;">
         ${b&&b.logo?`<img src="${b.logo}" alt="" style="width:30px;height:30px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff;flex-shrink:0;">`:''}
         <span>Liste de prix nets — ${escapeHtml(b?b.name:'')}${currentListe?' — '+escapeHtml(currentListe.nom):''}</span>
@@ -6819,7 +6819,7 @@ function renderListesPrixNetsDetail(){
     </div>
   </div>
   ${backupRiskBannerHtml()}
-  ${listes.length===0?emptyState('▥','Aucune liste pour cette marque','Créez une première liste de prix nets pour commencer.'):`
+  ${listes.length===0?emptyState('▥','Aucune liste pour ce fournisseur','Créez une première liste de prix nets pour commencer.'):`
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
     ${listes.map(l=>{
       const selected = l.id===ui.pnListeFilter;
@@ -6988,7 +6988,7 @@ function openPnClientAssign(listeId){
   openModal(`
     <div class="modal-head"><h3>Associer "${escapeHtml(l?l.nom:'')}" (${escapeHtml(b?b.name:'')}) à des clients</h3><button class="close-x" onclick="closeModal(); render();">✕</button></div>
     <div class="modal-body">
-      <div class="helper" style="margin-bottom:12px;">Les sociétés cochées verront automatiquement les prix de cette liste appliqués pour la marque ${escapeHtml(b?b.name:'')} lors de l'ajout d'une référence dans un devis (tous les contacts de la société sont associés ensemble). Une société ne peut être rattachée qu'à une seule liste par marque : cocher une liste décoche automatiquement les autres listes de cette marque.</div>
+      <div class="helper" style="margin-bottom:12px;">Les sociétés cochées verront automatiquement les prix de cette liste appliqués pour le fournisseur ${escapeHtml(b?b.name:'')} lors de l'ajout d'une référence dans un devis (tous les contacts de la société sont associés ensemble). Une société ne peut être rattachée qu'à une seule liste par fournisseur : cocher une liste décoche automatiquement les autres listes de ce fournisseur.</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
         <div class="search-box" style="margin-bottom:0;flex:1;min-width:220px;">
           <span class="ic">⌕</span>
@@ -7082,7 +7082,7 @@ function renderListesPrixNetsTableInner(){
   return `
     <div class="table-wrap"><table>
       <thead><tr>
-        ${showBrandCol?'<th>Marque</th>':''}
+        ${showBrandCol?'<th>Fournisseur</th>':''}
         <th>Référence</th><th>Désignation</th><th>Prix Net</th>
         <th>Achat distrib.</th><th>Marge nette</th><th></th>
       </tr></thead>
@@ -7151,14 +7151,14 @@ function renderListesPrixNetsTable(){
 }
 function openPrixNetForm(id){
   const t = id ? state.listesPrixNets.find(x=>x.id===id) : null;
-  if(state.brands.length===0){ showToast('Ajoutez d\'abord une marque.'); return; }
+  if(state.brands.length===0){ showToast('Ajoutez d\'abord un fournisseur.'); return; }
   const defaultBrand = t ? t.brandId : (ui.pnBrandFilter!=='all'?ui.pnBrandFilter:state.brands[0].id);
   const defaultListe = t ? t.listeId : (ui.pnListeFilter || (listesForBrand(defaultBrand)[0] && listesForBrand(defaultBrand)[0].id) || '');
   openModal(`
     <div class="modal-head"><h3>${t?'Modifier la référence':'Nouvelle référence'} — Liste de prix nets</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
       <div class="field-row">
-        <div class="field"><label>Marque *</label>
+        <div class="field"><label>Fournisseur *</label>
           <select id="pn_brand" onchange="refreshPnFormListeOptions()">${state.brands.map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
         </div>
         <div class="field"><label>Liste de prix nets *</label>
@@ -7215,7 +7215,7 @@ function savePrixNet(id){
   const brandId = document.getElementById('pn_brand').value;
   const listeId = document.getElementById('pn_liste').value;
   if(!reference || isNaN(prixNet)){ showToast('Référence et prix net sont requis.'); return; }
-  if(!listeId){ showToast('Choisissez ou créez une liste de prix nets pour cette marque.'); return; }
+  if(!listeId){ showToast('Choisissez ou créez une liste de prix nets pour ce fournisseur.'); return; }
   const data = {
     reference, prixNet, brandId, listeId,
     designation: document.getElementById('pn_desig').value.trim(),
@@ -7247,7 +7247,7 @@ function deletePrixNet(id){
 /* ---- Import Excel / CSV (Liste de prix nets — indépendant de l'import Tarifs) ---- */
 let importParsedRowsPN = null;
 function openImportModalPN(){
-  if(state.brands.length===0){ showToast('Ajoutez d\'abord une marque.'); return; }
+  if(state.brands.length===0){ showToast('Ajoutez d\'abord un fournisseur.'); return; }
   importParsedRowsPN = null;
   const defaultBrand = ui.pnBrandFilter!=='all' ? ui.pnBrandFilter : state.brands[0].id;
   const defaultListe = ui.pnListeFilter || (listesForBrand(defaultBrand)[0] && listesForBrand(defaultBrand)[0].id) || '';
@@ -7255,7 +7255,7 @@ function openImportModalPN(){
     <div class="modal-head"><h3>Importer une liste de prix nets (Excel ou CSV)</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
       <div class="field-row">
-        <div class="field"><label>Marque de destination *</label>
+        <div class="field"><label>Fournisseur de destination *</label>
           <select id="impPN_brand" onchange="refreshImportPNListeOptions()">${state.brands.map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
         </div>
         <div class="field"><label>Liste de prix nets *</label>
@@ -7423,12 +7423,12 @@ function confirmImportPN(){
 }
 function openTarifForm(id){
   const t = id ? state.tarifs.find(x=>x.id===id) : null;
-  if(state.brands.length===0){ showToast('Ajoutez d\'abord une marque.'); return; }
+  if(state.brands.length===0){ showToast('Ajoutez d\'abord un fournisseur.'); return; }
   const defaultBrand = t ? t.brandId : (ui.tarifsBrandFilter!=='all'?ui.tarifsBrandFilter:state.brands[0].id);
   openModal(`
     <div class="modal-head"><h3>${t?'Modifier la référence':'Nouvelle référence'}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
-      <div class="field"><label>Marque *</label>
+      <div class="field"><label>Fournisseur *</label>
         <select id="f_brand" onchange="refreshTarifFamilleDatalist()">${state.brands.map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
       </div>
       <div class="field-row">
@@ -7540,7 +7540,7 @@ function deleteTarif(id){
 }
 function clearBrandTarifs(brandId){
   const items = state.tarifs.filter(t=>t.brandId===brandId);
-  if(items.length===0){ showToast('Aucun tarif à supprimer pour cette marque.'); return; }
+  if(items.length===0){ showToast('Aucun tarif à supprimer pour ce fournisseur.'); return; }
   if(!confirm(`Supprimer les ${items.length} référence(s) tarifaire(s) de ${brandName(brandId)} ? Retrouvables dans la Corbeille (en un seul bloc).`)) return;
   moveToTrash('tarifsBulk', `${items.length} référence(s) — ${brandName(brandId)}`, items);
   state.tarifs = state.tarifs.filter(t=>t.brandId!==brandId);
@@ -7557,13 +7557,13 @@ const IMPORT_TARGETS = [
 ];
 let importParsedRows = null;
 function openImportModal(defaultTarget){
-  if(state.brands.length===0){ showToast('Ajoutez d\'abord une marque.'); return; }
+  if(state.brands.length===0){ showToast('Ajoutez d\'abord un fournisseur.'); return; }
   importParsedRows = null;
   const defaultBrand = ui.tarifsBrandFilter!=='all' ? ui.tarifsBrandFilter : state.brands[0].id;
   openModal(`
     <div class="modal-head"><h3>Importer des tarifs (Excel ou CSV)</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
-      <div class="field"><label>Marque de destination *</label>
+      <div class="field"><label>Fournisseur de destination *</label>
         <select id="imp_brand">${state.brands.map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
       </div>
       <div class="field"><label>Prix importé</label>
@@ -7677,7 +7677,7 @@ function confirmImport(){
   // Le traitement est différé d'un tick pour laisser le navigateur afficher le message ci-dessus
   // avant de lancer la boucle (fichiers volumineux : plusieurs dizaines de milliers de lignes).
   setTimeout(async ()=>{
-    // Index O(1) des références déjà existantes pour cette marque (au lieu d'un .find() par ligne,
+    // Index O(1) des références déjà existantes pour ce fournisseur (au lieu d'un .find() par ligne,
     // dont le coût explose avec de gros fichiers — plusieurs dizaines de milliers de lignes).
     const index = new Map();
     state.tarifs.forEach(t=>{
@@ -7762,7 +7762,7 @@ function renderRecherche(){
         <input type="text" ${subTab==='prix'?'autofocus':''} placeholder="Tapez une référence ou un mot de la désignation…" value="${escapeHtml(ui.rechercheQuery)}" oninput="ui.rechercheQuery=this.value; debouncedRenderRechercheResults();">
       </div>
       <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:16px;">
-        <span class="helper" style="font-weight:600;padding-top:6px;white-space:nowrap;">Marque :</span>
+        <span class="helper" style="font-weight:600;padding-top:6px;white-space:nowrap;">Fournisseur :</span>
         <div id="rechercheBrandPills">${rechercheBrandPillsHtml()}</div>
       </div>
       <div id="rechercheResults">${renderRechercheResultsInner(results,q)}</div>
@@ -7810,7 +7810,7 @@ function rechercheBrandPillsHtml(){
   const cur = ui.rechercheBrand || 'all';
   const brands = state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name));
   return `<div class="pill-select">
-    <button class="${cur==='all'?'active':''}" onclick="setRechercheBrand('all')">Toutes les marques</button>
+    <button class="${cur==='all'?'active':''}" onclick="setRechercheBrand('all')">Tous les fournisseurs</button>
     ${brands.map(b=>`<button class="${cur===b.id?'active':''}" onclick="setRechercheBrand('${b.id}')">${escapeHtml(b.name)}</button>`).join('')}
   </div>`;
 }
@@ -7820,7 +7820,7 @@ function setRechercheBrand(brandId){
   if(pills) pills.innerHTML = rechercheBrandPillsHtml();
   renderRechercheResults();
 }
-/* Recherche de prix : tarif (prix HT) + prix nets des listes, pour la marque choisie (ou toutes) */
+/* Recherche de prix : tarif (prix HT) + prix nets des listes, pour le fournisseur choisi (ou tous) */
 function rechercheComputeRows(){
   const q = ui.rechercheQuery.trim().toLowerCase();
   if(!q) return [];
@@ -7828,7 +7828,7 @@ function rechercheComputeRows(){
   const brand = ui.rechercheBrand || 'all';
   const inBrand = t => brand==='all' || t.brandId===brand;
   const keyOf = (b,r)=> b+'|'+normalizeRefQuery(r);
-  // Prix nets, regroupés par marque + référence
+  // Prix nets, regroupés par fournisseur + référence
   const netsByKey = new Map();
   state.listesPrixNets.forEach(t=>{
     if(!inBrand(t)) return;
@@ -7891,8 +7891,8 @@ function renderRechercheResultsInner(all,q){
   const rows = all.tarif, devisRows = all.devis;
   const brand = ui.rechercheBrand || 'all';
   const brandLabel = brand==='all' ? '' : ` de ${escapeHtml(brandName(brand))}`;
-  if(!q) return `<div class="helper" style="text-align:center;padding:40px;">Tapez une référence${brandLabel} pour voir son prix — ${state.tarifs.length} références au tarif${brand==='all'?'':' (toutes marques)'}, et vos ${state.devis.length} devis / marchés.</div>`;
-  if(rows.length===0 && devisRows.length===0) return emptyState('⌕','Aucun résultat', brand==='all' ? 'Aucune référence ne correspond à cette recherche, ni au tarif ni dans vos devis.' : `Aucune référence ne correspond à cette recherche chez ${brandName(brand)}. Essayez « Toutes les marques ».`);
+  if(!q) return `<div class="helper" style="text-align:center;padding:40px;">Tapez une référence${brandLabel} pour voir son prix — ${state.tarifs.length} références au tarif${brand==='all'?'':' (tous fournisseurs)'}, et vos ${state.devis.length} devis / marchés.</div>`;
+  if(rows.length===0 && devisRows.length===0) return emptyState('⌕','Aucun résultat', brand==='all' ? 'Aucune référence ne correspond à cette recherche, ni au tarif ni dans vos devis.' : `Aucune référence ne correspond à cette recherche chez ${brandName(brand)}. Essayez « Tous les fournisseurs ».`);
   const shown = rows.slice(0,200);
   const DEV_CAP = 150;
   const shownDevis = devisRows.slice(0,DEV_CAP);
@@ -7902,7 +7902,7 @@ function renderRechercheResultsInner(all,q){
     ${rows.length===0?'<div class="helper" style="margin-bottom:14px;">Aucune référence au tarif ni en liste de prix nets pour cette recherche.</div>':`
     <div class="section-title">Au tarif et en listes de prix nets</div>
     <div class="table-wrap card" style="margin-bottom:24px;"><table>
-      <thead><tr><th>Marque</th><th>Référence</th><th>Désignation</th><th class="num">Prix HT (tarif)</th><th>Prix nets</th></tr></thead>
+      <thead><tr><th>Fournisseur</th><th>Référence</th><th>Désignation</th><th class="num">Prix HT (tarif)</th><th>Prix nets</th></tr></thead>
       <tbody>
         ${shown.map(r=>`
           <tr>
@@ -7918,7 +7918,7 @@ function renderRechercheResultsInner(all,q){
     ${devisRows.length===0?'':`
     <div class="section-title">Dans vos devis et marchés <span class="helper" style="display:inline;">— cliquez sur une ligne pour ouvrir le devis</span></div>
     <div class="table-wrap card"><table>
-      <thead><tr><th>Date</th><th>N°</th><th>Société</th><th>Marque</th><th>Référence</th><th>Désignation</th><th class="num">Qté</th><th class="num">PU tarif</th><th>Remise</th><th class="num">Prix d'achat HT</th><th class="num">Total HT</th></tr></thead>
+      <thead><tr><th>Date</th><th>N°</th><th>Société</th><th>Fournisseur</th><th>Référence</th><th>Désignation</th><th class="num">Qté</th><th class="num">PU tarif</th><th>Remise</th><th class="num">Prix d'achat HT</th><th class="num">Total HT</th></tr></thead>
       <tbody>
         ${shownDevis.map(x=>`
           <tr style="cursor:pointer;" onclick="openDevisForm('${x.d.id}')" title="Ouvrir ce ${x.d.type==='Marché'?'marché':'devis'}">
@@ -8157,7 +8157,7 @@ function renderParamListPanel(){
     </div>
     ${items.length===0?`<div class="helper" style="padding:14px 0;">Aucun élément pour l'instant.</div>`:`
     <div class="table-wrap"><table>
-      <thead><tr><th>Code</th><th>Libellé</th>${hasBrand?'<th>Marque</th>':''}${hasFamille?'<th>Famille</th>':''}${hasOutcome?'<th>Catégorie</th>':''}<th></th></tr></thead>
+      <thead><tr><th>Code</th><th>Libellé</th>${hasBrand?'<th>Fournisseur</th>':''}${hasFamille?'<th>Famille</th>':''}${hasOutcome?'<th>Catégorie</th>':''}<th></th></tr></thead>
       <tbody>
         ${items.map(it=>{
           const oc = hasOutcome ? etatAffaireColor(it.outcome||'encours') : null;
@@ -8165,7 +8165,7 @@ function renderParamListPanel(){
           <tr>
             <td style="font-weight:600;font-family:'Space Grotesk';">${escapeHtml(it.code||'—')}</td>
             <td>${escapeHtml(it.libelle||'')}</td>
-            ${hasBrand?`<td>${it.brandId?`<span class="chip" style="background:${brandColor(it.brandId)};"><span class="sq"></span>${escapeHtml(brandName(it.brandId))}</span>`:'<span class="helper">Toutes marques</span>'}</td>`:''}
+            ${hasBrand?`<td>${it.brandId?`<span class="chip" style="background:${brandColor(it.brandId)};"><span class="sq"></span>${escapeHtml(brandName(it.brandId))}</span>`:'<span class="helper">Tous fournisseurs</span>'}</td>`:''}
             ${hasFamille?`<td>${familleLabel(it.familleId)}</td>`:''}
             ${hasOutcome?`<td><span class="status-pill" style="background:${oc.bg};color:${oc.fg};">${outcomeLabel(it.outcome||'encours')}</span></td>`:''}
             <td class="table-actions">
@@ -8193,9 +8193,9 @@ function openParamItemForm(listKey, id){
     <div class="modal-body">
       <div class="field"><label>Code</label><input type="text" id="pi_code" value="${it?escapeHtml(it.code||''):''}" placeholder="Ex. K10"></div>
       <div class="field"><label>Libellé *</label><input type="text" id="pi_libelle" value="${it?escapeHtml(it.libelle||''):''}" placeholder="Ex. Kaufel 10"></div>
-      ${hasBrand?`<div class="field"><label>Marque de rattachement</label>
+      ${hasBrand?`<div class="field"><label>Fournisseur de rattachement</label>
         <select id="pi_brand">
-          <option value="">Toutes les marques</option>
+          <option value="">Tous les fournisseurs</option>
           ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${it&&it.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
         </select>
       </div>`:''}
@@ -8485,7 +8485,7 @@ function renderDevis(){
         </div>
         <div class="field" style="margin-bottom:0;max-width:200px;">
           <select onchange="ui.devisFilterBrand=this.value; updateDevisListOnly();">
-            <option value="all" ${(!ui.devisFilterBrand||ui.devisFilterBrand==='all')?'selected':''}>Toutes les marques</option>
+            <option value="all" ${(!ui.devisFilterBrand||ui.devisFilterBrand==='all')?'selected':''}>Tous les fournisseurs</option>
             ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.devisFilterBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
           </select>
         </div>
@@ -8595,7 +8595,7 @@ function openImportModalDevis(){
     <div class="modal-head"><h3>Importer des devis (Excel ou CSV)</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
       <div class="helper" style="margin-bottom:12px;">
-        Format attendu : <strong>une ligne par devis</strong> (ou une ligne par marque si un devis en comporte plusieurs), avec le numéro de devis, le client, la date, la marque et le montant total. Sans détail produit par produit : chaque devis importé aura une seule ligne globale reprenant ce montant.
+        Format attendu : <strong>une ligne par devis</strong> (ou une ligne par fournisseur si un devis en comporte plusieurs), avec le numéro de devis, le client, la date, le fournisseur et le montant total. Sans détail produit par produit : chaque devis importé aura une seule ligne globale reprenant ce montant.
         <br>Chaque client doit déjà exister dans Comagentco (recherché par société, puis par nom) — importez d'abord vos clients si besoin.
       </div>
       <label>Fichier</label>
@@ -8665,9 +8665,9 @@ function renderImportMappingDevis(){
     </div>
     <div class="field"><label>Commentaire</label><select id="impDevis_colNotes">${opts(g(/commentaire|note/i))}</select></div>
 
-    <div class="section-title">Marque et montant</div>
+    <div class="section-title">Fournisseur et montant</div>
     <div class="field-row">
-      <div class="field"><label>Marque</label><select id="impDevis_colMarque">${opts(g(/marque|fabricant/i))}</select></div>
+      <div class="field"><label>Fournisseur</label><select id="impDevis_colMarque">${opts(g(/marque|fournisseur|fabricant/i))}</select></div>
       <div class="field"><label>Montant total du devis (HT) *</label><select id="impDevis_colMontant">${opts(g(/montant|total.?ht|total.?devis|^total\b/i))}</select></div>
     </div>
     <div class="helper">${importParsedRowsDevis.length} ligne(s) détectée(s). Chaque ligne du fichier devient un devis avec une seule ligne globale reprenant le montant total — sans détail produit par produit.</div>
@@ -8756,7 +8756,7 @@ function confirmImportDevis(){
   if(skippedNoLines>0) msg += ` ${skippedNoLines} ignoré(s) — aucune ligne valide.`;
   if(skippedLines>0) msg += ` ${skippedLines} ligne(s) ignorée(s) (montant vide ou à 0).`;
   if(unmatchedClients.size>0) msg += ` Sociétés non reconnues : ${Array.from(unmatchedClients).slice(0,5).join(', ')}${unmatchedClients.size>5?'…':''} — créez-les d\'abord puis réessayez.`;
-  if(unmatchedBrands.size>0) msg += ` Marques non reconnues (lignes importées sans marque) : ${Array.from(unmatchedBrands).slice(0,5).join(', ')}${unmatchedBrands.size>5?'…':''}.`;
+  if(unmatchedBrands.size>0) msg += ` Fournisseurs non reconnus (lignes importées sans fournisseur) : ${Array.from(unmatchedBrands).slice(0,5).join(', ')}${unmatchedBrands.size>5?'…':''}.`;
   showToast(msg, 9000);
 }
 function clientSocieteLabel(clientId){
@@ -8832,7 +8832,7 @@ function renderDevisListInner(){
   if(list.length===0) return emptyState('▧','Aucun devis','Créez votre premier devis à partir de vos listes de prix.');
   return `
   <div class="card table-wrap"><table>
-    <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Marque(s)</th><th>Total HT</th><th>Apporteur</th><th>Statut devis</th><th>État de l'affaire</th><th>Suivi</th></tr></thead>
+    <thead><tr><th>N°</th><th>Type</th><th>Date</th><th>Société</th><th>Objet</th><th>Fournisseur(s)</th><th>Total HT</th><th>Apporteur</th><th>Statut devis</th><th>État de l'affaire</th><th>Suivi</th></tr></thead>
     <tbody>
       ${list.map(d=>{
         const t = devisTotal(d);
@@ -9088,7 +9088,7 @@ function commissionsTotals(){
   return {ca, commission};
 }
 function commissionForBrandPeriod(brandId, year, month){
-  // CA et commission tels que saisis manuellement dans l'onglet Commissions, pour une marque et une période (mois précis, ou année entière si mois=0)
+  // CA et commission tels que saisis manuellement dans l'onglet Commissions, pour un fournisseur et une période (mois précis, ou année entière si mois=0)
   if(month){
     return getCommissionEntry(brandId, year, month);
   }
@@ -9132,14 +9132,14 @@ function renderCommissionsTop5(){
   <div class="dash-grid" style="margin-bottom:22px;">
     <div class="card card-pad dash-card" style="grid-column:span ${DASH_SIZE_COLS[state.settings.commissionsTop5CaSize||'md']};${getCardHeight('commissions','top5-ca')?`height:${getCardHeight('commissions','top5-ca')}px;overflow:auto;`:''}">
       ${commissionsSizeToolsHtml(state.settings.commissionsTop5CaSize||'md', 'top5ca')}
-      <h3 style="margin:0 0 3px;font-size:14.5px;">🏆 Top 5 marques — CA</h3>
+      <h3 style="margin:0 0 3px;font-size:14.5px;">🏆 Top 5 fournisseurs — CA</h3>
       <div class="helper" style="margin-bottom:12px;">${periodLabel}</div>
       ${renderList(topCa, 'ca', 'var(--accent)')}
       ${cardResizeHandleHtml('commissions','top5-ca')}
     </div>
     <div class="card card-pad dash-card" style="grid-column:span ${DASH_SIZE_COLS[state.settings.commissionsTop5CommissionSize||'md']};${getCardHeight('commissions','top5-commission')?`height:${getCardHeight('commissions','top5-commission')}px;overflow:auto;`:''}">
       ${commissionsSizeToolsHtml(state.settings.commissionsTop5CommissionSize||'md', 'top5commission')}
-      <h3 style="margin:0 0 3px;font-size:14.5px;">🏆 Top 5 marques — Commission</h3>
+      <h3 style="margin:0 0 3px;font-size:14.5px;">🏆 Top 5 fournisseurs — Commission</h3>
       <div class="helper" style="margin-bottom:12px;">${periodLabel}</div>
       ${renderList(topCommission, 'commission', 'var(--success)')}
       ${cardResizeHandleHtml('commissions','top5-commission')}
@@ -9151,7 +9151,7 @@ function renderCommissions(){
   const totals = commissionsTotals();
   return `
   <div class="topbar">
-    <div><h1>Commissions</h1><div class="sub">CA et montant de commission saisis manuellement, par marque / année / mois</div></div>
+    <div><h1>Commissions</h1><div class="sub">CA et montant de commission saisis manuellement, par fournisseur / année / mois</div></div>
     <div style="display:flex;gap:64px;align-items:flex-start;">
       <div style="text-align:right;">
         <div class="label" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;margin-bottom:4px;">Total CA</div>
@@ -9176,9 +9176,9 @@ function renderCommissions(){
         ${MOIS_LABELS.map((m,i)=>`<option value="${i+1}" ${ui.commissionsMonth===i+1?'selected':''}>${m}</option>`).join('')}
       </select>
     </div>
-    <div class="field" style="margin-bottom:0;max-width:220px;"><label style="margin-bottom:4px;">Marque</label>
+    <div class="field" style="margin-bottom:0;max-width:220px;"><label style="margin-bottom:4px;">Fournisseur</label>
       <select onchange="ui.commissionsBrand=this.value; render();">
-        <option value="all" ${ui.commissionsBrand==='all'?'selected':''}>Toutes les marques</option>
+        <option value="all" ${ui.commissionsBrand==='all'?'selected':''}>Tous les fournisseurs</option>
         ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.commissionsBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select>
     </div>
@@ -9241,11 +9241,11 @@ function commissionsSortPillsHtml(){
   `;
 }
 function renderCommissionsTableInner(){
-  if(state.brands.length===0) return emptyState('%','Aucune marque','Ajoutez vos marques / fournisseurs pour saisir leurs commissions.');
+  if(state.brands.length===0) return emptyState('%','Aucun fournisseur','Ajoutez vos fournisseurs pour saisir leurs commissions.');
   const year = ui.commissionsYear || 0;
   const month = year ? (ui.commissionsMonth||0) : 0;
   const brandsList = ui.commissionsBrand==='all' ? state.brands : state.brands.filter(b=>b.id===ui.commissionsBrand);
-  if(brandsList.length===0) return emptyState('%','Marque introuvable','Sélectionnez une autre marque.');
+  if(brandsList.length===0) return emptyState('%','Fournisseur introuvable','Sélectionnez un autre fournisseur.');
 
   if(year && month){
     // Saisie directe pour un mois précis d'une année précise
@@ -9257,7 +9257,7 @@ function renderCommissionsTableInner(){
         return sortDir==='asc' ? av-bv : bv-av;
       });
     return renderCustomizableTable('commissionsMonth', [
-        {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
+        {key:'marque', label:'Fournisseur', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
         {key:'ca', label:`CA (${MOIS_LABELS[month-1]} ${year})`, defaultWidth:150, cell:r=>`<input type="number" data-nfmt="1" step="0.01" min="0" value="${r.entry.ca||''}" placeholder="0" style="max-width:140px;" onchange="setCommissionEntry('${r.b.id}',${year},${month},'ca',this.value); render();">`},
         {key:'commission', label:'Montant commission', defaultWidth:170, cell:r=>`<input type="number" data-nfmt="1" step="0.01" min="0" value="${r.entry.commission||''}" placeholder="0" style="max-width:140px;font-weight:700;color:var(--success);" onchange="setCommissionEntry('${r.b.id}',${year},${month},'commission',this.value); render();">`},
         {key:'commentaire', label:'Commentaire', defaultWidth:260, cell:r=>`<textarea rows="1" placeholder="—" onchange="setCommissionComment('${r.b.id}',${year},${month},this.value);">${escapeHtml(r.entry.commentaire||'')}</textarea>`},
@@ -9276,10 +9276,10 @@ function renderCommissionsTableInner(){
       return sortDir==='asc' ? av-bv : bv-av;
     });
     return `
-      <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur le nom d'une marque pour ouvrir la saisie de toute l'année dans une fenêtre.</div>
+      <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur le nom d'un fournisseur pour ouvrir la saisie de toute l'année dans une fenêtre.</div>
       ${renderCustomizableTable('commissionsYear', [
         {key:'rang', label:'#', defaultWidth:50, cellStyle:'font-weight:700;color:var(--muted);', cell:(r)=>String(rows.indexOf(r)+1)},
-        {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};cursor:pointer;" onclick="event.stopPropagation(); openCommissionYearModal('${r.b.id}')" title="Cliquer pour ouvrir la saisie de l'année complète"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
+        {key:'marque', label:'Fournisseur', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};cursor:pointer;" onclick="event.stopPropagation(); openCommissionYearModal('${r.b.id}')" title="Cliquer pour ouvrir la saisie de l'année complète"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
         {key:'ca', label:`CA (${year})`, defaultWidth:150, cellClass:'num', cellStyle:'font-weight:600;', cell:r=>fmtMoney(r.ca)},
         {key:'commission', label:'Montant commission', defaultWidth:170, cellClass:'num', cellStyle:'font-weight:700;color:var(--success);', cell:r=>fmtMoney(r.commission)},
       ], rows)}
@@ -9306,14 +9306,14 @@ function renderCommissionsTableInner(){
     <div class="helper" style="margin-bottom:10px;">Vue cumulée sur toutes les années saisies. Sélectionnez une année pour modifier les montants.</div>
     ${renderCustomizableTable('commissionsAllYears', [
       {key:'rang', label:'#', defaultWidth:50, cellStyle:'font-weight:700;color:var(--muted);', cell:(r)=>String(rows.indexOf(r)+1)},
-      {key:'marque', label:'Marque', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
+      {key:'marque', label:'Fournisseur', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandColor(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
       {key:'ca', label:'CA cumulé', defaultWidth:150, cellClass:'num', cellStyle:'font-weight:600;', cell:r=>fmtMoney(r.ca)},
       {key:'commission', label:'Commission cumulée', defaultWidth:170, cellClass:'num', cellStyle:'font-weight:700;color:var(--success);', cell:r=>fmtMoney(r.commission)},
     ], rows)}
   `;
 }
 
-/* ---- Saisie des commissions d'une marque sur l'année complète (fenêtre dédiée) ---- */
+/* ---- Saisie des commissions d'un fournisseur sur l'année complète (fenêtre dédiée) ---- */
 let commissionModalState = null; // {brandId, year}
 function openCommissionYearModal(brandId){
   const year = ui.commissionsYear || new Date().getFullYear();
@@ -9325,7 +9325,7 @@ function openCommissionYearModal(brandId){
 function commissionYearModalHtml(){
   const {brandId, year} = commissionModalState;
   const b = state.brands.find(x=>x.id===brandId);
-  if(!b) return '<div class="modal-body">Marque introuvable.</div>';
+  if(!b) return '<div class="modal-body">Fournisseur introuvable.</div>';
   const years = commissionsAvailableYears().slice().sort((a,b)=>a-b);
   return `
     <div class="modal-head">
@@ -9551,7 +9551,7 @@ async function importDevisPdfFile(file){
       const content = await page.getTextContent();
       groupPdfTextIntoLines(content.items).forEach(l=>{ l.page = p; lines.push(l); });
       if(p===1){
-        // L'en-tête (fournisseur/marque à gauche, client à droite) forme deux blocs côte à côte à des
+        // L'en-tête (fournisseur à gauche, client à droite) forme deux blocs côte à côte à des
         // hauteurs souvent très proches : les lire comme une seule colonne mélange les deux. On extrait
         // donc séparément le texte de chaque moitié de la 1ère page.
         const viewport = page.getViewport({scale:1});
@@ -9662,12 +9662,12 @@ function parseComagentcoDevisPdf(lines, page1RightText, page1LeftText){
   if(bestClient) result.clientId = bestClient.id;
   else result.warnings.push("Société cliente non identifiée automatiquement — sélectionnez-la manuellement.");
 
-  // Marque du devis : le bloc "FABRICANT :" se trouve en haut à GAUCHE de la 1ère page — on y cherche la
-  // marque en priorité (nom de la marque, ou son site internet qui contient souvent le même mot), avant
+  // Fournisseur du devis : le bloc "FABRICANT :" se trouve en haut à GAUCHE de la 1ère page — on y cherche la
+  // fournisseur en priorité (nom du fournisseur, ou son site internet qui contient souvent le même mot), avant
   // de chercher plus largement dans tout le document si rien n'y est trouvé.
-  // Un devis ne concerne qu'un seul fournisseur (le bloc "FABRICANT :") : on ne retient donc qu'UNE seule
-  // marque — la meilleure correspondance trouvée — plutôt qu'une liste, pour ne jamais mélanger les
-  // catalogues de plusieurs marques différentes sur les lignes d'un même devis.
+  // Un devis ne concerne qu'un seul fournisseur (le bloc "FABRICANT :") : on ne retient donc qu'UN seul
+  // fournisseur — la meilleure correspondance trouvée — plutôt qu'une liste, pour ne jamais mélanger les
+  // catalogues de plusieurs fournisseurs différents sur les lignes d'un même devis.
   const bestBrandMatch = (text)=>{
     const upper = text.toUpperCase();
     const flat = stripSpaces(text);
@@ -9688,7 +9688,7 @@ function parseComagentcoDevisPdf(lines, page1RightText, page1LeftText){
   };
   let matchedBrand = page1LeftText ? bestBrandMatch(page1LeftText) : null;
   if(!matchedBrand) matchedBrand = bestBrandMatch(fullText);
-  if(!matchedBrand) result.warnings.push("Marque du devis non identifiée automatiquement — vérifiez la marque de chaque ligne.");
+  if(!matchedBrand) result.warnings.push("Fournisseur du devis non identifié automatiquement — vérifiez le fournisseur de chaque ligne.");
   const brandPool = matchedBrand ? [matchedBrand] : state.brands;
   const allRefs = [];
   brandPool.forEach(b=>{
@@ -9926,9 +9926,9 @@ function openEditDevisLineModal(i){
       <input type="text" id="editLine_search" placeholder="Rechercher une référence ou une désignation…" oninput="debouncedEditLineSearch(this.value, ${i})" autocomplete="off">
       <div id="editLine_results" style="margin-top:8px;"></div>
       <div class="divider"></div>
-      <div class="helper" style="margin-bottom:8px;">Ou modifiez directement la marque / la référence / la désignation (utile pour une ligne hors catalogue) :</div>
+      <div class="helper" style="margin-bottom:8px;">Ou modifiez directement le fournisseur / la référence / la désignation (utile pour une ligne hors catalogue) :</div>
       <div class="field-row">
-        <div class="field"><label>Marque</label>
+        <div class="field"><label>Fournisseur</label>
           <select onchange="draft.lines[${i}].brandId=this.value; refreshDevisModal();">
             ${state.brands.map(b=>`<option value="${b.id}" ${l.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
           </select>
@@ -10112,7 +10112,7 @@ function renderDevisTemplates(){
   <div class="helper" style="margin-bottom:14px;">Créez un modèle une fois, puis dupliquez-le en vrai devis autant de fois que nécessaire — les lignes et notes sont reprises, il ne restera qu'à choisir le client.</div>
   ${state.devisTemplates.length===0?emptyState('📐','Aucun modèle','Créez votre premier modèle de devis pour gagner du temps sur vos prochains devis récurrents.'):`
   <div class="table-wrap card"><table>
-    <thead><tr><th>Nom du modèle</th><th>Marque(s)</th><th>Lignes</th><th></th></tr></thead>
+    <thead><tr><th>Nom du modèle</th><th>Fournisseur(s)</th><th>Lignes</th><th></th></tr></thead>
     <tbody>
       ${state.devisTemplates.slice().sort((a,b)=>(a.templateName||'').localeCompare(b.templateName||'')).map(tpl=>{
         const brandIds = [...new Set((tpl.lines||[]).map(l=>l.brandId))].filter(Boolean);
@@ -10353,9 +10353,9 @@ function devisFormHtml(){
             <option value="Marché" ${draft.type==='Marché'?'selected':''}>Marché</option>
           </select>
         </div>
-        <div class="field" style="max-width:200px;"><label>Marque</label>
+        <div class="field" style="max-width:200px;"><label>Fournisseur</label>
           <select id="d_filterBrand" onchange="draft.filterBrandId=this.value; refreshDevisModal();">
-            <option value="" ${!draft.filterBrandId?'selected':''}>Toutes les marques</option>
+            <option value="" ${!draft.filterBrandId?'selected':''}>Tous les fournisseurs</option>
             ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${draft.filterBrandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
           </select>
           <div class="helper">Filtre la recherche de référence ci-dessous.</div>
@@ -10456,7 +10456,7 @@ function devisFormHtml(){
     </div>
   `;
 }
-/* ---- Franco de port par type d'articles (fiche marque) ---- */
+/* ---- Franco de port par type d'articles (fiche fournisseur) ---- */
 let brandFrancoRulesDraft = [];
 let brandFrancoBrandId = null;
 function brandFrancoFamilyOptions(){
@@ -10475,7 +10475,7 @@ function renderBrandFrancoRules(){
   return `
     <datalist id="dl_francoFam">${opts.fam.map(x=>`<option value="${escapeHtml(x)}">`).join('')}</datalist>
     <datalist id="dl_francoSous">${opts.sous.map(x=>`<option value="${escapeHtml(x)}">`).join('')}</datalist>
-    ${rules.length===0?'<div class="helper" style="margin-bottom:8px;">Aucune règle : le franco général ci-dessus s\'applique à tout le devis de cette marque.</div>':''}
+    ${rules.length===0?'<div class="helper" style="margin-bottom:8px;">Aucune règle : le franco général ci-dessus s\'applique à tout le devis de ce fournisseur.</div>':''}
     ${rules.map((r,i)=>`
       <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:var(--surface-2);">
         <div class="field-row">
@@ -10527,8 +10527,8 @@ function francoRuleForLine(brand, line){
   return best;
 }
 function devisFrancoAlerts(){
-  // Une alerte par marque : pour chaque type d'articles (règle de la marque, ou franco général) dont le
-  // franco n'est pas atteint. Aucune alerte si des frais de port ont déjà été ajoutés pour la marque.
+  // Une alerte par fournisseur : pour chaque type d'articles (règle du fournisseur, ou franco général) dont le
+  // franco n'est pas atteint. Aucune alerte si des frais de port ont déjà été ajoutés pour le fournisseur.
   if(draft.isTemplate) return [];
   const result = [];
   const brandIds = [...new Set((draft.lines||[]).filter(l=>!l.isTitleLine && !l.isFraisPort && l.brandId).map(l=>l.brandId))];
@@ -10561,7 +10561,7 @@ function devisFrancoAlertHtml(){
       <div style="flex:1;min-width:240px;">
         <strong>🚚 Franco de port non atteint — ${escapeHtml(a.brand.name)}</strong>
         ${a.below.map(x=>`<div class="helper" style="margin-top:2px;">${x.label?escapeHtml(x.label)+' : ':''}${fmtMoney(x.subtotal)} pour un franco de ${fmtMoney(x.franco)}.</div>`).join('')}
-        <div class="helper" style="margin-top:4px;">${a.frais>0?`Pensez à ajouter les frais de port : <strong>${fmtMoney(a.frais)}</strong>.`:`Aucun montant de frais de port n'est renseigné sur la fiche de cette marque.`}</div>
+        <div class="helper" style="margin-top:4px;">${a.frais>0?`Pensez à ajouter les frais de port : <strong>${fmtMoney(a.frais)}</strong>.`:`Aucun montant de frais de port n'est renseigné sur la fiche de ce fournisseur.`}</div>
       </div>
       ${a.frais>0?`<button type="button" class="btn btn-sm btn-primary" onclick="addFraisPortLine('${a.brand.id}', ${a.frais})">+ Ajouter les frais de port</button>`:''}
     </div>`).join('');
@@ -10597,7 +10597,7 @@ function devisLinesEditorHtml(){
           <div class="field-row">
             <div class="field" style="margin-bottom:8px;"><label>Référence</label><input type="text" id="fl_ref" placeholder="Ex. DIVERS-01"></div>
             <div class="field" style="margin-bottom:8px;"><label>Désignation</label><input type="text" id="fl_desig" placeholder="Ex. Prestation sur mesure"></div>
-            <div class="field" style="margin-bottom:8px;max-width:220px;"><label>Marque</label>
+            <div class="field" style="margin-bottom:8px;max-width:220px;"><label>Fournisseur</label>
               <select id="fl_brand">${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${(draft.filterBrandId||devisSoleBrandId())===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
             </div>
           </div>
@@ -10796,7 +10796,7 @@ function setDevisAttention(contactId){
   refreshDevisModal();
 }
 const DEVIS_LINES_COLUMNS = [
-  {key:'marque', label:'Marque', defaultWidth:80},
+  {key:'marque', label:'Fournisseur', defaultWidth:80},
   {key:'ref', label:'Code article', defaultWidth:70},
   {key:'desig', label:'Désignation', defaultWidth:260, center:true},
   {key:'qty', label:'Qté', defaultWidth:110},
@@ -11067,8 +11067,8 @@ function devisLineDragEnd(evt){
   document.querySelectorAll('.devis-line-dragover').forEach(el=>el.classList.remove('devis-line-dragover'));
 }
 function brandIdsMatchingName(brandId){
-  // Tolère les doublons de fiches marque (même nom, identifiants internes différents) :
-  // renvoie tous les identifiants de marque partageant le même nom que celui sélectionné.
+  // Tolère les doublons de fiches fournisseur (même nom, identifiants internes différents) :
+  // renvoie tous les identifiants de fournisseur partageant le même nom que celui sélectionné.
   const ref = state.brands.find(b=>b.id===brandId);
   if(!ref) return [brandId];
   const name = ref.name.trim().toLowerCase();
@@ -11085,8 +11085,8 @@ function devisSearchRefsRun(q){
   if(draft.filterBrandId){
     const matchingIds = brandIdsMatchingName(draft.filterBrandId);
     const filtered = pool.filter(t=>matchingIds.includes(t.brandId));
-    // Si le filtre marque ne renvoie rien du tout, on retente sans filtre pour distinguer
-    // "aucun résultat" de "résultat existant mais rattaché à une autre fiche marque".
+    // Si le filtre fournisseur ne renvoie rien du tout, on retente sans filtre pour distinguer
+    // "aucun résultat" de "résultat existant mais rattaché à une autre fiche fournisseur".
     const wouldMatchWithoutFilter = pool.some(t=>tarifMatchesQuery(t, q, qNorm));
     if(filtered.filter(t=>tarifMatchesQuery(t, q, qNorm)).length===0 && wouldMatchWithoutFilter) noBrandMatch = true;
     pool = filtered;
@@ -11094,7 +11094,7 @@ function devisSearchRefsRun(q){
   const results = pool.filter(t=>tarifMatchesQuery(t, q, qNorm)).slice(0,20);
   if(results.length===0){
     const brandNote = draft.filterBrandId ? ` (filtré sur ${escapeHtml(brandName(draft.filterBrandId))})` : '';
-    const dupHint = noBrandMatch ? `<div class="autocomplete-item" style="color:var(--danger,#B3392C);">⚠ Cette référence existe mais sous une <strong>autre fiche marque</strong> — vérifiez s'il n'y a pas deux fiches "${escapeHtml(brandName(draft.filterBrandId))}" dans l'onglet Marques, ou repassez sur "Toutes les marques" ci-dessus.</div>` : '';
+    const dupHint = noBrandMatch ? `<div class="autocomplete-item" style="color:var(--danger,#B3392C);">⚠ Cette référence existe mais sous une <strong>autre fiche fournisseur</strong> — vérifiez s'il n'y a pas deux fiches "${escapeHtml(brandName(draft.filterBrandId))}" dans l'onglet Fournisseurs, ou repassez sur "Tous les fournisseurs" ci-dessus.</div>` : '';
     box.innerHTML = `<div class="autocomplete-list">${dupHint}<div class="autocomplete-item" style="cursor:pointer;" onmousedown="prefillFreeLine('${escapeJsStr(q)}')">Aucun résultat pour « ${escapeHtml(q)} »${brandNote} — <strong>ajouter comme ligne hors catalogue</strong></div></div>`;
     return;
   }
@@ -11180,7 +11180,7 @@ function saveListeDates(listeId){
 }
 function clientRemiseRules(c){
   if(c.remisesTarif && c.remisesTarif.length) return c.remisesTarif;
-  // Compatibilité avec l'ancien format (une seule remise globale par client, sans marque/famille)
+  // Compatibilité avec l'ancien format (une seule remise globale par client, sans fournisseur/famille)
   if(c.remise1||c.remise2||c.remise3) return [{id:'legacy', brandId:'', familleArticle:'', remise1:c.remise1||0, remise2:c.remise2||0, remise3:c.remise3||0}];
   return [];
 }
@@ -11189,7 +11189,7 @@ function findClientRemiseRule(clientId, brandId, familleArticle){
   if(!c) return null;
   const rules = clientRemiseRules(c);
   const fam = (familleArticle||'').toLowerCase();
-  // Priorité : marque + famille > marque seule > famille seule > règle globale
+  // Priorité : fournisseur + famille > fournisseur seule > famille seule > règle globale
   let best = null, bestScore = -1;
   rules.forEach(r=>{
     const brandMatch = !r.brandId || r.brandId===brandId;
@@ -11203,7 +11203,7 @@ function findClientRemiseRule(clientId, brandId, familleArticle){
 function computeLinePricing(t, dateStr){
   const netEntry = findClientNetPriceEntry(draft.clientId, t.brandId, t.reference, dateStr);
   if(!netEntry){
-    // Si le client a une liste de prix nets pour cette marque mais qu'elle n'est pas valide à la date du devis,
+    // Si le client a une liste de prix nets pour ce fournisseur mais qu'elle n'est pas valide à la date du devis,
     // on le signale (au lieu de laisser croire silencieusement qu'aucune liste n'existe).
     const c = state.clients.find(x=>x.id===draft.clientId);
     const listeIds = c ? (c.netPriceListeIds||[]) : [];
@@ -11233,7 +11233,7 @@ function computeLinePricing(t, dateStr){
     netPriceOverride = netPrice;
   } else {
     // Pas de liste de prix nets pour cette référence : on applique la règle de remise tarif du
-    // client la plus spécifique (marque + famille > marque > famille > règle globale), si définie.
+    // client la plus spécifique (fournisseur + famille > fournisseur > famille > règle globale), si définie.
     const rule = findClientRemiseRule(draft.clientId, t.brandId, t.codeFamilleArticle);
     if(rule && (rule.remise1||rule.remise2||rule.remise3)){
       remise1 = rule.remise1||0;
@@ -11362,13 +11362,13 @@ function saveDraftDevis(thenAction, keepOpen){
     if(!draft.numberEditedManually){
       draft.number = consumeNextDevisNumber(draft.type);
     } else if(state.devis.some(d=>d.number===draft.number && devisBrandsOverlap(d, draft))){
-      showToast(`⚠ Le numéro "${draft.number}" est déjà utilisé par un autre devis de la même marque — vérifiez-le si besoin (l'enregistrement continue quand même).`, 5500);
+      showToast(`⚠ Le numéro "${draft.number}" est déjà utilisé par un autre devis du même fournisseur — vérifiez-le si besoin (l'enregistrement continue quand même).`, 5500);
     }
     finalizeSaveDraftDevis(false, devisSaveKeepOpen);
     return;
   }
   if(draft.numberEditedManually && state.devis.some(d=>d.number===draft.number && d.id!==draft.id && devisBrandsOverlap(d, draft))){
-    showToast(`⚠ Le numéro "${draft.number}" est déjà utilisé par un autre devis de la même marque — vérifiez-le si besoin (l'enregistrement continue quand même).`, 5500);
+    showToast(`⚠ Le numéro "${draft.number}" est déjà utilisé par un autre devis du même fournisseur — vérifiez-le si besoin (l'enregistrement continue quand même).`, 5500);
   }
   // Devis déjà enregistré : on demande d'abord si on écrase la version existante ou si on crée une nouvelle version numérotée.
   openDevisVersionChoiceModal();
@@ -11691,7 +11691,7 @@ function openDevisVersionViewer(docId, versionId){
         Document actuel : <strong>${escapeHtml(doc.number)}</strong>
       </div>
       <div class="table-wrap card"><table class="no-col-resize">
-        <thead><tr><th>Marque</th><th>Référence</th><th>Désignation</th><th class="num">Qté</th><th class="num">PU tarif</th><th>Remise</th><th class="num">Prix d'achat HT</th><th class="num">Total HT</th></tr></thead>
+        <thead><tr><th>Fournisseur</th><th>Référence</th><th>Désignation</th><th class="num">Qté</th><th class="num">PU tarif</th><th>Remise</th><th class="num">Prix d'achat HT</th><th class="num">Total HT</th></tr></thead>
         <tbody>
           ${lines.map(l=> l.isTitleLine
             ? `<tr><td colspan="8" style="background:var(--surface-2);font-weight:700;">${cleanRichHtml(l.designation||'')}</td></tr>`
@@ -11848,7 +11848,7 @@ async function exportDevisPdf(id, mode){
   pdfDoubleVLine(doc, div1X, boxTop, boxTop+boxH);
   pdfDoubleVLine(doc, div2X, boxTop, boxTop+boxH);
 
-  // -- Colonne 1 : logo de la marque + représentant -- (centrée sur le logo)
+  // -- Colonne 1 : logo du fournisseur + représentant -- (centrée sur le logo)
   const logoMaxW = div1X - col1X - 4;
   const centerX1 = col1X + logoMaxW/2;
   let c1y = boxTop;
@@ -11878,7 +11878,7 @@ async function exportDevisPdf(id, mode){
   const reprPhone = s.portable || s.companyPhone;
   if(reprPhone){ doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(90); doc.text(reprPhone, centerX1, c1y, {align:'center'}); c1y += 4; }
 
-  // -- Colonne 2 : identification du fabricant (marque unique) ou émetteur -- (centrée)
+  // -- Colonne 2 : identification du fabricant (fournisseur unique) ou émetteur -- (centrée)
   let c2y = boxTop + 4;
   if(soleBrand){
     doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(50);
@@ -12371,7 +12371,7 @@ function openSendDevisModal(id){
         </div>
       `}
       <div class="field"><label>Destinataire(s) *</label><input type="text" data-email="1" id="sendmail_to" value="${escapeHtml(clientEmail)}" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
-      <div class="field"><label>Copie (CC) <span class="helper" style="display:inline;">— reprise automatiquement du champ "Email copie devis" de la marque, modifiable ici au cas par cas</span></label><input type="text" data-email="1" id="sendmail_cc" value="${escapeHtml(defaultCc)}" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
+      <div class="field"><label>Copie (CC) <span class="helper" style="display:inline;">— reprise automatiquement du champ "Email copie devis" du fournisseur, modifiable ici au cas par cas</span></label><input type="text" data-email="1" id="sendmail_cc" value="${escapeHtml(defaultCc)}" placeholder="email1@exemple.fr, email2@exemple.fr"></div>
       <div class="field"><label>Objet</label><input type="text" id="sendmail_subject" value="${escapeHtml(defaultSubject)}"></div>
       <div class="field-row" style="align-items:flex-end;">
         <div class="field" style="max-width:220px;">
@@ -12387,7 +12387,7 @@ function openSendDevisModal(id){
       <div class="field">
         <label>Signature — ${escapeHtml(soleBrand.name)} <span class="helper" style="display:inline;">${connected?'(jointe automatiquement, images comprises)':'(le texte sera ajouté ; les images ne peuvent pas s\'afficher en mode gratuit sans Outlook)'}</span></label>
         <div class="signature-editor" style="background:var(--surface-2);">${signatureHtmlForPreview}</div>
-        <div class="helper" style="margin-top:6px;">Modifiable dans la fiche marque <strong>${escapeHtml(soleBrand.name)}</strong>, onglet "Signature de mail".</div>
+        <div class="helper" style="margin-top:6px;">Modifiable dans la fiche fournisseur <strong>${escapeHtml(soleBrand.name)}</strong>, onglet "Signature de mail".</div>
       </div>
       `:`
       <div class="helper" style="margin-bottom:14px;">Aucune signature n'est ajoutée automatiquement — laissez ce champ tel quel pour que la signature configurée dans votre messagerie (Outlook) s'applique.</div>
@@ -12579,10 +12579,10 @@ function computeRapportData(brandId, year, month){
       if(!periodMatchesReport(h.date, year, month)) return;
       const tags = historyBrandIds(h);
       if(tags.length>0){
-        // Note taguée avec une ou plusieurs marques précises : ne remonte que dans le(s) rapport(s) de ces marques
+        // Note taguée avec un ou plusieurs fournisseurs précis : ne remonte que dans le(s) rapport(s) de ces fournisseurs
         if(tags.includes(brandId)) meetings.push({client:c, ...h, brandNote:(h.brandNotes||{})[brandId]||''});
       } else {
-        // Note non taguée (ancienne saisie ou générale) : conserve l'ancien comportement, rattachée à toute marque déjà achetée par ce client
+        // Note non taguée (ancienne saisie ou générale) : conserve l'ancien comportement, rattachée à tout fournisseur déjà acheté par ce client
         if(clientIds.has(c.id)) meetings.push({client:c, ...h});
       }
     });
@@ -12778,7 +12778,7 @@ function rptResize(id, delta){
 
 function renderRapport(){
   if(state.brands.length===0){
-    return `<div class="topbar"><div><h1>Rapport</h1><div class="sub">Synthèse d'activité par marque</div></div></div>${emptyState('▩',"Ajoutez d'abord une marque","Le rapport se construit marque par marque.")}`;
+    return `<div class="topbar"><div><h1>Rapport</h1><div class="sub">Synthèse d'activité par fournisseur</div></div></div>${emptyState('▩',"Ajoutez d'abord un fournisseur","Le rapport se construit fournisseur par fournisseur.")}`;
   }
   if(!ui.rapportBrand || !state.brands.some(b=>b.id===ui.rapportBrand)) ui.rapportBrand = state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name))[0].id;
   const years = availableYears();
@@ -12825,7 +12825,7 @@ function renderRapport(){
 
   return `
   <div class="topbar">
-    <div><h1>Rapport</h1><div class="sub">Synthèse d'activité par marque, par mois ou par année — ${escapeHtml(periodLabel)}</div></div>
+    <div><h1>Rapport</h1><div class="sub">Synthèse d'activité par fournisseur, par mois ou par année — ${escapeHtml(periodLabel)}</div></div>
     <div style="display:flex;gap:8px;">
       <button class="btn btn-sm btn-ghost" onclick="ui.rapportFullscreen=!ui.rapportFullscreen; render();" title="${ui.rapportFullscreen?'Revenir à l\'affichage normal':'Afficher le rapport en plein écran'}">${ui.rapportFullscreen?'✕ Quitter le plein écran':'⛶ Plein écran'}</button>
       <button type="button" class="btn btn-sm btn-ghost" onclick="if(confirm('Réinitialiser la disposition du rapport ?')){ state.rapportLayout={order:[],sizes:{},heights:{}}; persist('rapportLayout'); render(); }" title="Réinitialiser l'ordre, la largeur et la hauteur des cartes">Réinitialiser la disposition</button>
@@ -12836,7 +12836,7 @@ function renderRapport(){
   </div>
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
     <div class="field" style="margin-bottom:0;max-width:260px;">
-      <label>Marque</label>
+      <label>Fournisseur</label>
       <select onchange="ui.rapportBrand=this.value; render();">
         ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.rapportBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select>
@@ -12867,7 +12867,7 @@ function rapportDevisSectionBody(list, lineAmount){
   const withNotes = list.some(d=>devisSuiviNotesSorted(d).length>0);
   return `
   <div class="table-wrap"><table>
-    <thead><tr><th>N°</th><th>Date</th><th>Client</th><th>Objet</th><th>État de l'affaire</th><th>Montant (marque)</th>${withNotes?'<th>Commentaires de suivi</th>':''}</tr></thead>
+    <thead><tr><th>N°</th><th>Date</th><th>Client</th><th>Objet</th><th>État de l'affaire</th><th>Montant (fournisseur)</th>${withNotes?'<th>Commentaires de suivi</th>':''}</tr></thead>
     <tbody>
       ${list.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(d=>{
         const oc = devisEtatColor(d);
@@ -12911,7 +12911,7 @@ async function exportRapportPdf(brandId, year, month, mode, sections){
     devisEnCours:true, devisGagnes:true, devisPerdus:true, rdv:true
   };
   const brand = state.brands.find(b=>b.id===brandId);
-  if(!brand){ showToast('Sélectionnez une marque.'); return; }
+  if(!brand){ showToast('Sélectionnez un fournisseur.'); return; }
   const data = computeRapportData(brandId, year, month);
   const s = state.settings;
   const { jsPDF } = window.jspdf;
@@ -13022,7 +13022,7 @@ async function exportRapportPdf(brandId, year, month, mode, sections){
   }
 }
 function openSendRapportModal(){
-  if(!ui.rapportBrand){ showToast('Sélectionnez une marque.'); return; }
+  if(!ui.rapportBrand){ showToast('Sélectionnez un fournisseur.'); return; }
   const brand = state.brands.find(b=>b.id===ui.rapportBrand);
   const periodLabel = ui.rapportMonth ? `${MOIS_LABELS[ui.rapportMonth-1]} ${ui.rapportYear}` : `Année ${ui.rapportYear}`;
   const data = computeRapportData(ui.rapportBrand, ui.rapportYear, ui.rapportMonth);
@@ -13161,23 +13161,23 @@ function renderTempsGains(){
 
   const sortBy = ui.tempsGainsSortBy||'importance', sortDir = ui.tempsGainsSortDir||'desc';
 
-  // Importance par marque : même principe (rentabilité horaire), mais avec le CA de l'onglet Commissions
-  // (saisie manuelle par marque/année/mois) plutôt que le CA calculé à partir des devis, et un temps passé
-  // basé sur les marques cochées sur chaque rendez-vous des clients actuellement filtrés.
+  // Importance par fournisseur : même principe (rentabilité horaire), mais avec le CA de l'onglet Commissions
+  // (saisie manuelle par fournisseur/année/mois) plutôt que le CA calculé à partir des devis, et un temps passé
+  // basé sur les fournisseurs cochés sur chaque rendez-vous des clients actuellement filtrés.
   const brandRows = state.brands.map(b=>{
     let minutes = 0, visites = 0;
     clientsScope.forEach(c=>{
       (c.history||[]).forEach(h=>{
         if(periodMatchesReport(h.date, year, month) && historyBrandIds(h).includes(b.id)){
-          // Le temps du rendez-vous est réparti entre les marques cochées (ex. 60 min sur 3 marques =
-          // 20 min chacune), pour ne pas compter plusieurs fois le même temps sur chaque marque.
+          // Le temps du rendez-vous est réparti entre les fournisseurs cochés (ex. 60 min sur 3 fournisseurs =
+          // 20 min chacun), pour ne pas compter plusieurs fois le même temps sur chaque fournisseur.
           const brandCount = historyBrandIds(h).length || 1;
           minutes += (h.duree||0) / brandCount;
           visites++;
         }
       });
     });
-    // Temps passé directement avec la marque (rendez-vous fournisseur, formation…), sans client précis.
+    // Temps passé directement avec le fournisseur (rendez-vous fournisseur, formation…), sans client précis.
     (b.history||[]).forEach(h=>{
       if(periodMatchesReport(h.date, year, month)){
         minutes += h.duree||0;
@@ -13189,9 +13189,9 @@ function renderTempsGains(){
     const heures = minutes/60;
     return { brand:b, minutes, visites, ca, commission, heures };
   }).filter(r=>r.minutes>0 || r.ca>0 || r.commission>0);
-  // L'importance d'une marque combine ses TROIS critères — temps passé, CA et commission — plutôt qu'un
+  // L'importance d'un fournisseur combine ses TROIS critères — temps passé, CA et commission — plutôt qu'un
   // seul : on calcule le CA par heure passée et la commission par heure passée, on note chacun sur 100
-  // par rapport à la meilleure marque sur ce critère, puis on fait la moyenne des deux notes. Une marque
+  // par rapport au meilleur fournisseur sur ce critère, puis on fait la moyenne des deux notes. Un fournisseur
   // à fort CA mais à faible taux de commission n'est ainsi plus artificiellement mise en avant.
   brandRows.forEach(r=>{
     r.ratioCa = r.heures>0.0166 ? r.ca/r.heures : null;
@@ -13255,11 +13255,11 @@ function renderTempsGains(){
     </table></div>`}
     `,
     marqueCA: `
-    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('marqueCA')}" title="Cliquer pour afficher tout / réduire">Importance par marque ${tgExpanded==='marqueCA'?'▲':'▼'} <span class="helper" style="display:inline;">(CA et commission de l'onglet Commissions)${tgExpanded==='marqueCA'?` — ${brandRows.length} au total`:(brandRows.length>5?` — 5 sur ${brandRows.length}`:'')}</span></div>
-    ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période","Cochez une ou plusieurs marques sur vos rendez-vous (fiche client → note de suivi) et renseignez le CA/la commission dans l'onglet Commissions."):`
-    <div class="helper" style="margin:8px 0 10px;">Note combinant les <strong>trois critères</strong> : temps passé, CA et commission par heure investie — la moyenne des notes CA/heure et Commission/heure, chacune comparée à la meilleure marque de la période. Une marque à fort CA mais à faible taux de commission n'est ainsi plus mise en avant artificiellement. Cliquez sur une ligne pour corriger le CA, la commission ou le temps passé.</div>
+    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('marqueCA')}" title="Cliquer pour afficher tout / réduire">Importance par fournisseur ${tgExpanded==='marqueCA'?'▲':'▼'} <span class="helper" style="display:inline;">(CA et commission de l'onglet Commissions)${tgExpanded==='marqueCA'?` — ${brandRows.length} au total`:(brandRows.length>5?` — 5 sur ${brandRows.length}`:'')}</span></div>
+    ${brandRows.length===0?emptyState('▩',"Aucune donnée de fournisseur pour cette période","Cochez un ou plusieurs fournisseurs sur vos rendez-vous (fiche client → note de suivi) et renseignez le CA/la commission dans l'onglet Commissions."):`
+    <div class="helper" style="margin:8px 0 10px;">Note combinant les <strong>trois critères</strong> : temps passé, CA et commission par heure investie — la moyenne des notes CA/heure et Commission/heure, chacune comparée au meilleur fournisseur de la période. Un fournisseur à fort CA mais à faible taux de commission n'est ainsi plus mis en avant artificiellement. Cliquez sur une ligne pour corriger le CA, la commission ou le temps passé.</div>
     <div class="card table-wrap"><table>
-      <thead><tr><th>Marque</th><th>Visites</th><th>Temps</th><th>CA (Commissions)</th><th>Commission</th><th>Importance</th></tr></thead>
+      <thead><tr><th>Fournisseur</th><th>Visites</th><th>Temps</th><th>CA (Commissions)</th><th>Commission</th><th>Importance</th></tr></thead>
       <tbody>
         ${brandCaRowsShown.map(r=>`
           <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
@@ -13275,11 +13275,11 @@ function renderTempsGains(){
     </table></div>`}
     `,
     marqueCommission: `
-    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('marqueCommission')}" title="Cliquer pour afficher tout / réduire">Importance par marque — uniquement par rapport aux commissions ${tgExpanded==='marqueCommission'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='marqueCommission'?`(${brandCommissionSorted.length} au total)`:(brandCommissionSorted.length>5?`(5 sur ${brandCommissionSorted.length})`:'')}</span></div>
-    ${brandRows.length===0?emptyState('▩',"Aucune donnée de marque pour cette période",""):`
-    <div class="helper" style="margin:8px 0 10px;">Note basée uniquement sur la <strong>commission par heure passée</strong>, sans tenir compte du CA — utile pour voir quelles marques rapportent le plus, indépendamment de leur volume d'affaires.</div>
+    <div class="section-title" style="cursor:pointer;display:inline;" onclick="${tgToggle('marqueCommission')}" title="Cliquer pour afficher tout / réduire">Importance par fournisseur — uniquement par rapport aux commissions ${tgExpanded==='marqueCommission'?'▲':'▼'} <span class="helper" style="display:inline;">${tgExpanded==='marqueCommission'?`(${brandCommissionSorted.length} au total)`:(brandCommissionSorted.length>5?`(5 sur ${brandCommissionSorted.length})`:'')}</span></div>
+    ${brandRows.length===0?emptyState('▩',"Aucune donnée de fournisseur pour cette période",""):`
+    <div class="helper" style="margin:8px 0 10px;">Note basée uniquement sur la <strong>commission par heure passée</strong>, sans tenir compte du CA — utile pour voir quels fournisseurs rapportent le plus, indépendamment de leur volume d'affaires.</div>
     <div class="card table-wrap"><table>
-      <thead><tr><th>Marque</th><th>Temps</th><th>Commission</th><th>Importance (commission)</th></tr></thead>
+      <thead><tr><th>Fournisseur</th><th>Temps</th><th>Commission</th><th>Importance (commission)</th></tr></thead>
       <tbody>
         ${brandCommissionRowsShown.map(r=>`
           <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
@@ -13426,7 +13426,7 @@ function buildIcsMatchedRows(events){
     const start = parseIcsDate(ev.dtstart);
     const end = parseIcsDate(ev.dtend);
     // Recherche uniquement dans l'objet (titre) du rendez-vous lui-même — ni le lieu/les participants,
-    // ni les devis, ne sont utilisés pour deviner le client ou la marque.
+    // ni les devis, ne sont utilisés pour deviner le client ou le fournisseur.
     const haystackWords = normalizeForWordMatch(ev.summary||'').split(/\s+/).filter(Boolean);
     let bestClient = null, bestScore = 0;
     state.clients.forEach(c=>{
@@ -13454,7 +13454,7 @@ function isIcsUidAlreadyImported(uid){
   if(inClients) return true;
   return state.brands.some(b=>(b.history||[]).some(h=>h.icsUid===uid));
 }
-/* ---- Modifier les données d'une marque depuis le tableau Temps/Gains ---- */
+/* ---- Modifier les données d'un fournisseur depuis le tableau Temps/Gains ---- */
 function openBrandTempsGainsModal(brandId){
   const b = state.brands.find(x=>x.id===brandId);
   if(!b) return;
@@ -13479,11 +13479,11 @@ function openBrandTempsGainsModal(brandId){
           }).join('')}
         </tbody>
       </table></div>
-      <div class="section-title">Temps passé directement avec la marque <span class="helper" style="display:inline;">(hors visites clients — celles-ci se modifient depuis la fiche du client concerné)</span></div>
+      <div class="section-title">Temps passé directement avec le fournisseur <span class="helper" style="display:inline;">(hors visites clients — celles-ci se modifient depuis la fiche du client concerné)</span></div>
       <div id="brandHistoryWrap">${renderBrandHistoryRows(b, year, month)}</div>
       <button class="btn btn-sm btn-ghost" style="margin-top:10px;" onclick="addBrandHistoryEntry('${brandId}')">+ Ajouter une entrée de temps</button>
 
-      <div class="section-title" style="margin-top:24px;">Rendez-vous clients où cette marque est sélectionnée</div>
+      <div class="section-title" style="margin-top:24px;">Rendez-vous clients où ce fournisseur est sélectionné</div>
       ${renderBrandClientVisitsRows(brandId, year, month)}
     </div>
     <div class="modal-foot"><button class="btn btn-primary" onclick="closeModal(); render();">Fermer</button></div>
@@ -13498,7 +13498,7 @@ function renderBrandClientVisitsRows(brandId, year, month){
       }
     });
   });
-  if(rows.length===0) return '<div class="helper">Aucun rendez-vous client avec cette marque sélectionnée sur cette période.</div>';
+  if(rows.length===0) return '<div class="helper">Aucun rendez-vous client avec ce fournisseur sélectionné sur cette période.</div>';
   rows.sort((a,b)=>b.h.date.localeCompare(a.h.date));
   return `<div class="table-wrap"><table>
     <thead><tr><th>Date</th><th>Client</th><th>Note</th><th style="width:100px;">Durée</th></tr></thead>
@@ -13710,7 +13710,7 @@ function openAgendaImportReview(matched){
   openModal(`
     <div class="modal-head"><h3>Vérifier avant d'enregistrer</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
-      <div class="helper" style="margin-bottom:12px;">${matched.length} événement(s) trouvé(s)${notMatched?`, dont ${notMatched} sans client ni marque identifié automatiquement — choisissez-en un manuellement ou décochez la ligne`:''}${alreadyCount?`, dont ${alreadyCount} déjà importé(s) précédemment (décochés automatiquement, grisés)`:''}. Décochez ce que vous ne souhaitez pas importer. Certains rendez-vous concernent une marque plutôt qu'un client précis (réunion fournisseur, formation…) : renseignez la colonne correspondante.</div>
+      <div class="helper" style="margin-bottom:12px;">${matched.length} événement(s) trouvé(s)${notMatched?`, dont ${notMatched} sans client ni fournisseur identifié automatiquement — choisissez-en un manuellement ou décochez la ligne`:''}${alreadyCount?`, dont ${alreadyCount} déjà importé(s) précédemment (décochés automatiquement, grisés)`:''}. Décochez ce que vous ne souhaitez pas importer. Certains rendez-vous concernent un fournisseur plutôt qu'un client précis (réunion fournisseur, formation…) : renseignez la colonne correspondante.</div>
       <div id="agendaImportRowsWrap" style="max-height:65vh;overflow-y:auto;">${renderAgendaImportRows()}</div>
     </div>
     <div class="modal-foot">
@@ -13722,7 +13722,7 @@ function openAgendaImportReview(matched){
 function renderAgendaImportRows(){
   if(agendaImportRows.length===0) return '<div class="helper">Aucun événement sur cette période.</div>';
   return `<div class="table-wrap"><table>
-    <thead><tr><th style="width:30px;"></th><th>Date</th><th>Événement</th><th>Client</th><th>Marque</th><th style="width:120px;">Durée (min)</th></tr></thead>
+    <thead><tr><th style="width:30px;"></th><th>Date</th><th>Événement</th><th>Client</th><th>Fournisseur</th><th style="width:120px;">Durée (min)</th></tr></thead>
     <tbody>
       ${agendaImportRows.map((m,i)=>`
         <tr${m.alreadyImported?' style="opacity:.5;"':''}>
@@ -13755,8 +13755,8 @@ function confirmAgendaImport(){
         added++; addedClients++; clientsTouched = true;
       }
     } else if(m.brandId){
-      // Rendez-vous concernant une marque sans client précis (réunion fournisseur, formation…) : le
-      // temps est enregistré directement sur la marque, dans son propre suivi.
+      // Rendez-vous concernant un fournisseur sans client précis (réunion fournisseur, formation…) : le
+      // temps est enregistré directement sur le fournisseur, dans son propre suivi.
       const b = state.brands.find(x=>x.id===m.brandId);
       if(b){
         b.history = b.history || [];
@@ -13769,7 +13769,7 @@ function confirmAgendaImport(){
   if(brandsTouched) persist('brands');
   closeModal();
   render();
-  showToast(added>0 ? `${added} événement(s) ajouté(s) (${addedClients} côté clients, ${addedBrands} côté marques).` : "Aucun événement importé (ni client ni marque choisi).");
+  showToast(added>0 ? `${added} événement(s) ajouté(s) (${addedClients} côté clients, ${addedBrands} côté fournisseurs).` : "Aucun événement importé (ni client ni fournisseur choisi).");
 }
 
 /* ============================= SUIVI ET RELANCES ============================= */
@@ -13933,7 +13933,7 @@ function caVvaMonthsRec(year, brandId, clientId){
   return byBrand[caVvaCK(clientId)] || {};
 }
 function commissionsCaForMonth(brandId, year, month){
-  // CA saisi dans l'onglet Commissions pour ce mois : une marque précise, ou la somme de toutes les marques
+  // CA saisi dans l'onglet Commissions pour ce mois : un fournisseur précis, ou la somme de tous les fournisseurs
   if(brandId && brandId!=='all'){
     return getCommissionEntry(brandId, year, month).ca || 0;
   }
@@ -13953,7 +13953,7 @@ function caVvaEffectiveMonth(year, brandId, clientId, month){
   return {value:0, auto:false};
 }
 function caVvaTotal(year, brandId, clientId){
-  // Marque "Toutes les marques" : on additionne l'effectif (manuel, sinon auto Commissions) de chaque marque.
+  // Fournisseur "Tous les fournisseurs" : on additionne l'effectif (manuel, sinon auto Commissions) de chaque fournisseur.
   // Client "Tous les clients" : on ne prend QUE le compartiment "tous les clients", complété automatiquement
   // par l'onglet Commissions quand aucune saisie manuelle n'existe pour un mois.
   const bFilter = brandId && brandId!=='all' ? brandId : null;
@@ -13972,12 +13972,12 @@ function caVvaModalHtml(year, brandId, clientId){
   const monthNames = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const effectiveRows = monthNames.map((mn,i)=>({mn, m:i+1, ...caVvaEffectiveMonth(year, brandId, clientId, i+1)}));
   const total = effectiveRows.reduce((s,r)=>s+r.value, 0);
-  const brandLabel = bk!=='all' ? brandName(bk) : 'Toutes les marques';
+  const brandLabel = bk!=='all' ? brandName(bk) : 'Tous les fournisseurs';
   const clientLabel = ck!=='all' ? clientSocieteLabel(ck) : 'Tous les clients';
   return `
     <div class="modal-head"><h3>CA (VVA) — ${year}</h3><button class="close-x" onclick="closeModal(); render();">✕</button></div>
     <div class="modal-body">
-      <div class="helper" style="margin-bottom:12px;">Saisie manuelle du CA (VVA), mois par mois, pour <strong>${escapeHtml(brandLabel)}</strong> — <strong>${escapeHtml(clientLabel)}</strong>.<br>Ce détail suit les filtres marque/client du tableau de bord : changez-les avant d'ouvrir cette fenêtre pour saisir le CA (VVA) d'une autre marque ou d'un autre client. Le total affiché sur la carte du tableau de bord additionne toutes les saisies correspondant aux filtres actifs.${ck==='all'?'<br><strong>Les mois en italique</strong> sont repris automatiquement du CA saisi dans l\'onglet Commissions — laissez-les tels quels, ou saisissez une valeur pour les remplacer par une saisie manuelle.':''}</div>
+      <div class="helper" style="margin-bottom:12px;">Saisie manuelle du CA (VVA), mois par mois, pour <strong>${escapeHtml(brandLabel)}</strong> — <strong>${escapeHtml(clientLabel)}</strong>.<br>Ce détail suit les filtres fournisseur/client du tableau de bord : changez-les avant d'ouvrir cette fenêtre pour saisir le CA (VVA) d'un autre fournisseur ou d'un autre client. Le total affiché sur la carte du tableau de bord additionne toutes les saisies correspondant aux filtres actifs.${ck==='all'?'<br><strong>Les mois en italique</strong> sont repris automatiquement du CA saisi dans l\'onglet Commissions — laissez-les tels quels, ou saisissez une valeur pour les remplacer par une saisie manuelle.':''}</div>
       <div class="table-wrap"><table>
         <thead><tr><th>Mois</th><th class="num">CA (VVA) HT</th></tr></thead>
         <tbody>
@@ -14004,14 +14004,14 @@ function caVvaBrandBreakdownHtml(year, clientId, clientTotal){
   const nonVentile = clientTotal - sumBrands;
   return `
     <div class="divider"></div>
-    <div class="section-title">Détail par marque — ${escapeHtml(clientSocieteLabel(clientId))}</div>
-    <div class="helper" style="margin-bottom:10px;">Répartition, marque par marque, du CA (VVA) de ce client — pour une analyse plus fine, en gardant le total ci-dessus (${fmtMoney(clientTotal)}) comme référence.</div>
-    ${brandRows.length===0?`<div class="helper">Aucune saisie détaillée par marque pour ce client.</div>`:`
+    <div class="section-title">Détail par fournisseur — ${escapeHtml(clientSocieteLabel(clientId))}</div>
+    <div class="helper" style="margin-bottom:10px;">Répartition, fournisseur par fournisseur, du CA (VVA) de ce client — pour une analyse plus fine, en gardant le total ci-dessus (${fmtMoney(clientTotal)}) comme référence.</div>
+    ${brandRows.length===0?`<div class="helper">Aucune saisie détaillée par fournisseur pour ce client.</div>`:`
     <div class="table-wrap"><table>
-      <thead><tr><th>Marque</th><th class="num">CA (VVA) ${year}</th></tr></thead>
+      <thead><tr><th>Fournisseur</th><th class="num">CA (VVA) ${year}</th></tr></thead>
       <tbody>
         ${brandRows.map(r=>`
-          <tr style="cursor:pointer;" onclick="openCaVvaModal(${year}, '${r.brand.id}', '${clientId}')" title="Voir/modifier le détail mensuel de cette marque">
+          <tr style="cursor:pointer;" onclick="openCaVvaModal(${year}, '${r.brand.id}', '${clientId}')" title="Voir/modifier le détail mensuel de ce fournisseur">
             <td><span class="chip" style="background:${brandColor(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
             <td class="num" style="font-weight:700;">${fmtMoney(r.total)}</td>
           </tr>
@@ -14037,8 +14037,8 @@ function caVvaClientBreakdownHtml(year, brandId, brandTotal){
   return `
     <div class="divider"></div>
     <div class="section-title">Détail par client — ${escapeHtml(brandName(brandId))}</div>
-    <div class="helper" style="margin-bottom:10px;">Répartition, client par client, du CA (VVA) de cette marque — pour une analyse plus fine, en gardant le total ci-dessus (${fmtMoney(brandTotal)}, issu des saisies manuelles ou automatiquement des Commissions) comme référence.</div>
-    ${clientRows.length===0?`<div class="helper">Aucune saisie détaillée par client pour cette marque — le total ci-dessus provient uniquement du CA saisi dans l'onglet Commissions, sans détail client disponible.</div>`:`
+    <div class="helper" style="margin-bottom:10px;">Répartition, client par client, du CA (VVA) de ce fournisseur — pour une analyse plus fine, en gardant le total ci-dessus (${fmtMoney(brandTotal)}, issu des saisies manuelles ou automatiquement des Commissions) comme référence.</div>
+    ${clientRows.length===0?`<div class="helper">Aucune saisie détaillée par client pour ce fournisseur — le total ci-dessus provient uniquement du CA saisi dans l'onglet Commissions, sans détail client disponible.</div>`:`
     <div class="table-wrap"><table>
       <thead><tr><th>Client</th><th class="num">CA (VVA) ${year}</th></tr></thead>
       <tbody>
@@ -14063,7 +14063,7 @@ function openCaVvaModal(year, brandId, clientId){
   modalNavLabel('openCaVvaModal', arguments);
   const bk = caVvaBK(brandId), ck = caVvaCK(clientId);
   if(bk==='all' && ck==='all'){
-    showToast('Sélectionnez au moins une marque ou un client (dans les filtres du tableau de bord) avant de saisir le CA (VVA).');
+    showToast('Sélectionnez au moins un fournisseur ou un client (dans les filtres du tableau de bord) avant de saisir le CA (VVA).');
     return;
   }
   openModal(caVvaModalHtml(year, brandId, clientId));
@@ -14169,7 +14169,7 @@ function renderDashboard(){
   const nbDevisEnCours = state.devis.filter(d=>(d.status==='Envoyé'||d.status==='Brouillon') && !isDevisWon(d) && !isDevisLost(d) && inDashboardScope(d)).length;
   const panierMoyen = accepted.length ? caTotal/accepted.length : 0;
 
-  // Nombre de devis/marchés par marque, ventilé par apporteur d'affaire (toutes années confondues
+  // Nombre de devis/marchés par fournisseur, ventilé par apporteur d'affaire (toutes années confondues
   // sur l'année sélectionnée, tous statuts, dans le périmètre filtré ci-dessus).
   const scopedYearDevis = state.devis.filter(d=>yearOf(d.date)===y && inDashboardScope(d));
   const brandApporteurRows = state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>{
@@ -14181,7 +14181,7 @@ function renderDashboard(){
   }).filter(r=>r.total>0);
 
   // Top clients par famille (Grossiste/Distributeur vs Installateur), sur le CA des devis acceptés
-  // dans le périmètre filtré (année, commercial, marque, client).
+  // dans le périmètre filtré (année, commercial, fournisseur, client).
   const caSource = ui.dashboardCaSource||'devis';
   const clientCaMap = {};
   if(caSource==='vva'){
@@ -14218,12 +14218,12 @@ function renderDashboard(){
     'kpi-ca': `<div class="label">CA ${y} (devis gagnés)</div><div class="value num">${fmtMoney(caTotal)}</div>`,
     'kpi-encours': `<div class="label">Devis en cours</div><div class="value num">${nbDevisEnCours}</div>`,
     'kpi-panier': `<div class="label">Panier moyen</div><div class="value num">${fmtMoney(panierMoyen)}</div>`,
-    'chart-brand': `<h3 style="margin:0 0 14px 0;font-size:15px;">CA par marque <span class="helper" style="display:inline;">(${caSource==='vva'?'VVA':'devis gagnés'})</span></h3><div class="chart-wrap"><canvas id="chartBrand"></canvas></div>`,
+    'chart-brand': `<h3 style="margin:0 0 14px 0;font-size:15px;">CA par fournisseur <span class="helper" style="display:inline;">(${caSource==='vva'?'VVA':'devis gagnés'})</span></h3><div class="chart-wrap"><canvas id="chartBrand"></canvas></div>`,
     'chart-client': `<h3 style="margin:0 0 14px 0;font-size:15px;">Top clients <span class="helper" style="display:inline;">(${caSource==='vva'?'VVA':'devis gagnés'})</span></h3><div class="chart-wrap"><canvas id="chartClient"></canvas></div>`,
     'top-distrib': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients distributeurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (${caSource==='vva'?'VVA':'devis gagnés'}), société de famille Grossiste/Distributeur.</div>${topListHtml(topDistrib)}`,
     'top-install': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients installateurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (${caSource==='vva'?'VVA':'devis gagnés'}), société de famille Installateur.</div>${topListHtml(topInstall)}`,
     'chart-correlation': `<h3 style="margin:0 0 4px 0;font-size:15px;">Corrélation devis réalisés / CA généré</h3><div class="helper" style="margin-bottom:12px;">Par mois sur ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}. Barres : nombre de devis/marchés créés (tous statuts). Ligne : CA généré (devis gagnés).</div><div class="chart-wrap"><canvas id="chartCorrelation"></canvas></div>`,
-    'table-apporteur': `<h3 style="margin:0 0 4px 0;font-size:15px;">Nombre de devis/marchés par marque et par apporteur d'affaire</h3><div class="helper" style="margin-bottom:12px;">Année ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}, tous statuts confondus. Cliquez sur un nombre pour voir le détail.</div>${brandApporteurRows.length===0?'<div class="helper">Aucun devis/marché sur cette période pour ce périmètre.</div>':`<div class="table-wrap"><table><thead><tr><th>Marque</th><th class="num">Agent</th><th class="num">Distributeur</th><th class="num">Non précisé</th><th class="num">Total</th></tr></thead><tbody>${brandApporteurRows.map(r=>`<tr><td style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)"><span class="chip" style="background:${brandColor(r.brand.id)}"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Agent')">${r.agent}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Distributeur')">${r.distrib}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'nonPrecise')">${r.nonPrecise}</td><td class="num" style="font-weight:700;cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)">${r.total}</td></tr>`).join('')}</tbody></table></div>`}`,
+    'table-apporteur': `<h3 style="margin:0 0 4px 0;font-size:15px;">Nombre de devis/marchés par fournisseur et par apporteur d'affaire</h3><div class="helper" style="margin-bottom:12px;">Année ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}, tous statuts confondus. Cliquez sur un nombre pour voir le détail.</div>${brandApporteurRows.length===0?'<div class="helper">Aucun devis/marché sur cette période pour ce périmètre.</div>':`<div class="table-wrap"><table><thead><tr><th>Fournisseur</th><th class="num">Agent</th><th class="num">Distributeur</th><th class="num">Non précisé</th><th class="num">Total</th></tr></thead><tbody>${brandApporteurRows.map(r=>`<tr><td style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)"><span class="chip" style="background:${brandColor(r.brand.id)}"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Agent')">${r.agent}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Distributeur')">${r.distrib}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'nonPrecise')">${r.nonPrecise}</td><td class="num" style="font-weight:700;cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)">${r.total}</td></tr>`).join('')}</tbody></table></div>`}`,
   };
   const dashBlocked = brandFilter==='all' && clientFilter==='all';
   const widgetCardsHtml = state.dashboardLayout.order.map(id=>{
@@ -14235,7 +14235,7 @@ function renderDashboard(){
     let extraAttrs = '', styleExtra = '';
     if(id==='kpi-cavva'){
       styleExtra = dashBlocked ? 'cursor:not-allowed;opacity:.7;' : 'cursor:pointer;';
-      extraAttrs = ` onclick="openCaVvaModal(${y}, '${brandFilter}', '${clientFilter}')" title="${dashBlocked?'Sélectionnez une marque ou un client pour saisir le CA (VVA)':'Cliquer pour saisir/consulter le détail mensuel'}"`;
+      extraAttrs = ` onclick="openCaVvaModal(${y}, '${brandFilter}', '${clientFilter}')" title="${dashBlocked?'Sélectionnez un fournisseur ou un client pour saisir le CA (VVA)':'Cliquer pour saisir/consulter le détail mensuel'}"`;
     } else if(id==='kpi-ca'){
       styleExtra = 'cursor:pointer;';
       extraAttrs = ` onclick="drillDownAccepted(${y}, '${cmId}', '${brandFilter}', '${clientFilter}')" title="Voir le détail des devis gagnés"`;
@@ -14266,7 +14266,7 @@ function renderDashboard(){
 
   return `
   <div class="topbar">
-    <div><h1>Tableau de bord</h1><div class="sub">Chiffre d'affaires par marque et par client${cmId!=='all'?` — ${escapeHtml(commercialDisplayName(state.commerciaux.find(x=>x.id===cmId)||{}))}`:''}</div></div>
+    <div><h1>Tableau de bord</h1><div class="sub">Chiffre d'affaires par fournisseur et par client${cmId!=='all'?` — ${escapeHtml(commercialDisplayName(state.commerciaux.find(x=>x.id===cmId)||{}))}`:''}</div></div>
     <div class="pill-select">${years.map(yr=>`<button class="${yr===y?'active':''}" onclick="ui.dashboardYear=${yr}; render();">${yr}</button>`).join('')}</div>
   </div>
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
@@ -14275,7 +14275,7 @@ function renderDashboard(){
       <button class="${(ui.dashboardCaSource||'devis')==='devis'?'active':''}" onclick="ui.dashboardCaSource='devis'; render();">CA (devis gagnés)</button>
       <button class="${ui.dashboardCaSource==='vva'?'active':''}" onclick="ui.dashboardCaSource='vva'; render();">CA (VVA)</button>
     </div>
-    <span class="helper">— s'applique aux graphiques "CA par marque", "Top clients", et aux tops distributeurs/installateurs ci-dessous.</span>
+    <span class="helper">— s'applique aux graphiques "CA par fournisseur", "Top clients", et aux tops distributeurs/installateurs ci-dessous.</span>
   </div>
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
     <span class="helper" style="font-weight:600;">Affichage :</span>
@@ -14285,7 +14285,7 @@ function renderDashboard(){
     </div>
     <div class="field" style="margin-bottom:0;max-width:200px;">
       <select onchange="ui.dashboardBrand=this.value; render();">
-        <option value="all" ${brandFilter==='all'?'selected':''}>Toutes les marques</option>
+        <option value="all" ${brandFilter==='all'?'selected':''}>Tous les fournisseurs</option>
         ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${brandFilter===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select>
     </div>
@@ -14349,7 +14349,7 @@ function renderDrillDownModalBody(title, subtitle, list){
       ${subtitle?`<div class="helper" style="margin-bottom:14px;">${escapeHtml(subtitle)}</div>`:''}
       ${list.length===0?'<div class="helper">Aucun devis / marché ne correspond à cette sélection.</div>':`
       <div class="table-wrap"><table>
-        <thead><tr><th>Numéro</th><th>Date</th><th>Client</th><th>Objet</th><th>Marque(s)</th><th>Apporteur</th><th class="num">Total HT</th></tr></thead>
+        <thead><tr><th>Numéro</th><th>Date</th><th>Client</th><th>Objet</th><th>Fournisseur(s)</th><th>Apporteur</th><th class="num">Total HT</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
       <div class="helper" style="margin-top:10px;text-align:right;">${list.length} devis/marché(s) — total : <strong>${fmtMoney(totalSum)}</strong></div>
@@ -14602,7 +14602,7 @@ function syncKeyFromLocalStorage(k){
   }catch(e){ console.error('Erreur de synchronisation inter-fenêtres', k, e); }
 }
 document.addEventListener('click', (ev)=>{
-  // Referme la saisie mensuelle des commissions (marque dépliée) dès qu'on clique en dehors du tableau
+  // Referme la saisie mensuelle des commissions (fournisseur déplié) dès qu'on clique en dehors du tableau
   // ou de la petite fenêtre de saisie détaillée, sans toucher au reste de la page.
   if(ui.tab!=='commissions' || !ui.commissionsExpandedBrand) return;
   if(ev.target.closest('#commissionsTableCard')) return;
