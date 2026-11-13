@@ -2849,6 +2849,31 @@ function switchBrandFormTab(tab){
     t.classList.toggle('active', t.dataset.tab===tab);
   });
 }
+/* ---- Contacts d'une marque : nom, prénom, fonction, portable, téléphone, mail, commentaires ---- */
+let brandDraftContacts = [];
+function normalizeBrandContact(p){
+  p.nom = formatLastName(p.nom); p.prenom = formatFirstName(p.prenom);
+  p.telephone = formatPhoneFr(p.telephone); p.portable = formatPhoneFr(p.portable); p.email = formatEmail(p.email);
+  return p;
+}
+function brandContactsRowsHtml(){
+  if(brandDraftContacts.length===0) return `<tr><td colspan="8" class="helper" style="text-align:center;padding:14px;">Aucun contact ajouté pour cette marque.</td></tr>`;
+  return brandDraftContacts.map((p,i)=>`
+    <tr class="${i%2===0?'row-a':'row-b'}">
+      <td><input type="text" style="text-transform:uppercase;" value="${escapeHtml(p.nom||'')}" onchange="brandDraftContacts[${i}].nom=this.value=formatLastName(this.value);"></td>
+      <td><input type="text" style="text-transform:capitalize;" value="${escapeHtml(p.prenom||'')}" onchange="brandDraftContacts[${i}].prenom=this.value=formatFirstName(this.value);"></td>
+      <td><input type="text" list="dl_fonctionsContacts" value="${escapeHtml(p.fonction||'')}" onchange="brandDraftContacts[${i}].fonction=this.value;"></td>
+      <td><input type="tel" value="${escapeHtml(p.portable||'')}" onchange="brandDraftContacts[${i}].portable=this.value=formatPhoneFr(this.value);"></td>
+      <td><input type="tel" value="${escapeHtml(p.telephone||'')}" onchange="brandDraftContacts[${i}].telephone=this.value=formatPhoneFr(this.value);"></td>
+      <td><input type="email" value="${escapeHtml(p.email||'')}" onchange="brandDraftContacts[${i}].email=this.value;"></td>
+      <td><textarea rows="1" onchange="brandDraftContacts[${i}].commentaire=this.value;">${escapeHtml(p.commentaire||'')}</textarea></td>
+      <td><button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="brandDraftContacts.splice(${i},1); refreshBrandContactsTable();" title="Retirer ce contact">✕</button></td>
+    </tr>`).join('');
+}
+function refreshBrandContactsTable(){
+  const body = document.getElementById('brandContactsBody');
+  if(body) body.innerHTML = brandContactsRowsHtml();
+}
 let pendingLogoData = null;
 function openBrandForm(id){
   const b = id ? state.brands.find(x=>x.id===id) : null;
@@ -2856,11 +2881,13 @@ function openBrandForm(id){
   brandFormTab = 'identification';
   brandFrancoRulesDraft = JSON.parse(JSON.stringify((b && b.francoRules) || []));
   brandFrancoBrandId = b ? b.id : null;
+  brandDraftContacts = b && b.contacts ? JSON.parse(JSON.stringify(b.contacts)).map(normalizeBrandContact) : [];
   const civOpts = civiliteOptions();
   openModal(`
     <div class="modal-head"><h3>${b?'Modifier la marque / fournisseur':'Nouvelle marque / fournisseur'}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="tabs-sub" style="padding:0 22px;margin:0;">
       <button type="button" class="brand-form-tab active" data-tab="identification" onclick="switchBrandFormTab('identification')">Identification</button>
+      <button type="button" class="brand-form-tab" data-tab="contacts" onclick="switchBrandFormTab('contacts')">Contacts</button>
       <button type="button" class="brand-form-tab" data-tab="devis" onclick="switchBrandFormTab('devis')">Informations du devis</button>
       <button type="button" class="brand-form-tab" data-tab="fraisport" onclick="switchBrandFormTab('fraisport')">Frais de port</button>
       <button type="button" class="brand-form-tab" data-tab="departements" onclick="switchBrandFormTab('departements')">Départements représentés</button>
@@ -2913,6 +2940,18 @@ function openBrandForm(id){
           <label>Commentaire à intégrer dans les devis <span class="helper" style="display:inline;">(imprimé sur les devis de cette marque, sous les lignes)</span></label>
           <textarea id="f_commentaire" rows="4" placeholder="Ex. conditions de garantie, délais de livraison, mentions spécifiques à la marque…">${b?escapeHtml(b.commentaire||''):''}</textarea>
         </div>
+      </div>
+
+      <div class="brand-form-panel" data-panel="contacts" style="display:none;">
+        <div class="helper" style="margin-bottom:10px;">Les personnes à contacter chez cette marque (responsable commercial, ADV, technique…). Ajoutez-en autant que nécessaire.</div>
+        ${datalistHtml('dl_fonctionsContacts','fonctionsContacts')}
+        <div class="table-wrap lines-table">
+          <table class="contacts-sheet">
+            <thead><tr><th>Nom</th><th>Prénom</th><th>Fonction</th><th>Portable</th><th>Téléphone</th><th>Email</th><th>Commentaires</th><th></th></tr></thead>
+            <tbody id="brandContactsBody">${brandContactsRowsHtml()}</tbody>
+          </table>
+        </div>
+        <button type="button" class="btn btn-sm" style="margin-top:8px;" onclick="brandDraftContacts.push({id:uid(),nom:'',prenom:'',fonction:'',portable:'',telephone:'',email:'',commentaire:''}); refreshBrandContactsTable();">+ Ajouter un contact</button>
       </div>
 
       <div class="brand-form-panel" data-panel="fraisport" style="display:none;">
@@ -3040,6 +3079,7 @@ function saveBrand(id){
     francoPort: parseFloat(document.getElementById('f_francoPort').value)||0,
     fraisPort: parseFloat(document.getElementById('f_fraisPort').value)||0,
     francoRules: brandFrancoRulesDraft.filter(r=>r.francoPort>0 && (r.famille||r.sousFamille||(r.motsCles||'').trim())),
+    contacts: brandDraftContacts.map(normalizeBrandContact).filter(p=>p.nom||p.prenom||p.fonction||p.portable||p.telephone||p.email||(p.commentaire||'').trim()),
     civilite: document.getElementById('f_civilite').value,
     prenom: document.getElementById('f_prenom').value.trim(),
     adresse1: document.getElementById('f_adresse1').value.trim(),
