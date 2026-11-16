@@ -1292,6 +1292,50 @@ function brandColorList(b){
   if(b.colorMode==='manual' && b.colorManual && b.colorManual.length) return b.colorManual.filter(Boolean).slice(0,2);
   return (b.colors||[]).slice(0,2);
 }
+/* Remplissage d'une barre de graphique selon la couleur / l'effet du fournisseur */
+function brandChartFill(brandId, chart, el){
+  const b = state.brands.find(x=>x.id===brandId);
+  const cols = brandColorList(b);
+  if(cols.length<2 || !el) return brandColor(brandId);
+  const [c1,c2] = cols, ef = (b.colorEffect||'moitie');
+  const ctx = chart.ctx;
+  const p = el.getProps(['x','y','base','height'], true);
+  const x0 = Math.min(p.x,p.base), x1 = Math.max(p.x,p.base);
+  const y0 = p.y - p.height/2, y1 = p.y + p.height/2;
+  if(!(x1>x0)) return c1;
+  const hard = g=>{ g.addColorStop(0,c1); g.addColorStop(.5,c1); g.addColorStop(.5,c2); g.addColorStop(1,c2); return g; };
+  if(ef==='degrade'){ const g=ctx.createLinearGradient(x0,0,x1,0); g.addColorStop(0,c1); g.addColorStop(1,c2); return g; }
+  if(ef==='diagonale') return hard(ctx.createLinearGradient(x0,y0,x1,y1));
+  if(ef==='rayures' || ef==='mosaique' || ef==='pois'){
+    const t = document.createElement('canvas'), k = t.getContext('2d');
+    if(ef==='rayures'){
+      t.width=t.height=10; k.fillStyle=c1; k.fillRect(0,0,10,10); k.fillStyle=c2;
+      k.beginPath(); k.moveTo(0,10); k.lineTo(10,0); k.lineTo(10,5); k.lineTo(5,10); k.closePath(); k.fill();
+      k.beginPath(); k.moveTo(0,5); k.lineTo(5,0); k.lineTo(0,0); k.closePath(); k.fill();
+    } else if(ef==='mosaique'){
+      t.width=t.height=10; k.fillStyle=c1; k.fillRect(0,0,10,10); k.fillStyle=c2; k.fillRect(0,0,5,5); k.fillRect(5,5,5,5);
+    } else {
+      t.width=t.height=8; k.fillStyle=c1; k.fillRect(0,0,8,8); k.fillStyle=c2; k.beginPath(); k.arc(4,4,2,0,Math.PI*2); k.fill();
+    }
+    return ctx.createPattern(t,'repeat');
+  }
+  return hard(ctx.createLinearGradient(x0,0,x1,0));
+}
+function textColorFor(cols, pref){
+  if(pref==='white') return '#fff';
+  if(pref==='black') return '#1a1a1a';
+  if(!cols || !cols.length) return '#fff';
+  const lum = c=>{ const h=c.replace('#',''); const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16); return (0.299*r+0.587*g+0.114*b)/255; };
+  const avg = cols.reduce((a,c)=>a+lum(c),0)/cols.length;
+  return avg>0.6 ? '#1a1a1a' : '#fff';
+}
+function brandText(brandId){
+  const b = state.brands.find(x=>x.id===brandId);
+  if(!b) return '#fff';
+  let cl = brandColorList(b);
+  if(!cl.length) cl = [brandColor(brandId)];
+  return textColorFor(cl, b.colorText);
+}
 const BRAND_EFFECTS = [
   ['moitie','Deux moitiés'],['diagonale','Diagonale'],['degrade','Dégradé'],
   ['rayures','Rayures'],['mosaique','Mosaïque (damier)'],['pois','Pois']
@@ -1380,7 +1424,6 @@ function extractLogoColors(dataUrl){
         const fix = rgb=>{ // assombrit les couleurs trop claires pour garder le texte blanc lisible
           let [r,g,b]=rgb;
           const lum=(0.299*r+0.587*g+0.114*b)/255;
-          if(lum>0.52){ const f=0.52/lum; r*=f; g*=f; b*=f; }
           const hx=v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0');
           return '#'+hx(r)+hx(g)+hx(b);
         };
@@ -1397,10 +1440,10 @@ function extractLogoColors(dataUrl){
 async function migrateBrandColors(){
   let changed=false;
   for(const b of state.brands){
-    if(b.logo && b.colorsFrom!==b.logo.length){
+    if(b.logo && b.colorsFrom!==b.logo.length+'v2'){
       const cols = await extractLogoColors(b.logo);
       b.colors = cols || null;
-      b.colorsFrom = b.logo.length;
+      b.colorsFrom = b.logo.length+'v2';
       changed=true;
     } else if(!b.logo && b.colors && b.colorsFrom){
       b.colors=null; b.colorsFrom=null; changed=true;
@@ -2955,7 +2998,7 @@ function renderMarques(){
       <div class="card card-pad" style="cursor:pointer;" onclick="openBrandForm('${b.id}')" title="Cliquer pour voir le détail">
         <div style="display:flex;align-items:center;gap:9px;min-width:0;">
           ${b.logo?`<img src="${b.logo}" alt="" style="width:30px;height:30px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff;flex-shrink:0;">`:''}
-          <div class="chip" style="background:${brandBg(b.id)};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span class="sq"></span>${escapeHtml(b.name)}</div>
+          <div class="chip" style="background:${brandBg(b.id)};color:${brandText(b.id)};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span class="sq"></span>${escapeHtml(b.name)}</div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px;font-size:12px;">
           <span style="color:var(--muted);">${nbTarifs} référence(s)</span>
@@ -3010,7 +3053,8 @@ function openBrandForm(id){
     auto: b ? (b.colors||null) : null,
     c1: (b && b.colorManual && b.colorManual[0]) || (b && b.colors && b.colors[0]) || (b ? brandColor(b.id) : '#3A86FF'),
     c2: (b && b.colorManual && b.colorManual[1]) || (b && b.colors && b.colors[1]) || '',
-    effect: (b && b.colorEffect) || 'moitie'
+    effect: (b && b.colorEffect) || 'moitie',
+    text: (b && b.colorText) || 'auto'
   };
   brandFormTab = 'identification';
   brandFrancoRulesDraft = JSON.parse(JSON.stringify((b && b.francoRules) || []));
@@ -3144,7 +3188,7 @@ function renderLogoPreview(){
     <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="pendingLogoData=null; document.getElementById('logoPreviewWrap').innerHTML=renderLogoPreview(); brandColorLogoChanged();">Retirer le logo</button>
   </div>`;
 }
-let brandColorDraft = {mode:'auto',auto:null,c1:'#3A86FF',c2:'',effect:'moitie'};
+let brandColorDraft = {mode:'auto',auto:null,c1:'#3A86FF',c2:'',effect:'moitie',text:'auto'};
 function brandDraftColors(){
   const d = brandColorDraft;
   return d.mode==='manual' ? [d.c1, d.c2].filter(Boolean) : (d.auto||[]);
@@ -3169,7 +3213,14 @@ function renderBrandColorUI(){
       <span style="display:flex;gap:6px;align-items:center;">Effet
         <select id="f_coleffect" onchange="brandColorChange()" style="width:auto;">${effOpts}</select>
       </span>
-      <span class="chip" id="f_colpreview" style="background:${colorBgCss(cols,d.effect)};"><span class="sq"></span>${escapeHtml(nm)}</span>
+      <span style="display:flex;gap:6px;align-items:center;">Texte
+        <select id="f_coltext" onchange="brandColorChange()" style="width:auto;">
+          <option value="auto" ${d.text==='auto'?'selected':''}>Automatique</option>
+          <option value="white" ${d.text==='white'?'selected':''}>Blanc</option>
+          <option value="black" ${d.text==='black'?'selected':''}>Noir</option>
+        </select>
+      </span>
+      <span class="chip" id="f_colpreview" style="background:${colorBgCss(cols,d.effect)};color:${textColorFor(cols.length?cols:['#3A86FF'],d.text)};"><span class="sq"></span>${escapeHtml(nm)}</span>
     </div>
     <div class="helper" style="margin-top:4px;">${man?'Cochez « Couleur 2 » pour une pastille bi-couleur.':'Couleurs détectées dans le logo : '+(cols.length?cols.length+' couleur(s).':'aucune (couleur par défaut).')+' L\'effet s\'applique si le logo comporte 2 couleurs.'}</div>`;
 }
@@ -3181,10 +3232,11 @@ function brandColorChange(){
   if(g('f_col1')) d.c1 = g('f_col1').value;
   d.c2 = (g('f_col2on') && g('f_col2on').checked && g('f_col2')) ? g('f_col2').value : '';
   if(g('f_coleffect')) d.effect = g('f_coleffect').value;
+  if(g('f_coltext')) d.text = g('f_coltext').value;
   if(d.mode!==prevMode || (g('f_col2') && g('f_col2').disabled === !!d.c2)){
     const w = g('brandColorWrap'); if(w) w.innerHTML = renderBrandColorUI();
   } else {
-    const p = g('f_colpreview'); if(p) p.style.background = colorBgCss(brandDraftColors(), d.effect);
+    const p = g('f_colpreview'); if(p){ p.style.background = colorBgCss(brandDraftColors(), d.effect); p.style.color = textColorFor(brandDraftColors(), d.text); }
   }
 }
 async function brandColorLogoChanged(){
@@ -3285,6 +3337,7 @@ function saveBrand(id){
     colorMode: brandColorDraft.mode,
     colorManual: [brandColorDraft.c1, brandColorDraft.c2].filter(Boolean),
     colorEffect: brandColorDraft.effect || 'moitie',
+    colorText: brandColorDraft.text || 'auto',
   };
   if(id){
     const b = state.brands.find(x=>x.id===id);
@@ -3646,7 +3699,7 @@ function renderBudgetCommercial(){
     <tbody>
       ${brandRows.map(br=>`
         <tr>
-          <td style="font-weight:600;"><span class="chip" style="background:${brandBg(br.brandId)};"><span class="sq"></span>${escapeHtml(brandName(br.brandId))}</span></td>
+          <td style="font-weight:600;"><span class="chip" style="background:${brandBg(br.brandId)};color:${brandText(br.brandId)};"><span class="sq"></span>${escapeHtml(brandName(br.brandId))}</span></td>
           <td class="num">${br.nbClients}</td>
           <td class="num" style="font-weight:700;">${fmtMoney(br.total)}</td>
         </tr>
@@ -3669,7 +3722,7 @@ function renderBudgetCommercial(){
           <td style="font-weight:600;">${r.titre?escapeHtml(r.titre):`<span class="helper" style="display:inline;">Animation du ${fmtDate(r.date)}</span>`}</td>
           <td style="cursor:pointer;" onclick="openClientSuiviOnlyModal('${r.client.id}')" title="Ouvrir le suivi commercial">${escapeHtml(clientDisplayName(r.client))}</td>
           <td>${r.linkedClients.length===0?'—':r.linkedClients.map(lc=>escapeHtml(clientDisplayName(lc))).join(', ')}</td>
-          <td>${Object.keys(r.budgets).map(bid=>`<span class="chip" style="background:${brandBg(bid)};font-size:10px;margin:1px 3px 1px 0;">${escapeHtml(brandName(bid))} — ${fmtMoney(r.budgets[bid])}</span>`).join('')}</td>
+          <td>${Object.keys(r.budgets).map(bid=>`<span class="chip" style="background:${brandBg(bid)};color:${brandText(bid)};font-size:10px;margin:1px 3px 1px 0;">${escapeHtml(brandName(bid))} — ${fmtMoney(r.budgets[bid])}</span>`).join('')}</td>
           <td class="num" style="font-weight:700;">${fmtMoney(r.totalBudget)}</td>
           <td class="num">${fmtMoney(r.ca)}</td>
           <td class="num" style="font-weight:700;color:${r.ratio==null?'var(--muted)':(r.ratio>15?'var(--danger)':(r.ratio>7?'#D9782D':'var(--success)'))};">${r.ratio==null?'—':r.ratio.toFixed(1)+' %'}</td>
@@ -5026,7 +5079,7 @@ function renderClientSuiviCommercialSection(c, timelineMaxHeight, showFullscreen
           <div class="timeline-item" style="align-items:flex-start;">
             <input type="checkbox" style="width:auto;margin-top:2px;" ${ui.historySelected[h.id]?'checked':''} onchange="toggleHistorySelect('${h.id}', this.checked)">
             <div class="tdot"></div>
-            <div style="flex:1;cursor:pointer;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')"><div class="tdate">${fmtDate(h.date)}${h.typeVisite?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:6px;">${escapeHtml(h.typeVisite)}</span>`:''}${h.duree?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:4px;">⏱ ${h.duree} min</span>`:''}${historyBrandIds(h).map(bid=>` <span class="chip" style="background:${brandBg(bid)};font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(brandName(bid))}</span>`).join('')}${historyTasks(h).map(t=>` <span class="chip" title="${t.comment?escapeHtml(t.comment):''}" style="background:${taskColor(t.name)};color:#fff;font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(t.name)}${t.comment?' 💬':''}</span>`).join('')}</div>${historyPersonneNames(h,c).length>0?`<div class="helper" style="margin:2px 0 2px;">👤 ${historyPersonneNames(h,c).map(escapeHtml).join(', ')}</div>`:''}${historyNoteBlocksHtml(h)}</div>
+            <div style="flex:1;cursor:pointer;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')"><div class="tdate">${fmtDate(h.date)}${h.typeVisite?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:6px;">${escapeHtml(h.typeVisite)}</span>`:''}${h.duree?` <span class="chip" style="background:var(--surface-2);color:var(--ink-soft);font-size:9px;padding:2px 6px;margin-left:4px;">⏱ ${h.duree} min</span>`:''}${historyBrandIds(h).map(bid=>` <span class="chip" style="background:${brandBg(bid)};color:${brandText(bid)};font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(brandName(bid))}</span>`).join('')}${historyTasks(h).map(t=>` <span class="chip" title="${t.comment?escapeHtml(t.comment):''}" style="background:${taskColor(t.name)};color:#fff;font-size:9px;padding:2px 6px;margin-left:4px;">${escapeHtml(t.name)}${t.comment?' 💬':''}</span>`).join('')}</div>${historyPersonneNames(h,c).length>0?`<div class="helper" style="margin:2px 0 2px;">👤 ${historyPersonneNames(h,c).map(escapeHtml).join(', ')}</div>`:''}${historyNoteBlocksHtml(h)}</div>
             <button class="btn btn-sm btn-ghost" style="padding:2px 8px;" onclick="openEditHistoryNoteModal('${c.id}','${h.id}')">✎</button>
             <button class="btn btn-sm btn-ghost btn-danger" style="padding:2px 8px;" onclick="deleteHistoryNote('${c.id}','${h.id}')">✕</button>
           </div>
@@ -5099,7 +5152,7 @@ function openContactDetail(clientId, contactId){
             <td><span class="helper" style="font-weight:600;">${escapeHtml(d.type||'Devis')}</span></td>
             <td style="white-space:nowrap;">${fmtDate(d.date)}</td>
             <td style="max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(d.objet||'')}">${escapeHtml(d.objet||'—')}</td>
-            <td>${brandIds.slice(0,3).map(bid=>`<span class="chip" style="background:${brandBg(bid)};margin-right:3px;"><span class="sq"></span>${escapeHtml(brandName(bid))}</span>`).join('')||'<span class="helper">—</span>'}${brandIds.length>3?`<span class="helper">+${brandIds.length-3}</span>`:''}</td>
+            <td>${brandIds.slice(0,3).map(bid=>`<span class="chip" style="background:${brandBg(bid)};color:${brandText(bid)};margin-right:3px;"><span class="sq"></span>${escapeHtml(brandName(bid))}</span>`).join('')||'<span class="helper">—</span>'}${brandIds.length>3?`<span class="helper">+${brandIds.length-3}</span>`:''}</td>
             <td class="num" style="font-weight:700;white-space:nowrap;">${fmtMoney(devisTotal(d).ht)}</td>
             <td><span class="status-pill status-${escapeHtml(d.status||'')}">${escapeHtml(d.status||'—')}</span></td>
             <td>${d.etatAffaire?`<span class="status-pill" style="background:${oc.bg};color:${oc.fg};">${escapeHtml(d.etatAffaire)}</span>`:'<span class="helper">—</span>'}</td>
@@ -5214,7 +5267,7 @@ function openClientDetail(id, scrollToSuivi){
             <td style="white-space:nowrap;">${fmtDate(d.date)}</td>
             <td>${d.clientId===id?`${escapeHtml(clientSocieteLabel(d.clientId))}${d.installateurId?`<div style="font-size:11.5px;font-weight:700;color:#2977D9;">↳ pour ${escapeHtml(clientSocieteLabel(d.installateurId))}</div>`:''}`:(d.installateurId===id?`<span class="chip" style="background:#2977D9;" title="Offre faite à ce distributeur pour cet installateur">Via ${escapeHtml(clientSocieteLabel(d.clientId))}</span>`:`<span class="chip" style="background:var(--ink-soft);" title="Devis fait à une autre fiche de la même société, à l'attention de ${escapeHtml(c.name)}">Autre fiche de la société</span>`)}${d.attentionA?`<div class="helper" style="font-size:11px;">✉ à l'attention de ${escapeHtml(d.attentionA)}</div>`:''}</td>
             <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(d.objet||'')}">${escapeHtml(d.objet||'—')}</td>
-            <td>${brandIds.slice(0,3).map(bid=>`<span class="chip" style="background:${brandBg(bid)};margin-right:3px;"><span class="sq"></span>${escapeHtml(brandName(bid))}</span>`).join('')||'<span class="helper">—</span>'}${brandIds.length>3?`<span class="helper">+${brandIds.length-3}</span>`:''}</td>
+            <td>${brandIds.slice(0,3).map(bid=>`<span class="chip" style="background:${brandBg(bid)};color:${brandText(bid)};margin-right:3px;"><span class="sq"></span>${escapeHtml(brandName(bid))}</span>`).join('')||'<span class="helper">—</span>'}${brandIds.length>3?`<span class="helper">+${brandIds.length-3}</span>`:''}</td>
             <td class="num" style="font-weight:700;white-space:nowrap;">${fmtMoney(t.ht)}</td>
             <td onclick="event.stopPropagation();">
               <select onchange="clientDetailChangeApporteur('${c.id}','${d.id}', this.value)" style="width:auto;padding:4px 8px;font-size:11.5px;">
@@ -5260,7 +5313,7 @@ function openClientDetail(id, scrollToSuivi){
 function renderHistoryBrandChips(){
   return state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>{
     const active = historyNoteSelectedBrands.includes(b.id);
-    return `<button type="button" onclick="toggleHistoryBrandChip(this,'${b.id}')" data-brand="${b.id}" style="background:${brandBg(b.id)};color:#fff;border:2px solid ${active?'#1a1a1a':'transparent'};opacity:${active?'1':'.5'};padding:3px 11px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;">${escapeHtml(b.name)}</button>`;
+    return `<button type="button" onclick="toggleHistoryBrandChip(this,'${b.id}')" data-brand="${b.id}" style="background:${brandBg(b.id)};color:${brandText(b.id)};border:2px solid ${active?'#1a1a1a':'transparent'};opacity:${active?'1':'.5'};padding:3px 11px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;">${escapeHtml(b.name)}</button>`;
   }).join('');
 }
 function toggleHistoryBrandChip(el, brandId){
@@ -5281,7 +5334,7 @@ function renderHistoryBudgetSection(tasks, brandIds, budgets, onchangeFn){
     <div style="display:flex;flex-wrap:wrap;gap:10px;">
       ${brandIds.map(bid=>`
         <div style="display:flex;align-items:center;gap:6px;">
-          <span class="chip" style="background:${brandBg(bid)};font-size:10px;">${escapeHtml(brandName(bid))}</span>
+          <span class="chip" style="background:${brandBg(bid)};color:${brandText(bid)};font-size:10px;">${escapeHtml(brandName(bid))}</span>
           <input type="number" min="0" step="10" value="${budgets[bid]!=null?budgets[bid]:''}" placeholder="0 €" style="width:90px;" onchange="${onchangeFn}('${bid}', this.value)">
         </div>
       `).join('')}
@@ -5298,7 +5351,7 @@ function renderHistoryBrandNotes(brandIds, texts, kind){
   const prefix = kind==='add' ? 'ah_bn_' : 'eh_bn_';
   return `<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">${brandIds.map(bid=>`
     <div class="field" style="margin:0;padding:10px 12px;border:1px solid var(--line);border-left:4px solid ${brandColor(bid)};border-radius:8px;background:var(--surface-2);">
-      <label style="display:flex;align-items:center;gap:8px;"><span class="chip" style="background:${brandBg(bid)};font-size:10px;">${escapeHtml(brandName(bid))}</span> Note spécifique à ${escapeHtml(brandName(bid))} <span class="helper" style="display:inline;">— uniquement dans son rapport</span></label>
+      <label style="display:flex;align-items:center;gap:8px;"><span class="chip" style="background:${brandBg(bid)};color:${brandText(bid)};font-size:10px;">${escapeHtml(brandName(bid))}</span> Note spécifique à ${escapeHtml(brandName(bid))} <span class="helper" style="display:inline;">— uniquement dans son rapport</span></label>
       <textarea rows="3" id="${prefix}${bid}" placeholder="Ce qui concerne ${escapeHtml(brandName(bid))}…" oninput="setHistoryBrandText('${kind}','${bid}',this.value)">${escapeHtml(texts[bid]||'')}</textarea>
     </div>`).join('')}</div>`;
 }
@@ -5323,7 +5376,7 @@ function historyNoteBlocksHtml(h){
   const bn = h.brandNotes || {};
   historyBrandIds(h).forEach(bid=>{
     const t = (bn[bid]||'').trim();
-    if(t) parts.push(`<div style="white-space:pre-wrap;margin-top:4px;"><span class="chip" style="background:${brandBg(bid)};font-size:9px;padding:2px 6px;margin-right:6px;">${escapeHtml(brandName(bid))}</span>${escapeHtml(t).replace(/\n/g,'<br>')}</div>`);
+    if(t) parts.push(`<div style="white-space:pre-wrap;margin-top:4px;"><span class="chip" style="background:${brandBg(bid)};color:${brandText(bid)};font-size:9px;padding:2px 6px;margin-right:6px;">${escapeHtml(brandName(bid))}</span>${escapeHtml(t).replace(/\n/g,'<br>')}</div>`);
   });
   return parts.join('') || '<span class="helper">—</span>';
 }
@@ -5472,7 +5525,7 @@ let historyEditSelectedBrands = [];
 function renderHistoryEditBrandChips(){
   return state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>{
     const active = historyEditSelectedBrands.includes(b.id);
-    return `<button type="button" onclick="toggleHistoryEditBrandChip(this,'${b.id}')" data-brand="${b.id}" style="background:${brandBg(b.id)};color:#fff;border:2px solid ${active?'#1a1a1a':'transparent'};opacity:${active?'1':'.5'};padding:3px 11px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;">${escapeHtml(b.name)}</button>`;
+    return `<button type="button" onclick="toggleHistoryEditBrandChip(this,'${b.id}')" data-brand="${b.id}" style="background:${brandBg(b.id)};color:${brandText(b.id)};border:2px solid ${active?'#1a1a1a':'transparent'};opacity:${active?'1':'.5'};padding:3px 11px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;">${escapeHtml(b.name)}</button>`;
   }).join('');
 }
 function toggleHistoryEditBrandChip(el, brandId){
@@ -6458,7 +6511,7 @@ function renderTarifs(){
       <div class="card card-pad" style="cursor:pointer;" onclick="ui.tarifsView='detail'; ui.tarifsBrandFilter='${b.id}'; ui.tarifsSearch=''; ui.tarifsPage=0; render();">
         <div style="display:flex;align-items:center;gap:8px;">
           ${b.logo?`<img src="${b.logo}" alt="" style="width:32px;height:32px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff;flex-shrink:0;">`:''}
-          <div class="chip" style="background:${brandBg(b.id)}"><span class="sq"></span>${escapeHtml(b.name)}</div>
+          <div class="chip" style="background:${brandBg(b.id)};color:${brandText(b.id)}"><span class="sq"></span>${escapeHtml(b.name)}</div>
         </div>
         <div style="margin-top:12px;font-size:12.5px;color:var(--ink-soft);">
           <strong style="color:var(--ink);font-size:15px;">${nb}</strong> référence(s)
@@ -6891,7 +6944,7 @@ function renderTarifsTableInner(){
         ${pageItems.map(t=>{
           return `
           <tr>
-            ${showBrandCol?`<td><span class="chip" style="background:${brandBg(t.brandId)}"><span class="sq"></span>${escapeHtml(brandName(t.brandId))}</span></td>`:''}
+            ${showBrandCol?`<td><span class="chip" style="background:${brandBg(t.brandId)};color:${brandText(t.brandId)}"><span class="sq"></span>${escapeHtml(brandName(t.brandId))}</span></td>`:''}
             <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(t.reference)}</td>
             <td>${escapeHtml(t.designation)}</td>
             <td class="num" style="font-weight:600;${!t.prixCatalogue?'color:var(--danger, #b3392c);':''}">${t.prixCatalogue?fmtMoney(t.prixCatalogue):'⚠ 0,00 €'}</td>
@@ -6969,14 +7022,14 @@ function renderListesPrixNets(){
       <div class="card card-pad" style="cursor:pointer;" onclick="ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${defaultListeId}'; ui.pnSearch=''; render();" title="Cliquer pour ouvrir ce fournisseur">
         <div style="display:flex;align-items:center;gap:8px;">
           ${b.logo?`<img src="${b.logo}" alt="" style="width:28px;height:28px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff;flex-shrink:0;">`:''}
-          <div class="chip" style="background:${brandBg(b.id)}"><span class="sq"></span>${escapeHtml(b.name)}</div>
+          <div class="chip" style="background:${brandBg(b.id)};color:${brandText(b.id)}"><span class="sq"></span>${escapeHtml(b.name)}</div>
           <div style="margin-left:auto;font-size:11.5px;color:var(--ink-soft);white-space:nowrap;">${totalRefs} réf. · ${assigned.length} client(s)</div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;">
           ${listes.length===0?'<span class="helper">Aucune liste pour ce fournisseur — cliquez pour en créer une.</span>':listes.map(l=>{
             const nb = countsByListe.get(l.id)||0;
             const nbC = pnAssignedClientsForListe(l.id).length;
-            return `<span class="chip" style="background:var(--surface-2);color:var(--ink-soft);border:1px solid var(--line);cursor:pointer;" onclick="event.stopPropagation(); ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();" title="${nb} référence(s) · ${nbC} client(s)${listeDatesRangeLabel(l)?' · '+listeDatesRangeLabel(l):''}"><span class="sq" style="background:${brandBg(b.id)};"></span>${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</span>`;
+            return `<span class="chip" style="background:var(--surface-2);color:var(--ink-soft);border:1px solid var(--line);cursor:pointer;" onclick="event.stopPropagation(); ui.pnView='detail'; ui.pnBrandFilter='${b.id}'; ui.pnListeFilter='${l.id}'; ui.pnSearch=''; render();" title="${nb} référence(s) · ${nbC} client(s)${listeDatesRangeLabel(l)?' · '+listeDatesRangeLabel(l):''}"><span class="sq" style="background:${brandBg(b.id)};color:${brandText(b.id)};"></span>${escapeHtml(l.nom)}${listeValidityBadgeHtml(l)}</span>`;
           }).join('')}
         </div>
       </div>`;
@@ -7279,7 +7332,7 @@ function renderListesPrixNetsTableInner(){
           const m = margeNetInfo(t);
           return `
           <tr>
-            ${showBrandCol?`<td><span class="chip" style="background:${brandBg(t.brandId)}"><span class="sq"></span>${escapeHtml(brandName(t.brandId))}</span></td>`:''}
+            ${showBrandCol?`<td><span class="chip" style="background:${brandBg(t.brandId)};color:${brandText(t.brandId)}"><span class="sq"></span>${escapeHtml(brandName(t.brandId))}</span></td>`:''}
             <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(t.reference)}</td>
             <td>${escapeHtml(t.designation)}</td>
             <td class="num pn-edit" data-id="${t.id}" data-field="prixNet" title="Cliquer pour modifier le prix" onclick="startPnPriceEdit(this)" style="cursor:text;font-weight:600;${!t.prixNet?'color:var(--danger, #b3392c);':''}">${t.prixNet?fmtMoney(t.prixNet):'⚠ 0,00 €'}</td>
@@ -8094,7 +8147,7 @@ function renderRechercheResultsInner(all,q){
       <tbody>
         ${shown.map(r=>`
           <tr>
-            <td><span class="chip" style="background:${brandBg(r.brandId)}"><span class="sq"></span>${escapeHtml(brandName(r.brandId))}</span></td>
+            <td><span class="chip" style="background:${brandBg(r.brandId)};color:${brandText(r.brandId)}"><span class="sq"></span>${escapeHtml(brandName(r.brandId))}</span></td>
             <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(r.reference)}</td>
             <td>${escapeHtml(r.designation||'—')}</td>
             <td class="num" style="font-weight:600;">${r.prixHT!=null?fmtMoney(r.prixHT):'<span class="helper" title="Référence absente du tarif, présente uniquement dans une liste de prix nets">—</span>'}</td>
@@ -8113,7 +8166,7 @@ function renderRechercheResultsInner(all,q){
             <td>${fmtDate(x.d.date)}</td>
             <td style="font-weight:600;white-space:nowrap;">${escapeHtml(x.d.number||'—')}${x.d.type==='Marché'?' <span class="chip" style="background:var(--ink-soft);font-size:10px;">Marché</span>':''}${x.d.etatAffaire?`<div class="helper" style="font-size:11px;">${escapeHtml(x.d.etatAffaire)}</div>`:''}</td>
             <td>${escapeHtml(clientSocieteLabel(x.d.clientId))}${x.d.installateurId?`<div style="font-size:11.5px;font-weight:700;color:#2977D9;">↳ pour ${escapeHtml(clientSocieteLabel(x.d.installateurId))}</div>`:''}</td>
-            <td>${x.l.brandId?`<span class="chip" style="background:${brandBg(x.l.brandId)}"><span class="sq"></span>${escapeHtml(brandName(x.l.brandId))}</span>`:'—'}</td>
+            <td>${x.l.brandId?`<span class="chip" style="background:${brandBg(x.l.brandId)};color:${brandText(x.l.brandId)}"><span class="sq"></span>${escapeHtml(brandName(x.l.brandId))}</span>`:'—'}</td>
             <td style="font-weight:700;font-family:'Space Grotesk';">${escapeHtml(x.l.reference||'—')}</td>
             <td>${escapeHtml(x.des||'—')}</td>
             <td class="num">${x.l.qty||0}</td>
@@ -8353,7 +8406,7 @@ function renderParamListPanel(){
           <tr>
             <td style="font-weight:600;font-family:'Space Grotesk';">${escapeHtml(it.code||'—')}</td>
             <td>${escapeHtml(it.libelle||'')}</td>
-            ${hasBrand?`<td>${it.brandId?`<span class="chip" style="background:${brandBg(it.brandId)};"><span class="sq"></span>${escapeHtml(brandName(it.brandId))}</span>`:'<span class="helper">Tous fournisseurs</span>'}</td>`:''}
+            ${hasBrand?`<td>${it.brandId?`<span class="chip" style="background:${brandBg(it.brandId)};color:${brandText(it.brandId)};"><span class="sq"></span>${escapeHtml(brandName(it.brandId))}</span>`:'<span class="helper">Tous fournisseurs</span>'}</td>`:''}
             ${hasFamille?`<td>${familleLabel(it.familleId)}</td>`:''}
             ${hasOutcome?`<td><span class="status-pill" style="background:${oc.bg};color:${oc.fg};">${outcomeLabel(it.outcome||'encours')}</span></td>`:''}
             <td class="table-actions">
@@ -9032,7 +9085,7 @@ function renderDevisListInner(){
           <td>${fmtDate(d.date)}</td>
           <td>${escapeHtml(clientSocieteLabel(d.clientId))}${d.installateurId?`<div style="font-size:11.5px;font-weight:700;color:#2977D9;">↳ pour ${escapeHtml(clientSocieteLabel(d.installateurId))}</div>`:''}</td>
           <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(d.objet||'—')}</td>
-          <td>${brandIds.slice(0,3).map(bid=>`<span class="chip" style="background:${brandBg(bid)};margin-right:3px;"><span class="sq"></span>${escapeHtml(brandName(bid))}</span>`).join('')}${brandIds.length>3?`<span class="helper">+${brandIds.length-3}</span>`:''}</td>
+          <td>${brandIds.slice(0,3).map(bid=>`<span class="chip" style="background:${brandBg(bid)};color:${brandText(bid)};margin-right:3px;"><span class="sq"></span>${escapeHtml(brandName(bid))}</span>`).join('')}${brandIds.length>3?`<span class="helper">+${brandIds.length-3}</span>`:''}</td>
           <td class="num" style="font-weight:700;">${fmtMoney(t.ht)}</td>
           <td onclick="event.stopPropagation();">
             <select onchange="changeDevisApporteur('${d.id}', this.value)" style="width:auto;padding:4px 8px;font-size:11.5px;">
@@ -9307,7 +9360,7 @@ function renderCommissionsTop5(){
       ${rows2.map((r,i)=>`
         <div style="display:flex;align-items:center;gap:10px;">
           <div style="width:18px;text-align:center;font-weight:700;color:var(--muted);font-size:12.5px;">${i+1}</div>
-          <span class="chip" style="background:${brandBg(r.b.id)};flex-shrink:0;"><span class="sq"></span>${escapeHtml(r.b.name)}</span>
+          <span class="chip" style="background:${brandBg(r.b.id)};color:${brandText(r.b.id)};flex-shrink:0;"><span class="sq"></span>${escapeHtml(r.b.name)}</span>
           <div style="flex:1;min-width:24px;height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden;">
             <div style="height:100%;width:${Math.max(4, (r[valueKey]/rows2[0][valueKey])*100)}%;background:${color};"></div>
           </div>
@@ -9445,7 +9498,7 @@ function renderCommissionsTableInner(){
         return sortDir==='asc' ? av-bv : bv-av;
       });
     return renderCustomizableTable('commissionsMonth', [
-        {key:'marque', label:'Fournisseur', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandBg(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
+        {key:'marque', label:'Fournisseur', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandBg(r.b.id)};color:${brandText(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
         {key:'ca', label:`CA (${MOIS_LABELS[month-1]} ${year})`, defaultWidth:150, cell:r=>`<input type="number" data-nfmt="1" step="0.01" min="0" value="${r.entry.ca||''}" placeholder="0" style="max-width:140px;" onchange="setCommissionEntry('${r.b.id}',${year},${month},'ca',this.value); render();">`},
         {key:'commission', label:'Montant commission', defaultWidth:170, cell:r=>`<input type="number" data-nfmt="1" step="0.01" min="0" value="${r.entry.commission||''}" placeholder="0" style="max-width:140px;font-weight:700;color:var(--success);" onchange="setCommissionEntry('${r.b.id}',${year},${month},'commission',this.value); render();">`},
         {key:'commentaire', label:'Commentaire', defaultWidth:260, cell:r=>`<textarea rows="1" placeholder="—" onchange="setCommissionComment('${r.b.id}',${year},${month},this.value);">${escapeHtml(r.entry.commentaire||'')}</textarea>`},
@@ -9467,7 +9520,7 @@ function renderCommissionsTableInner(){
       <div class="helper" style="margin-bottom:10px;">💡 Cliquez sur le nom d'un fournisseur pour ouvrir la saisie de toute l'année dans une fenêtre.</div>
       ${renderCustomizableTable('commissionsYear', [
         {key:'rang', label:'#', defaultWidth:50, cellStyle:'font-weight:700;color:var(--muted);', cell:(r)=>String(rows.indexOf(r)+1)},
-        {key:'marque', label:'Fournisseur', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandBg(r.b.id)};cursor:pointer;" onclick="event.stopPropagation(); openCommissionYearModal('${r.b.id}')" title="Cliquer pour ouvrir la saisie de l'année complète"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
+        {key:'marque', label:'Fournisseur', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandBg(r.b.id)};color:${brandText(r.b.id)};cursor:pointer;" onclick="event.stopPropagation(); openCommissionYearModal('${r.b.id}')" title="Cliquer pour ouvrir la saisie de l'année complète"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
         {key:'ca', label:`CA (${year})`, defaultWidth:150, cellClass:'num', cellStyle:'font-weight:600;', cell:r=>fmtMoney(r.ca)},
         {key:'commission', label:'Montant commission', defaultWidth:170, cellClass:'num', cellStyle:'font-weight:700;color:var(--success);', cell:r=>fmtMoney(r.commission)},
       ], rows)}
@@ -9494,7 +9547,7 @@ function renderCommissionsTableInner(){
     <div class="helper" style="margin-bottom:10px;">Vue cumulée sur toutes les années saisies. Sélectionnez une année pour modifier les montants.</div>
     ${renderCustomizableTable('commissionsAllYears', [
       {key:'rang', label:'#', defaultWidth:50, cellStyle:'font-weight:700;color:var(--muted);', cell:(r)=>String(rows.indexOf(r)+1)},
-      {key:'marque', label:'Fournisseur', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandBg(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
+      {key:'marque', label:'Fournisseur', defaultWidth:220, cell:r=>`<span class="chip" style="background:${brandBg(r.b.id)};color:${brandText(r.b.id)};"><span class="sq"></span>${escapeHtml(r.b.name)}</span>`},
       {key:'ca', label:'CA cumulé', defaultWidth:150, cellClass:'num', cellStyle:'font-weight:600;', cell:r=>fmtMoney(r.ca)},
       {key:'commission', label:'Commission cumulée', defaultWidth:170, cellClass:'num', cellStyle:'font-weight:700;color:var(--success);', cell:r=>fmtMoney(r.commission)},
     ], rows)}
@@ -9518,7 +9571,7 @@ function commissionYearModalHtml(){
   return `
     <div class="modal-head">
       <h3 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <span class="chip" style="background:${brandBg(b.id)};font-size:14px;padding:5px 14px;">${escapeHtml(b.name)}</span>
+        <span class="chip" style="background:${brandBg(b.id)};color:${brandText(b.id)};font-size:14px;padding:5px 14px;">${escapeHtml(b.name)}</span>
         Commissions ${year}
       </h3>
       <button class="close-x" onclick="closeCommissionYearModal()">✕</button>
@@ -10084,7 +10137,7 @@ function inlineRefSearchRun(q, idx){
   if(results.length===0){ box.innerHTML=''; return; }
   box.innerHTML = results.map(t=>`
     <div class="autocomplete-item" onmousedown="event.preventDefault(); replaceDevisLineWithTarif(${idx}, '${t.id}');">
-      <span class="chip" style="background:${brandBg(t.brandId)};font-size:9px;margin-right:5px;">${escapeHtml(brandName(t.brandId))}</span>
+      <span class="chip" style="background:${brandBg(t.brandId)};color:${brandText(t.brandId)};font-size:9px;margin-right:5px;">${escapeHtml(brandName(t.brandId))}</span>
       <span class="ref">${escapeHtml(t.reference)}</span> — <span class="num">${fmtMoney(t.prixCatalogue)}</span>
       <div class="desig" style="font-size:10.5px;">${escapeHtml(t.designation||'')}</div>
     </div>
@@ -10144,7 +10197,7 @@ function editLineSearchRun(q, idx){
   }
   box.innerHTML = `<div class="autocomplete-list">${results.map(t=>`
     <div class="autocomplete-item" onclick="replaceDevisLineWithTarif(${idx}, '${t.id}')">
-      <span class="chip" style="background:${brandBg(t.brandId)};font-size:10px;margin-right:6px;">${escapeHtml(brandName(t.brandId))}</span>
+      <span class="chip" style="background:${brandBg(t.brandId)};color:${brandText(t.brandId)};font-size:10px;margin-right:6px;">${escapeHtml(brandName(t.brandId))}</span>
       <span class="ref">${escapeHtml(t.reference)}</span> — <span class="num">${fmtMoney(t.prixCatalogue)}</span>
       <div class="desig">${escapeHtml(t.designation||'')}</div>
       ${t.complementInfo?`<div style="color:var(--brass);font-weight:600;font-size:11.5px;margin-top:2px;">⚠ ${escapeHtml(t.complementInfo)}</div>`:''}
@@ -10307,7 +10360,7 @@ function renderDevisTemplates(){
         return `
         <tr>
           <td style="font-weight:600;cursor:pointer;" onclick="openDevisTemplateForm('${tpl.id}')">📐 ${escapeHtml(tpl.templateName||'(sans nom)')}</td>
-          <td>${brandIds.map(bid=>`<span class="chip" style="background:${brandBg(bid)};font-size:10px;margin-right:3px;">${escapeHtml(brandName(bid))}</span>`).join('')||'—'}</td>
+          <td>${brandIds.map(bid=>`<span class="chip" style="background:${brandBg(bid)};color:${brandText(bid)};font-size:10px;margin-right:3px;">${escapeHtml(brandName(bid))}</span>`).join('')||'—'}</td>
           <td>${(tpl.lines||[]).length}</td>
           <td class="table-actions">
             <button class="btn btn-sm btn-brass" onclick="duplicateTemplateToDevis('${tpl.id}')" title="Crée un nouveau devis à partir de ce modèle">⧉ Dupliquer en devis</button>
@@ -11060,7 +11113,7 @@ function devisLinesRowsHtml(){
     return `
     <tr data-reference="${escapeHtml(l.reference||'')}" title="Curseur sur cette ligne : F3 historique client, F4 département, F5 tous clients, F6 famille/sous-famille">
       ${dragHandle}
-      <td><span class="chip" style="background:${brandBg(l.brandId)};font-size:9.5px;padding:3px 6px;white-space:normal;line-height:1.25;">${escapeHtml(brandName(l.brandId))}</span></td>
+      <td><span class="chip" style="background:${brandBg(l.brandId)};color:${brandText(l.brandId)};font-size:9.5px;padding:3px 6px;white-space:normal;line-height:1.25;">${escapeHtml(brandName(l.brandId))}</span></td>
       <td style="position:relative;font-weight:700;font-family:'Space Grotesk';font-size:12px;">
         <input type="text" value="${escapeHtml(l.reference||'')}" oninput="debouncedInlineRefSearch(this.value, ${i})" onchange="commitInlineRefEdit(${i}, this.value)" style="width:100%;font-weight:700;font-family:'Space Grotesk';font-size:12px;padding:2px 4px;border:1px solid transparent;background:transparent;" onfocus="this.style.borderColor='var(--line)';this.style.background='#fff';" onblur="this.style.borderColor='transparent';this.style.background='transparent';">
         ${l.prixNetApplied?'<span class="chip" style="background:var(--success, #3F8A7B);font-size:8px;padding:1px 5px;display:inline-block;margin-top:2px;" title="Prix net client appliqué automatiquement">Prix net</span>':''}
@@ -11288,7 +11341,7 @@ function devisSearchRefsRun(q){
   }
   box.innerHTML = `<div class="autocomplete-list">${results.map(t=>`
     <div class="autocomplete-item" onclick="addDevisLine('${t.id}')">
-      <span class="chip" style="background:${brandBg(t.brandId)};font-size:10px;margin-right:6px;">${escapeHtml(brandName(t.brandId))}</span>
+      <span class="chip" style="background:${brandBg(t.brandId)};color:${brandText(t.brandId)};font-size:10px;margin-right:6px;">${escapeHtml(brandName(t.brandId))}</span>
       <span class="ref">${escapeHtml(t.reference)}</span> — <span class="num">${fmtMoney(t.prixCatalogue)}</span>
       <div class="desig">${escapeHtml(t.designation||'')}</div>
       ${t.complementInfo?`<div style="color:var(--brass);font-weight:600;font-size:11.5px;margin-top:2px;">⚠ ${escapeHtml(t.complementInfo)}</div>`:''}
@@ -11884,7 +11937,7 @@ function openDevisVersionViewer(docId, versionId){
           ${lines.map(l=> l.isTitleLine
             ? `<tr><td colspan="8" style="background:var(--surface-2);font-weight:700;">${cleanRichHtml(l.designation||'')}</td></tr>`
             : `<tr>
-                <td>${l.brandId?`<span class="chip" style="background:${brandBg(l.brandId)}"><span class="sq"></span>${escapeHtml(brandName(l.brandId))}</span>`:'—'}</td>
+                <td>${l.brandId?`<span class="chip" style="background:${brandBg(l.brandId)};color:${brandText(l.brandId)}"><span class="sq"></span>${escapeHtml(brandName(l.brandId))}</span>`:'—'}</td>
                 <td style="font-weight:700;font-family:'Space Grotesk';white-space:nowrap;">${escapeHtml(l.reference||'—')}</td>
                 <td>${cleanRichHtml(l.designation||'')||'—'}</td>
                 <td class="num">${l.qty||0}</td>
@@ -13451,7 +13504,7 @@ function renderTempsGains(){
       <tbody>
         ${brandCaRowsShown.map(r=>`
           <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
-            <td style="font-weight:600;"><span class="chip" style="background:${brandBg(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
+            <td style="font-weight:600;"><span class="chip" style="background:${brandBg(r.brand.id)};color:${brandText(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
             <td class="num">${r.visites}</td>
             <td class="num">${fmtDuree(r.minutes)}</td>
             <td class="num">${fmtMoney(r.ca)}</td>
@@ -13471,7 +13524,7 @@ function renderTempsGains(){
       <tbody>
         ${brandCommissionRowsShown.map(r=>`
           <tr style="cursor:pointer;" onclick="openBrandTempsGainsModal('${r.brand.id}')">
-            <td style="font-weight:600;"><span class="chip" style="background:${brandBg(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
+            <td style="font-weight:600;"><span class="chip" style="background:${brandBg(r.brand.id)};color:${brandText(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
             <td class="num">${fmtDuree(r.minutes)}</td>
             <td class="num" style="font-weight:600;color:var(--brass);">${fmtMoney(r.commission)}</td>
             <td class="num" style="font-weight:700;color:${r.importanceCommissionOnly==null?'var(--muted)':(r.importanceCommissionOnly>=75?'var(--success)':(r.importanceCommissionOnly>=50?'var(--info)':(r.importanceCommissionOnly>=25?'#D9782D':'var(--danger)')))};">${r.importanceCommissionOnly!=null?r.importanceCommissionOnly+' / 100':'—'}</td>
@@ -14200,7 +14253,7 @@ function caVvaBrandBreakdownHtml(year, clientId, clientTotal){
       <tbody>
         ${brandRows.map(r=>`
           <tr style="cursor:pointer;" onclick="openCaVvaModal(${year}, '${r.brand.id}', '${clientId}')" title="Voir/modifier le détail mensuel de ce fournisseur">
-            <td><span class="chip" style="background:${brandBg(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
+            <td><span class="chip" style="background:${brandBg(r.brand.id)};color:${brandText(r.brand.id)};"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td>
             <td class="num" style="font-weight:700;">${fmtMoney(r.total)}</td>
           </tr>
         `).join('')}
@@ -14411,7 +14464,7 @@ function renderDashboard(){
     'top-distrib': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients distributeurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (${caSource==='vva'?'VVA':'devis gagnés'}), société de famille Grossiste/Distributeur.</div>${topListHtml(topDistrib)}`,
     'top-install': `<h3 style="margin:0 0 4px 0;font-size:15px;">Top clients installateurs</h3><div class="helper" style="margin-bottom:12px;">CA ${y} (${caSource==='vva'?'VVA':'devis gagnés'}), société de famille Installateur.</div>${topListHtml(topInstall)}`,
     'chart-correlation': `<h3 style="margin:0 0 4px 0;font-size:15px;">Corrélation devis réalisés / CA généré</h3><div class="helper" style="margin-bottom:12px;">Par mois sur ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}. Barres : nombre de devis/marchés créés (tous statuts). Ligne : CA généré (devis gagnés).</div><div class="chart-wrap"><canvas id="chartCorrelation"></canvas></div>`,
-    'table-apporteur': `<h3 style="margin:0 0 4px 0;font-size:15px;">Nombre de devis/marchés par fournisseur et par apporteur d'affaire</h3><div class="helper" style="margin-bottom:12px;">Année ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}, tous statuts confondus. Cliquez sur un nombre pour voir le détail.</div>${brandApporteurRows.length===0?'<div class="helper">Aucun devis/marché sur cette période pour ce périmètre.</div>':`<div class="table-wrap"><table><thead><tr><th>Fournisseur</th><th class="num">Agent</th><th class="num">Distributeur</th><th class="num">Non précisé</th><th class="num">Total</th></tr></thead><tbody>${brandApporteurRows.map(r=>`<tr><td style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)"><span class="chip" style="background:${brandBg(r.brand.id)}"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Agent')">${r.agent}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Distributeur')">${r.distrib}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'nonPrecise')">${r.nonPrecise}</td><td class="num" style="font-weight:700;cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)">${r.total}</td></tr>`).join('')}</tbody></table></div>`}`,
+    'table-apporteur': `<h3 style="margin:0 0 4px 0;font-size:15px;">Nombre de devis/marchés par fournisseur et par apporteur d'affaire</h3><div class="helper" style="margin-bottom:12px;">Année ${y}${brandFilter!=='all'?` — ${escapeHtml(brandName(brandFilter))}`:''}${clientFilter!=='all'?` — ${escapeHtml(clientSocieteLabel(clientFilter))}`:''}, tous statuts confondus. Cliquez sur un nombre pour voir le détail.</div>${brandApporteurRows.length===0?'<div class="helper">Aucun devis/marché sur cette période pour ce périmètre.</div>':`<div class="table-wrap"><table><thead><tr><th>Fournisseur</th><th class="num">Agent</th><th class="num">Distributeur</th><th class="num">Non précisé</th><th class="num">Total</th></tr></thead><tbody>${brandApporteurRows.map(r=>`<tr><td style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)"><span class="chip" style="background:${brandBg(r.brand.id)};color:${brandText(r.brand.id)}"><span class="sq"></span>${escapeHtml(r.brand.name)}</span></td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Agent')">${r.agent}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'Distributeur')">${r.distrib}</td><td class="num" style="cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', 'nonPrecise')">${r.nonPrecise}</td><td class="num" style="font-weight:700;cursor:pointer;" onclick="drillDownApporteur(${y}, '${cmId}', '${brandFilter}', '${clientFilter}', '${r.brand.id}', null)">${r.total}</td></tr>`).join('')}</tbody></table></div>`}`,
   };
   const dashBlocked = brandFilter==='all' && clientFilter==='all';
   const widgetCardsHtml = state.dashboardLayout.order.map(id=>{
@@ -14520,7 +14573,7 @@ function renderDrillDownModalBody(title, subtitle, list){
       <td>${fmtDate(d.date)}</td>
       <td>${escapeHtml(c?clientSocieteLabel(c.id):'—')}</td>
       <td>${escapeHtml(d.objet||'—')}</td>
-      <td>${brandsInvolved.map(b=>`<span class="chip" style="background:${brandBg(b.id)};margin-right:3px;"><span class="sq"></span>${escapeHtml(b.name)}</span>`).join('')||'—'}</td>
+      <td>${brandsInvolved.map(b=>`<span class="chip" style="background:${brandBg(b.id)};color:${brandText(b.id)};margin-right:3px;"><span class="sq"></span>${escapeHtml(b.name)}</span>`).join('')||'—'}</td>
       <td onclick="event.stopPropagation();">
         <select onchange="changeDrillDownApporteur('${d.id}', this.value, '${escapeJsStr(title)}', '${escapeJsStr(subtitle||'')}')" style="width:auto;padding:4px 8px;font-size:11.5px;">
           <option value="" ${!d.apporteurAffaire?'selected':''}>—</option>
@@ -14659,7 +14712,7 @@ function initDashboardCharts(){
       total = 0;
       acceptedYear.forEach(d=>{ (d.lines||[]).forEach(l=>{ if(l.brandId===b.id) total += lineTotalHT(l, d.destinataire); }); });
     }
-    return {label:b.name, value:total, color:brandColor(b.id)};
+    return {id:b.id, label:b.name, value:total, color:brandColor(b.id)};
   }).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
 
   const clientsInScope = (cmId==='all' ? state.clients : state.clients.filter(c=>c.commercialId===cmId))
@@ -14674,6 +14727,10 @@ function initDashboardCharts(){
   } else {
     chartBrandInstance = new Chart(brandCanvas, {
       type:'bar',
+      plugins:[{id:'brandFill', beforeDatasetDraw(chart, args){
+        const meta = args.meta;
+        (meta.data||[]).forEach((el,i)=>{ const it=brandData[i]; if(it && el && el.options) el.options.backgroundColor = brandChartFill(it.id, chart, el); });
+      }}],
       data:{labels:brandData.map(x=>x.label), datasets:[{data:brandData.map(x=>x.value), backgroundColor:brandData.map(x=>x.color), borderRadius:5, maxBarThickness:28}]},
       options:{indexAxis:'y', responsive:true, maintainAspectRatio:false,
         onClick:(evt, elements)=>{
