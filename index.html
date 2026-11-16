@@ -1282,8 +1282,32 @@ function brandColor(brandId){
   const idx = state.brands.findIndex(b=>b.id===brandId);
   if(idx<0) return '#8A948E';
   const b = state.brands[idx];
-  if(b.colors && b.colors.length) return b.colors[0];
+  const cl = brandColorList(b);
+  if(cl.length) return cl[0];
   return BRAND_COLORS[(b.colorIdx!=null ? b.colorIdx : idx) % BRAND_COLORS.length];
+}
+/* Couleurs effectives d'un fournisseur : réglage manuel, sinon couleurs extraites du logo */
+function brandColorList(b){
+  if(!b) return [];
+  if(b.colorMode==='manual' && b.colorManual && b.colorManual.length) return b.colorManual.filter(Boolean).slice(0,2);
+  return (b.colors||[]).slice(0,2);
+}
+const BRAND_EFFECTS = [
+  ['moitie','Deux moitiés'],['diagonale','Diagonale'],['degrade','Dégradé'],
+  ['rayures','Rayures'],['mosaique','Mosaïque (damier)'],['pois','Pois']
+];
+function colorBgCss(cols, effect){
+  const c1 = cols[0], c2 = cols[1];
+  if(!c1) return '#8A948E';
+  if(!c2) return c1;
+  switch(effect){
+    case 'diagonale': return `linear-gradient(135deg,${c1} 50%,${c2} 50%)`;
+    case 'degrade': return `linear-gradient(90deg,${c1},${c2})`;
+    case 'rayures': return `repeating-linear-gradient(45deg,${c1} 0 5px,${c2} 5px 10px)`;
+    case 'mosaique': return `conic-gradient(${c1} 25%,${c2} 0 50%,${c1} 0 75%,${c2} 0) 0 0/10px 10px`;
+    case 'pois': return `radial-gradient(circle,${c2} 2px,transparent 2.5px) 0 0/8px 8px ${c1}`;
+    default: return `linear-gradient(90deg,${c1} 50%,${c2} 50%)`;
+  }
 }
 /* Classe les fournisseurs par ordre alphabétique (la couleur de repli reste stable grâce à colorIdx) */
 function sortBrands(){
@@ -1297,7 +1321,8 @@ function sortBrands(){
 /* Fond d'une pastille fournisseur : 1 couleur, ou bi-couleur (50/50) si le logo en comporte 2 */
 function brandBg(brandId){
   const b = state.brands.find(x=>x.id===brandId);
-  if(b && b.colors && b.colors.length>1) return `linear-gradient(90deg,${b.colors[0]} 50%,${b.colors[1]} 50%)`;
+  const cl = brandColorList(b);
+  if(cl.length>1) return colorBgCss(cl, b.colorEffect||'moitie');
   return brandColor(brandId);
 }
 /* Extraction des 1 ou 2 couleurs dominantes d'un logo (data URL) — ignore blanc, gris et transparence */
@@ -2980,6 +3005,13 @@ let pendingLogoData = null;
 function openBrandForm(id){
   const b = id ? state.brands.find(x=>x.id===id) : null;
   pendingLogoData = b ? (b.logo||null) : null;
+  brandColorDraft = {
+    mode: (b && b.colorMode==='manual') ? 'manual' : 'auto',
+    auto: b ? (b.colors||null) : null,
+    c1: (b && b.colorManual && b.colorManual[0]) || (b && b.colors && b.colors[0]) || (b ? brandColor(b.id) : '#3A86FF'),
+    c2: (b && b.colorManual && b.colorManual[1]) || (b && b.colors && b.colors[1]) || '',
+    effect: (b && b.colorEffect) || 'moitie'
+  };
   brandFormTab = 'identification';
   brandFrancoRulesDraft = JSON.parse(JSON.stringify((b && b.francoRules) || []));
   brandFrancoBrandId = b ? b.id : null;
@@ -3038,6 +3070,7 @@ function openBrandForm(id){
             <div>🖼 Glissez-déposez une image (PNG, JPG) ici, ou cliquez pour la rechercher dans vos dossiers</div>
           </div>
         </div>
+        <div class="field" id="brandColorWrap" style="margin-top:16px;">${renderBrandColorUI()}</div>
         <div class="field" style="margin-top:16px;">
           <label>Commentaire à intégrer dans les devis <span class="helper" style="display:inline;">(imprimé sur les devis de ce fournisseur, sous les lignes)</span></label>
           <textarea id="f_commentaire" rows="4" placeholder="Ex. conditions de garantie, délais de livraison, mentions spécifiques au fournisseur…">${b?escapeHtml(b.commentaire||''):''}</textarea>
@@ -3108,8 +3141,55 @@ function renderLogoPreview(){
   if(!pendingLogoData) return '<div class="helper">Aucun logo pour le moment.</div>';
   return `<div style="display:flex;align-items:center;gap:12px;">
     <img src="${pendingLogoData}" alt="Logo" style="max-width:140px;max-height:70px;object-fit:contain;border:1px solid var(--line);border-radius:8px;padding:6px;background:#fff;">
-    <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="pendingLogoData=null; document.getElementById('logoPreviewWrap').innerHTML=renderLogoPreview();">Retirer le logo</button>
+    <button type="button" class="btn btn-sm btn-ghost btn-danger" onclick="pendingLogoData=null; document.getElementById('logoPreviewWrap').innerHTML=renderLogoPreview(); brandColorLogoChanged();">Retirer le logo</button>
   </div>`;
+}
+let brandColorDraft = {mode:'auto',auto:null,c1:'#3A86FF',c2:'',effect:'moitie'};
+function brandDraftColors(){
+  const d = brandColorDraft;
+  return d.mode==='manual' ? [d.c1, d.c2].filter(Boolean) : (d.auto||[]);
+}
+function renderBrandColorUI(){
+  const d = brandColorDraft, man = d.mode==='manual';
+  const nm = (document.getElementById('f_name')||{}).value || 'Fournisseur';
+  const effOpts = BRAND_EFFECTS.map(([k,l])=>`<option value="${k}" ${d.effect===k?'selected':''}>${l}</option>`).join('');
+  const cols = brandDraftColors();
+  return `
+    <label>Couleur de la pastille <span class="helper" style="display:inline;">(automatique d'après le logo, ou réglée à la main)</span></label>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+      <label style="display:flex;gap:6px;align-items:center;font-weight:500;"><input type="radio" name="f_colmode" value="auto" ${man?'':'checked'} onchange="brandColorChange()"> Automatique (logo)</label>
+      <label style="display:flex;gap:6px;align-items:center;font-weight:500;"><input type="radio" name="f_colmode" value="manual" ${man?'checked':''} onchange="brandColorChange()"> Manuelle</label>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
+      <span style="display:flex;gap:6px;align-items:center;${man?'':'opacity:.4;pointer-events:none;'}">Couleur 1 <input type="color" id="f_col1" value="${d.c1||'#3A86FF'}" oninput="brandColorChange()" style="width:42px;height:30px;padding:0;border:1px solid var(--line);border-radius:6px;"></span>
+      <span style="display:flex;gap:6px;align-items:center;${man?'':'opacity:.4;pointer-events:none;'}">
+        <input type="checkbox" id="f_col2on" ${d.c2?'checked':''} onchange="brandColorChange()"> Couleur 2
+        <input type="color" id="f_col2" value="${d.c2||'#D62027'}" oninput="brandColorChange()" ${d.c2?'':'disabled'} style="width:42px;height:30px;padding:0;border:1px solid var(--line);border-radius:6px;">
+      </span>
+      <span style="display:flex;gap:6px;align-items:center;">Effet
+        <select id="f_coleffect" onchange="brandColorChange()" style="width:auto;">${effOpts}</select>
+      </span>
+      <span class="chip" id="f_colpreview" style="background:${colorBgCss(cols,d.effect)};"><span class="sq"></span>${escapeHtml(nm)}</span>
+    </div>
+    <div class="helper" style="margin-top:4px;">${man?'Cochez « Couleur 2 » pour une pastille bi-couleur.':'Couleurs détectées dans le logo : '+(cols.length?cols.length+' couleur(s).':'aucune (couleur par défaut).')+' L\'effet s\'applique si le logo comporte 2 couleurs.'}</div>`;
+}
+function brandColorChange(){
+  const d = brandColorDraft, g = id=>document.getElementById(id);
+  const m = document.querySelector('input[name="f_colmode"]:checked');
+  const prevMode = d.mode;
+  d.mode = m ? m.value : 'auto';
+  if(g('f_col1')) d.c1 = g('f_col1').value;
+  d.c2 = (g('f_col2on') && g('f_col2on').checked && g('f_col2')) ? g('f_col2').value : '';
+  if(g('f_coleffect')) d.effect = g('f_coleffect').value;
+  if(d.mode!==prevMode || (g('f_col2') && g('f_col2').disabled === !!d.c2)){
+    const w = g('brandColorWrap'); if(w) w.innerHTML = renderBrandColorUI();
+  } else {
+    const p = g('f_colpreview'); if(p) p.style.background = colorBgCss(brandDraftColors(), d.effect);
+  }
+}
+async function brandColorLogoChanged(){
+  brandColorDraft.auto = await extractLogoColors(pendingLogoData);
+  const w = document.getElementById('brandColorWrap'); if(w) w.innerHTML = renderBrandColorUI();
 }
 function handleLogoFile(evt){
   const file = evt.target.files[0];
@@ -3131,6 +3211,7 @@ function handleLogoFile(evt){
       pendingLogoData = canvas.toDataURL('image/png', 0.85);
       const wrap = document.getElementById('logoPreviewWrap');
       if(wrap) wrap.innerHTML = renderLogoPreview();
+      brandColorLogoChanged();
     };
     img.onerror = ()=> showToast("Impossible de lire cette image.");
     img.src = e.target.result;
@@ -3201,6 +3282,9 @@ function saveBrand(id){
     emailSignature: (document.getElementById('f_emailSignatureRich').innerText || '').trim().replace(/\n{2,}/g, '\n'),
     emailSignatureHtml: document.getElementById('f_emailSignatureRich').innerHTML.trim(),
     logo: pendingLogoData || null,
+    colorMode: brandColorDraft.mode,
+    colorManual: [brandColorDraft.c1, brandColorDraft.c2].filter(Boolean),
+    colorEffect: brandColorDraft.effect || 'moitie',
   };
   if(id){
     const b = state.brands.find(x=>x.id===id);
