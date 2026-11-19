@@ -5873,6 +5873,73 @@ function showClientImportReport(totalRows, added, updated, skippedRows, mergedRo
     <div class="modal-foot"><button class="btn btn-primary" onclick="closeModal()">Fermer</button></div>
   `, {lg:true});
 }
+
+/* ---- Export Excel mensuel des devis / marchés d'un fournisseur ---- */
+function exportFournisseurRows(brandId, ym){
+  const rows = [];
+  const docs = state.devis.filter(d=>(d.date||'').slice(0,7)===ym)
+    .sort((a,b)=>(a.date||'').localeCompare(b.date||'') || String(a.number||'').localeCompare(String(b.number||''),'fr',{numeric:true}));
+  docs.forEach(d=>{
+    (d.lines||[]).forEach(l=>{
+      if(l.brandId!==brandId || !l.reference) return;
+      const unit = +lineDistribUnit(l).toFixed(2);
+      rows.push({d, l, unit, qty:l.qty||0});
+    });
+  });
+  return rows;
+}
+function openExportFournisseurMois(){
+  const ym = todayStr().slice(0,7);
+  const brands = state.brands.slice();
+  if(brands.length===0){ showToast('Aucun fournisseur.'); return; }
+  openModal(`
+    <div class="modal-head"><h3>Export mensuel d'un fournisseur (Excel)</h3><button class="close-x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <div class="helper" style="margin-bottom:12px;">Exporte, pour le fournisseur et le mois choisis, une ligne par référence des devis et marchés : numéro, client (société), date, date de validité, référence, quantité et prix d'achat HT.</div>
+      <div class="field"><label>Fournisseur</label>
+        <select id="xf_brand" onchange="refreshExportFournisseurInfo()">${brands.map(b=>`<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Mois (date du devis)</label><input type="month" id="xf_month" value="${ym}" onchange="refreshExportFournisseurInfo()"></div>
+      <div class="helper" id="xf_info"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="doExportFournisseurMois()">⇩ Exporter en Excel</button>
+    </div>
+  `);
+  refreshExportFournisseurInfo();
+}
+function refreshExportFournisseurInfo(){
+  const b = document.getElementById('xf_brand').value, ym = document.getElementById('xf_month').value;
+  const rows = ym ? exportFournisseurRows(b, ym) : [];
+  const nd = new Set(rows.map(r=>r.d.id)).size;
+  document.getElementById('xf_info').textContent = rows.length ? `${nd} devis / marché(s) · ${rows.length} ligne(s) de référence à exporter.` : 'Aucun devis ou marché pour ce fournisseur sur ce mois.';
+}
+function doExportFournisseurMois(){
+  const brandId = document.getElementById('xf_brand').value, ym = document.getElementById('xf_month').value;
+  if(!ym){ showToast('Choisissez un mois.'); return; }
+  const rows = exportFournisseurRows(brandId, ym);
+  if(rows.length===0){ showToast('Rien à exporter pour ce mois.'); return; }
+  const toDate = v=>{ if(!v) return ''; const dt = new Date(String(v).slice(0,10)+'T12:00:00'); return isNaN(dt) ? v : dt; };
+  const header = ['N° devis / marché','Type','Client (société)','Date du devis','Date de validité','Référence','Quantité',"Prix d'achat HT (unitaire)","Total d'achat HT"];
+  const aoa = [header, ...rows.map(r=>[
+    r.d.number||'', r.d.type||'Devis', clientSocieteLabel(r.d.clientId), toDate(r.d.date), toDate(r.d.validUntil),
+    r.l.reference||'', r.qty, r.unit, +(r.qty*r.unit).toFixed(2)
+  ])];
+  const ws = XLSX.utils.aoa_to_sheet(aoa, {cellDates:true});
+  ws['!cols'] = [{wch:18},{wch:9},{wch:32},{wch:13},{wch:15},{wch:22},{wch:10},{wch:22},{wch:18}];
+  for(let R=1; R<aoa.length; R++){
+    ['D','E'].forEach(c=>{ const cell = ws[c+(R+1)]; if(cell && cell.v instanceof Date){ cell.t='d'; cell.z='dd/mm/yyyy'; } });
+    const q = ws['G'+(R+1)]; if(q) q.z='#,##0';
+    ['H','I'].forEach(c=>{ const cell = ws[c+(R+1)]; if(cell) cell.z='#,##0.00'; });
+  }
+  ws['!autofilter'] = {ref:`A1:I${aoa.length}`};
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Devis');
+  const bn = brandName(brandId).replace(/[^\w\-]+/g,'_');
+  XLSX.writeFile(wb, `devis_${bn}_${ym}.xlsx`, {cellDates:true});
+  closeModal();
+  showToast('Export réalisé.');
+}
 function exportClientsExcel(){
   if(state.clients.length===0){ showToast('Aucun client à exporter.'); return; }
   const headers = CLIENT_IMPORT_FIELDS.map(f=>f.label.replace(' *',''));
@@ -8707,6 +8774,7 @@ function renderDevis(){
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn" onclick="openImportModalDevis()">⇪ Importer (Excel / CSV)</button>
       <button class="btn" onclick="openImportDevisPdfPicker()" title="Recrée un devis à partir d'un de vos PDF déjà exportés par ComAgentCo">⇪ Importer un devis (PDF)</button>
+      <button class="btn" onclick="openExportFournisseurMois()" title="Exporte au format Excel les devis et marchés d'un fournisseur pour un mois donné">⇩ Export mensuel fournisseur (Excel)</button>
       <button class="btn btn-primary" onclick="openDevisForm()">+ Nouveau devis</button>
     </div>`:`
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
