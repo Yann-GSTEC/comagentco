@@ -5875,11 +5875,16 @@ function showClientImportReport(totalRows, added, updated, skippedRows, mergedRo
 }
 
 /* ---- Export Excel mensuel des devis / marchés d'un fournisseur ---- */
+let xfFam = new Set(), xfSub = new Set();
+const xfNorm = v=>String(v||'').trim().toLowerCase();
 function exportFournisseurRows(brandId, ym){
   const rows = [];
   const docs = state.devis.filter(d=>(d.date||'').slice(0,7)===ym)
     .sort((a,b)=>(a.date||'').localeCompare(b.date||'') || String(a.number||'').localeCompare(String(b.number||''),'fr',{numeric:true}));
   docs.forEach(d=>{
+    const c = state.clients.find(x=>x.id===d.clientId) || {};
+    if(xfFam.size && !xfFam.has(xfNorm(c.famille))) return;
+    if(xfSub.size && !xfSub.has(xfNorm(c.sousFamille))) return;
     (d.lines||[]).forEach(l=>{
       if(l.brandId!==brandId || !l.reference) return;
       const unit = +lineDistribUnit(l).toFixed(2);
@@ -5888,31 +5893,86 @@ function exportFournisseurRows(brandId, ym){
   });
   return rows;
 }
+function xfFamilyOptions(){
+  const set = new Map();
+  (state.paramLists.famillesClients||[]).forEach(f=>{ if(f.libelle) set.set(xfNorm(f.libelle), f.libelle); });
+  state.clients.forEach(c=>{ if(c.famille) set.set(xfNorm(c.famille), set.get(xfNorm(c.famille))||c.famille); });
+  return [...set.entries()].map(([k,l])=>({k,l})).sort((a,b)=>a.l.localeCompare(b.l,'fr'));
+}
+function xfSubOptions(){
+  const fams = (state.paramLists.famillesClients||[]);
+  const famIds = new Set(fams.filter(f=>xfFam.has(xfNorm(f.libelle))).map(f=>f.id));
+  const set = new Map();
+  (state.paramLists.sousFamillesClients||[]).forEach(sf=>{
+    if(!sf.libelle) return;
+    if(xfFam.size && sf.familleId && !famIds.has(sf.familleId)) return;
+    set.set(xfNorm(sf.libelle), sf.libelle);
+  });
+  state.clients.forEach(c=>{
+    if(!c.sousFamille) return;
+    if(xfFam.size && !xfFam.has(xfNorm(c.famille))) return;
+    if(!set.has(xfNorm(c.sousFamille))) set.set(xfNorm(c.sousFamille), c.sousFamille);
+  });
+  return [...set.entries()].map(([k,l])=>({k,l})).sort((a,b)=>a.l.localeCompare(b.l,'fr'));
+}
+function xfChecklist(opts, sel, kind){
+  if(!opts.length) return '<div class="helper">Aucune valeur disponible.</div>';
+  return opts.map(o=>`<label style="display:flex;gap:8px;align-items:center;padding:4px 6px;font-weight:500;cursor:pointer;"><input type="checkbox" ${sel.has(o.k)?'checked':''} onchange="xfToggle('${kind}',this.getAttribute('data-k'),this.checked)" data-k="${escapeHtml(o.k)}"> ${escapeHtml(o.l)}</label>`).join('');
+}
+function xfToggle(kind,k,on){
+  const set = kind==='fam' ? xfFam : xfSub;
+  if(on) set.add(k); else set.delete(k);
+  if(kind==='fam'){
+    // retire les sous-familles qui ne dépendent plus des familles cochées
+    const valid = new Set(xfSubOptions().map(o=>o.k));
+    [...xfSub].forEach(x=>{ if(!valid.has(x)) xfSub.delete(x); });
+  }
+  xfRefreshLists();
+}
+function xfClear(kind){ (kind==='fam'?xfFam:xfSub).clear(); if(kind==='fam') xfSub.clear(); xfRefreshLists(); }
+function xfRefreshLists(){
+  const f = document.getElementById('xf_fam'), sf = document.getElementById('xf_sub');
+  if(f) f.innerHTML = xfChecklist(xfFamilyOptions(), xfFam, 'fam');
+  if(sf) sf.innerHTML = xfChecklist(xfSubOptions(), xfSub, 'sub');
+  const cf = document.getElementById('xf_famcount'), cs = document.getElementById('xf_subcount');
+  if(cf) cf.textContent = xfFam.size ? xfFam.size+' sélectionnée(s)' : 'Toutes';
+  if(cs) cs.textContent = xfSub.size ? xfSub.size+' sélectionnée(s)' : 'Toutes';
+  refreshExportFournisseurInfo();
+}
 function openExportFournisseurMois(){
   const ym = todayStr().slice(0,7);
   const brands = state.brands.slice();
   if(brands.length===0){ showToast('Aucun fournisseur.'); return; }
+  xfFam = new Set(); xfSub = new Set();
+  const box = 'border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;padding:4px;background:#fff;';
   openModal(`
     <div class="modal-head"><h3>Export mensuel d'un fournisseur (Excel)</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
-      <div class="helper" style="margin-bottom:12px;">Exporte, pour le fournisseur et le mois choisis, une ligne par référence des devis et marchés : numéro, client (société), date, date de validité, référence, quantité et prix d'achat HT.</div>
-      <div class="field"><label>Fournisseur</label>
-        <select id="xf_brand" onchange="refreshExportFournisseurInfo()">${brands.map(b=>`<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('')}</select></div>
-      <div class="field"><label>Mois (date du devis)</label><input type="month" id="xf_month" value="${ym}" onchange="refreshExportFournisseurInfo()"></div>
-      <div class="helper" id="xf_info"></div>
+      <div class="helper" style="margin-bottom:14px;">Exporte, pour le fournisseur et le mois choisis, une ligne par référence des devis et marchés : numéro, client (société), date, date de validité, référence, quantité et prix d'achat HT. Sans sélection de famille ou de sous-famille, tous les clients sont exportés.</div>
+      <div class="grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="field"><label>Fournisseur</label>
+          <select id="xf_brand" onchange="refreshExportFournisseurInfo()" style="font-size:15px;padding:10px;">${brands.map(b=>`<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Mois (date du devis)</label><input type="month" id="xf_month" value="${ym}" onchange="refreshExportFournisseurInfo()" style="font-size:15px;padding:10px;width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;background:var(--surface,#fff);"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:6px;">
+        <div class="field"><label>Famille du client <span class="helper" style="display:inline;">— <span id="xf_famcount">Toutes</span> · <a href="#" onclick="xfClear('fam');return false;">tout décocher</a></span></label><div id="xf_fam" style="${box}"></div></div>
+        <div class="field"><label>Sous-famille du client <span class="helper" style="display:inline;">— <span id="xf_subcount">Toutes</span> · <a href="#" onclick="xfClear('sub');return false;">tout décocher</a></span></label><div id="xf_sub" style="${box}"></div></div>
+      </div>
+      <div class="helper" id="xf_info" style="margin-top:8px;"></div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal()">Annuler</button>
       <button class="btn btn-primary" onclick="doExportFournisseurMois()">⇩ Exporter en Excel</button>
     </div>
-  `);
-  refreshExportFournisseurInfo();
+  `, {lg:true});
+  xfRefreshLists();
 }
 function refreshExportFournisseurInfo(){
+  const el = document.getElementById('xf_info'); if(!el) return;
   const b = document.getElementById('xf_brand').value, ym = document.getElementById('xf_month').value;
   const rows = ym ? exportFournisseurRows(b, ym) : [];
   const nd = new Set(rows.map(r=>r.d.id)).size;
-  document.getElementById('xf_info').textContent = rows.length ? `${nd} devis / marché(s) · ${rows.length} ligne(s) de référence à exporter.` : 'Aucun devis ou marché pour ce fournisseur sur ce mois.';
+  el.textContent = rows.length ? `${nd} devis / marché(s) · ${rows.length} ligne(s) de référence à exporter.` : 'Aucun devis ou marché pour ces critères.';
 }
 function doExportFournisseurMois(){
   const brandId = document.getElementById('xf_brand').value, ym = document.getElementById('xf_month').value;
