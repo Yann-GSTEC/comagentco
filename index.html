@@ -2649,6 +2649,7 @@ async function readFolderBackupData(){
 }
 async function writeBackupNow(){
   if(!backupDirHandle && !backupDirHandle2) return false;
+  if(folderOnly && folderOnlyBypass) return false; // ouvert « sans le dossier » : on n'écrase jamais le fichier du dossier
   let ok1 = false, ok2 = false, needsRender = false;
   if(backupDirHandle){
     const perm = await ensureBackupPermission();
