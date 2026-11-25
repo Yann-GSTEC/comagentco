@@ -1901,11 +1901,11 @@ async function loadAll(){
   // autorisé, il fait foi pour toutes les tables (y compris quand le dossier est partagé/synchronisé
   // entre plusieurs postes, ex. OneDrive) — la sauvegarde la plus récente du dossier prime alors sur
   // le stockage du navigateur, pour ne jamais rouvrir sur des données obsolètes.
-  await initBackupFolder();
+  await withTimeout(initBackupFolder(), 4000, null);
   if(folderOnly && backupDirHandle && backupFolderNeedsPermission) await showFolderGate();
   let folderData = null;
   if(folderStorageActive()){
-    try{ folderData = await readFolderBackupData(); }catch(e){ folderData = null; }
+    try{ folderData = await withTimeout(readFolderBackupData(), 20000, null); }catch(e){ folderData = null; }
   }
   if(folderOnlyOn() && !folderData){
     // Mode dossier uniquement mais fichier illisible/absent : on n'écrase JAMAIS le dossier avec des données vides
@@ -2064,6 +2064,7 @@ async function loadAll(){
   safeBootStep('tri des fournisseurs', ()=>{ sortBrands(); persist('brands'); });
   render();
   bootDone = true;
+  const fp = document.getElementById('fatalErrorPanel'); if(fp) fp.remove();
   safeBootStep('couleurs des logos', ()=>{ migrateBrandColors().catch(e=>console.error('couleurs logos', e)); });
 }
 function showFolderGate(){
@@ -2459,9 +2460,16 @@ let backupFolderNeedsPermission = false;
 let backupDirHandle2 = null;
 let backupFolderNeedsPermission2 = false;
 function fsAccessSupported(){ return typeof window.showDirectoryPicker === 'function'; }
+function withTimeout(p, ms, fallback){
+  return new Promise(resolve=>{
+    let done=false; const t=setTimeout(()=>{ if(!done){ done=true; console.error('Délai dépassé ('+ms+' ms)'); resolve(fallback); } }, ms);
+    Promise.resolve(p).then(v=>{ if(!done){ done=true; clearTimeout(t); resolve(v); } }, ()=>{ if(!done){ done=true; clearTimeout(t); resolve(fallback); } });
+  });
+}
 function idbOpen(){
   return new Promise((resolve,reject)=>{
     const req = indexedDB.open('comagentco_fs', 1);
+    req.onblocked = ()=> reject(new Error('IndexedDB bloquée'));
     req.onupgradeneeded = ()=>{ if(!req.result.objectStoreNames.contains('handles')) req.result.createObjectStore('handles'); };
     req.onsuccess = ()=> resolve(req.result);
     req.onerror = ()=> reject(req.error);
@@ -15145,6 +15153,7 @@ document.addEventListener('click', (ev)=>{
   render();
 });
 loadAll().catch(showFatalError);
+setTimeout(()=>{ if(!bootDone) showFatalError(new Error("Le démarrage prend trop de temps (plus de 10 secondes). Cause probable : stockage du navigateur plein ou bloqué, ou dossier de sauvegarde inaccessible.")); }, 10000);
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
     navigator.serviceWorker.register('sw.js').catch(e=>console.warn('Service worker non enregistré (normal en ouverture locale file://) :', e));
