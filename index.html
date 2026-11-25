@@ -1902,9 +1902,15 @@ async function loadAll(){
   // entre plusieurs postes, ex. OneDrive) — la sauvegarde la plus récente du dossier prime alors sur
   // le stockage du navigateur, pour ne jamais rouvrir sur des données obsolètes.
   await initBackupFolder();
+  if(folderOnly && backupDirHandle && backupFolderNeedsPermission) await showFolderGate();
   let folderData = null;
   if(folderStorageActive()){
     try{ folderData = await readFolderBackupData(); }catch(e){ folderData = null; }
+  }
+  if(folderOnlyOn() && !folderData){
+    // Mode dossier uniquement mais fichier illisible/absent : on n'écrase JAMAIS le dossier avec des données vides
+    folderWriteBlocked = true;
+    console.error('Mode dossier uniquement : fichier de sauvegarde introuvable ou illisible');
   }
   try{
     const keys = ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','devisTemplates','commerciaux','devisAttachments','trash','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'];
@@ -2059,6 +2065,59 @@ async function loadAll(){
   render();
   bootDone = true;
   safeBootStep('couleurs des logos', ()=>{ migrateBrandColors().catch(e=>console.error('couleurs logos', e)); });
+}
+function showFolderGate(){
+  return new Promise(resolve=>{
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;z-index:99998;background:#F5F4EF;display:flex;align-items:center;justify-content:center;font-family:Inter,Arial,sans-serif;color:#1c2b26;';
+    d.innerHTML = `<div style="max-width:520px;padding:28px;background:#fff;border:1px solid #ddd;border-radius:14px;">
+      <h2 style="margin-top:0;">Ouverture de vos données</h2>
+      <p>Vos données sont stockées dans votre dossier de sauvegarde (<strong id="gateName"></strong>). Votre navigateur demande de confirmer l'accès à ce dossier à chaque ouverture.</p>
+      <p style="font-size:13px;background:#EEF4F1;border-radius:8px;padding:8px 10px;">Astuce : quand le navigateur affiche sa fenêtre de confirmation, choisissez <strong>« Autoriser à chaque visite »</strong> (Chrome / Edge récents) : l'accès sera alors mémorisé et cet écran n'apparaîtra plus.</p>
+      <p id="gateMsg" style="color:#b3261e;"></p>
+      <p style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button id="gateOk" style="padding:10px 16px;border-radius:8px;border:0;background:#2F5D50;color:#fff;cursor:pointer;">Autoriser l'accès au dossier</button>
+        <button id="gateSkip" style="padding:10px 16px;border-radius:8px;border:1px solid #999;background:#fff;cursor:pointer;">Ouvrir sans le dossier</button></p>
+      <p style="font-size:12px;color:#666;">« Ouvrir sans le dossier » utilise les anciennes données du navigateur, s'il en reste.</p></div>`;
+    document.body.appendChild(d);
+    d.querySelector('#gateName').textContent = backupDirHandle.name;
+    d.querySelector('#gateOk').onclick = async ()=>{
+      try{
+        const perm = await backupDirHandle.requestPermission({mode:'readwrite'});
+        backupFolderNeedsPermission = (perm!=='granted');
+        if(perm==='granted'){ d.remove(); resolve(); return; }
+      }catch(e){}
+      d.querySelector('#gateMsg').textContent = "Accès refusé : cliquez à nouveau et choisissez « Autoriser ».";
+    };
+    d.querySelector('#gateSkip').onclick = ()=>{ folderOnlyBypass = true; d.remove(); resolve(); };
+  });
+}
+async function enableFolderOnly(){
+  if(!backupDirHandle || backupFolderNeedsPermission){ showToast("Choisissez et autorisez d'abord le dossier de sauvegarde."); return; }
+  const ok = await writeBackupNow();
+  if(!ok){ showToast("Impossible d'écrire dans le dossier : mode non activé."); return; }
+  // Vérifie que le fichier relu contient bien toutes les données avant de toucher au navigateur
+  try{
+    const f = await (await backupDirHandle.getFileHandle('ComAgentCo_sauvegarde.json')).getFile();
+    const data = JSON.parse(await f.text());
+    const same = ['brands','clients','tarifs','listesPrixNets','devis'].every(k=>(data[k]||[]).length===(state[k]||[]).length);
+    if(!same) throw new Error('écart');
+  }catch(e){ showToast("Vérification du fichier du dossier échouée : mode non activé, rien n'a été supprimé."); return; }
+  if(!confirm("Le dossier contient bien toutes vos données (vérifié).\n\nActiver le mode « dossier uniquement » ? Les données seront supprimées du navigateur et n'y seront plus écrites. Il faudra autoriser l'accès au dossier à chaque ouverture.")) return;
+  folderOnly = true; folderOnlyBypass = false; folderWriteBlocked = false;
+  await idbSet('folderOnly', true);
+  try{
+    Object.keys(localStorage).filter(k=>k.indexOf('comagentco_')===0).forEach(k=>localStorage.removeItem(k));
+  }catch(e){}
+  showToast("Mode « dossier uniquement » activé : plus rien n'est stocké dans le navigateur.");
+  render();
+}
+async function disableFolderOnly(){
+  folderOnly = false;
+  await idbSet('folderOnly', false);
+  ['brands','clients','tarifs','listesPrixNets','prixNetListes','devis','devisTemplates','commerciaux','devisAttachments','trash','settings','paramLists','commissions','caVva','dashboardLayout','rapportLayout'].forEach(k=>{ if(state[k]!==undefined) persist(k); });
+  showToast("Mode « dossier uniquement » désactivé : le navigateur sert de nouveau de stockage en plus du dossier.");
+  render();
 }
 /* ---- Garde-fous de démarrage : jamais de page blanche sans explication ---- */
 let bootDone = false;
@@ -2227,9 +2286,45 @@ function ensureClientContactsMigrated(){
   if(changed) persist('clients');
 }
 let saveTimers = {};
+/* ---- Mode « dossier uniquement » : plus rien n'est écrit dans le navigateur ---- */
+let folderOnly = false, folderOnlyBypass = false, folderWriteBlocked = false;
+let folderDirty = false, folderFlushing = false, folderFlushTimer = null, folderLastPrevCopy = 0;
+function folderOnlyOn(){ return folderOnly && !folderOnlyBypass && !!backupDirHandle; }
+function scheduleFolderOnlyFlush(){
+  folderDirty = true;
+  clearTimeout(folderFlushTimer);
+  folderFlushTimer = setTimeout(folderOnlyFlush, 600);
+}
+async function keepPreviousFolderCopy(){
+  // Conserve une copie de la version précédente du fichier (au plus toutes les 10 minutes)
+  if(Date.now()-folderLastPrevCopy < 600000) return;
+  try{
+    const cur = await (await backupDirHandle.getFileHandle('ComAgentCo_sauvegarde.json')).getFile();
+    if(cur.size>0){
+      const w = await (await backupDirHandle.getFileHandle('ComAgentCo_precedente.json',{create:true})).createWritable();
+      await w.write(await cur.text()); await w.close();
+      folderLastPrevCopy = Date.now();
+    }
+  }catch(e){ /* pas encore de fichier : rien à copier */ }
+}
+async function folderOnlyFlush(){
+  if(folderFlushing){ folderDirty = true; return; }
+  if(folderWriteBlocked){ showToast("Enregistrement bloqué : le fichier du dossier n'a pas pu être lu à l'ouverture. Rechargez la page.", 7000); return; }
+  folderFlushing = true;
+  try{
+    do{
+      folderDirty = false;
+      if(await ensureBackupPermission()) await keepPreviousFolderCopy();
+      const ok = await writeBackupNow();
+      if(!ok){ folderDirty = true; showToast("Erreur d'enregistrement dans le dossier de sauvegarde — vérifiez que le dossier est accessible (Paramètres › Sauvegarde). Vos modifications restent à l'écran : ne fermez pas la page.", 8000); break; }
+    }while(folderDirty);
+  } finally { folderFlushing = false; }
+}
+window.addEventListener('beforeunload', e=>{ if(folderOnlyOn() && (folderDirty || folderFlushing)){ e.preventDefault(); e.returnValue=''; } });
 function folderStorageActive(){ return !!backupDirHandle && !backupFolderNeedsPermission; }
 const BIG_KEYS = ['tarifs','listesPrixNets','devisAttachments'];
 async function persistNow(key){
+  if(folderOnlyOn()){ scheduleFolderOnlyFlush(); return {localOk:true, cloudOk:null, size:0, viaFolder:true}; }
   // Tarifs et Liste de prix nets peuvent peser plusieurs dizaines de Mo pour un gros catalogue —
   // bien au-delà de ce que le stockage du navigateur (localStorage/cloud) peut accepter, même fragmenté.
   // Si un dossier de sauvegarde est actif, on vérifie l'autorisation EN DIRECT (elle peut avoir expiré
@@ -2402,6 +2497,7 @@ async function initBackupFolder(){
       backupFolderNeedsPermission = (perm!=='granted');
     }
   }catch(e){ /* pas de dossier mémorisé */ }
+  try{ folderOnly = !!(await idbGet('folderOnly')); }catch(e){ folderOnly = false; }
   try{
     const handle2 = await idbGet('backupDir2');
     if(handle2){
@@ -8423,6 +8519,14 @@ function renderParametres(){
       <div class="card card-pad">
         <div class="section-title">Sauvegarde automatique</div>
         ${folderStatus}
+        ${(fsAccessSupported() && backupDirHandle && !backupFolderNeedsPermission) ? `
+          <div style="margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;">
+            <div style="font-weight:600;margin-bottom:4px;">Stockage : dossier uniquement</div>
+            <div class="helper">${folderOnly
+              ? 'Activé : toutes vos données sont enregistrées uniquement dans le dossier. Rien n\'est stocké dans le navigateur. À chaque ouverture, le navigateur demandera de confirmer l\'accès au dossier.'
+              : 'Désactivé : les données sont enregistrées dans le navigateur ET dans le dossier. Activez ce mode pour ne plus rien stocker dans le navigateur (évite les erreurs de stockage plein).'}</div>
+            <button class="btn btn-sm" style="margin-top:6px;" onclick="${folderOnly?'disableFolderOnly()':'enableFolderOnly()'}">${folderOnly?'Désactiver (réutiliser aussi le navigateur)':'Stocker uniquement dans le dossier'}</button>
+          </div>` : ''}
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
           <button class="btn" onclick="chooseBackupFolder()">${backupDirHandle?'Changer de dossier':'Choisir un dossier de sauvegarde'}</button>
           ${backupDirHandle?`<button class="btn btn-ghost" onclick="writeBackupNow()">Sauvegarder maintenant</button>
@@ -14985,6 +15089,7 @@ function initDashboardCharts(){
 // l'événement "storage" se déclenche automatiquement dans les AUTRES fenêtres pour qu'elles se
 // mettent à jour sans avoir besoin de recharger la page.
 window.addEventListener('storage', (e)=>{
+  if(folderOnlyOn()) return;
   if(!e.key || !e.key.startsWith('comagentco_')) return;
   const rest = e.key.slice('comagentco_'.length);
   if(rest.indexOf('__c')>=0) return; // morceau de données : on ne réagit qu'au sommaire principal
