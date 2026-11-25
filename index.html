@@ -10779,6 +10779,8 @@ function duplicateDraftDevis(){
   clone.number = previewNextDevisNumber(clone.type||'Devis');
   clone.isNew = true;
   clone.status = 'Brouillon';
+  clone.etatAffaire = ''; // un duplicata repart « en cours » : il n'hérite pas de l'état Gagné / Perdu de l'original
+  delete clone._legacyStatus;
   clone.date = todayStr();
   clone.createdAt = new Date().toISOString();
   clone.validUntil = defaultValidUntil(clone.type||'Devis', clone.date);
