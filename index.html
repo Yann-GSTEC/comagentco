@@ -6,6 +6,7 @@
 <title>ComAgentCo — Gestion multi-marques</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2A2C">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ComAgentCo">
@@ -1360,7 +1361,7 @@ function sortBrands(){
   state.brands.forEach((b,i)=>{ if(b.colorIdx==null) b.colorIdx = i; mx=Math.max(mx,b.colorIdx); });
   const seen = new Set();
   state.brands.forEach(b=>{ if(seen.has(b.colorIdx)) b.colorIdx = ++mx; seen.add(b.colorIdx); });
-  state.brands.sort((a,b)=>(a.name||'').localeCompare(b.name||'','fr',{sensitivity:'base',numeric:true}));
+  state.brands.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'fr',{sensitivity:'base',numeric:true}));
 }
 /* Fond d'une pastille fournisseur : 1 couleur, ou bi-couleur (50/50) si le logo en comporte 2 */
 function brandBg(brandId){
@@ -1951,6 +1952,11 @@ async function loadAll(){
   }catch(e){
     console.error('Erreur de chargement', e);
   }
+  // Garde-fou : une table illisible ou de mauvaise forme (stockage plein / corrompu) ne doit jamais empêcher l'ouverture
+  ['brands','clients','tarifs','listesPrixNets','devis','devisTemplates','commerciaux'].forEach(k=>{
+    if(!Array.isArray(state[k])){ console.error('Table invalide ignorée :', k); state[k] = []; }
+    else if(state[k].some(x=>x===null || typeof x!=='object')) state[k] = state[k].filter(x=>x && typeof x==='object');
+  });
   // Complète les paramètres manquants (mises à jour de version) sans écraser les valeurs existantes
   state.settings = Object.assign({
     companyName:'', companyAddress:'', companyEmail:'', companyPhone:'', siret:'', tvaDefault:0, initiales:'', nextNumber:1,
@@ -2026,7 +2032,7 @@ async function loadAll(){
   // Ce bloc s'exécute à CHAQUE chargement (pas seulement une fois) : il ne fait rien si aucun devis
   // n'a plus l'ancien statut, donc il est sans risque à rejouer, et il rattrape automatiquement toute
   // migration qui n'aurait pas pu être enregistrée lors d'un chargement précédent.
-  runEtatAffaireMigration(false);
+  safeBootStep('migration état affaire', ()=>runEtatAffaireMigration(false));
   // Réparation : relie rétroactivement les sous-familles déjà créées (sans familleId) aux familles Grossiste / Installateur connues
   if(!state.paramLists._repairedFamilleLinks){
     const familleGrossiste = (state.paramLists.famillesClients||[]).find(f=>(f.libelle||'').toLowerCase()==='grossiste');
@@ -2044,15 +2050,48 @@ async function loadAll(){
     if(changed) persist('paramLists');
   }
   state.loaded = true;
-  reindexSearchKeys();
-  ensurePrixNetListes();
-  ensureClientContactsMigrated();
-  repairMangledVersionNumbers();
-  migrateLowercaseEmails();
-  sortBrands(); persist('brands');
+  safeBootStep('index de recherche', reindexSearchKeys);
+  safeBootStep('listes de prix nets', ensurePrixNetListes);
+  safeBootStep('contacts clients', ensureClientContactsMigrated);
+  safeBootStep('numéros de version', repairMangledVersionNumbers);
+  safeBootStep('emails', migrateLowercaseEmails);
+  safeBootStep('tri des fournisseurs', ()=>{ sortBrands(); persist('brands'); });
   render();
-  migrateBrandColors();
+  bootDone = true;
+  safeBootStep('couleurs des logos', ()=>{ migrateBrandColors().catch(e=>console.error('couleurs logos', e)); });
 }
+/* ---- Garde-fous de démarrage : jamais de page blanche sans explication ---- */
+let bootDone = false;
+const bootErrors = [];
+function safeBootStep(name, fn){
+  try{ fn(); }catch(e){ console.error('Étape de démarrage ignorée :', name, e); bootErrors.push(name+' : '+(e&&e.message||e)); }
+}
+function showFatalError(err){
+  try{
+    if(document.getElementById('fatalErrorPanel')) return;
+    const msg = (err && (err.stack||err.message)) || String(err);
+    const d = document.createElement('div');
+    d.id = 'fatalErrorPanel';
+    d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#F5F4EF;color:#1c2b26;padding:32px;overflow:auto;font-family:Inter,Arial,sans-serif;';
+    d.innerHTML = `<h2 style="margin-top:0;">ComAgentCo n'a pas pu s'ouvrir</h2>
+      <p>Vos données ne sont pas effacées. Cliquez d'abord sur « Télécharger une copie de mes données », puis sur « Recharger ». Si le problème persiste, envoyez le texte ci-dessous.</p>
+      <p style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button id="fatalDump" style="padding:10px 16px;border-radius:8px;border:1px solid #999;background:#fff;cursor:pointer;">Télécharger une copie de mes données</button>
+        <button onclick="location.reload()" style="padding:10px 16px;border-radius:8px;border:0;background:#2F5D50;color:#fff;cursor:pointer;">Recharger</button></p>
+      <pre style="white-space:pre-wrap;background:#fff;border:1px solid #ccc;border-radius:8px;padding:12px;font-size:12px;user-select:text;"></pre>`;
+    d.querySelector('pre').textContent = msg + (bootErrors.length ? '\n\nÉtapes ignorées :\n'+bootErrors.join('\n') : '');
+    document.body.appendChild(d);
+    document.getElementById('fatalDump').onclick = ()=>{
+      const dump = {};
+      try{ for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.indexOf('comagentco_')===0) dump[k]=localStorage.getItem(k); } }catch(e){ dump.__erreur = String(e); }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(dump)],{type:'application/json'}));
+      a.download = 'comagentco_copie_brute.json'; a.click();
+    };
+  }catch(e){ /* dernier recours : rien */ }
+}
+window.addEventListener('error', ev=>{ if(!bootDone) showFatalError(ev.error||ev.message); });
+window.addEventListener('unhandledrejection', ev=>{ if(!bootDone) showFatalError(ev.reason); });
 /* ---- Performance : clé de recherche pré-calculée + cache trié pour les grands catalogues ---- */
 function reindexSearchKeys(){
   state.tarifs.forEach(t=>{ t._sk = (t.reference+' '+(t.designation||'')).toLowerCase(); });
@@ -15000,7 +15039,7 @@ document.addEventListener('click', (ev)=>{
   ui.perfClientFilterMode = null;
   render();
 });
-loadAll();
+loadAll().catch(showFatalError);
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
     navigator.serviceWorker.register('sw.js').catch(e=>console.warn('Service worker non enregistré (normal en ouverture locale file://) :', e));
