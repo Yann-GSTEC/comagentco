@@ -1279,6 +1279,10 @@ function fmtDateTime(iso){
   return dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' à '+dt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
 }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
+/* Fournisseurs masqués : cachés des listes, filtres et choix ; leurs données (devis, tarifs…) sont conservées */
+function visibleBrands(keepId){
+  return state.brands.filter(b=>!b.hidden || (keepId && b.id===keepId));
+}
 function brandColor(brandId){
   const idx = state.brands.findIndex(b=>b.id===brandId);
   if(idx<0) return '#8A948E';
@@ -1907,7 +1911,7 @@ async function loadAll(){
   if(folderStorageActive()){
     try{ folderData = await withTimeout(readFolderBackupData(), 20000, null); }catch(e){ folderData = null; }
   }
-  if(folderOnlyOn() && !folderData){
+  if(folderOnlyOn() && !folderData && !desktopFsEmpty){
     // Mode dossier uniquement mais fichier illisible/absent : on n'écrase JAMAIS le dossier avec des données vides
     folderWriteBlocked = true;
     console.error('Mode dossier uniquement : fichier de sauvegarde introuvable ou illisible');
@@ -2459,7 +2463,48 @@ let backupDirHandle = null;
 let backupFolderNeedsPermission = false;
 let backupDirHandle2 = null;
 let backupFolderNeedsPermission2 = false;
-function fsAccessSupported(){ return typeof window.showDirectoryPicker === 'function'; }
+function fsAccessSupported(){ return !!window.desktopFs || typeof window.showDirectoryPicker === 'function'; }
+/* ---- Version « logiciel PC » (Electron) : dossier de données géré par le programme, sans aucune invite ---- */
+let desktopFsEmpty = false;
+function makeDesktopDirHandle(dirPath){
+  const mkFile = (name, st)=>({
+    kind:'file', name,
+    async getFile(){
+      const text = await window.desktopFs.read(name);
+      const meta = st || ((await window.desktopFs.list()).find(x=>x.name===name)) || {};
+      return { name, size: meta.size||(text?text.length:0), lastModified: meta.mtime||Date.now(), async text(){ return text==null?'':text; } };
+    },
+    async createWritable(){
+      let buf = '';
+      return { async write(d){ buf += (typeof d==='string') ? d : await new Blob([d]).text(); },
+               async close(){ await window.desktopFs.write(name, buf); } };
+    }
+  });
+  return {
+    kind:'directory', name: dirPath,
+    async queryPermission(){ return 'granted'; },
+    async requestPermission(){ return 'granted'; },
+    async getFileHandle(name, opts){
+      const list = await window.desktopFs.list();
+      const found = list.find(x=>x.name===name);
+      if(!found && !(opts && opts.create)){ const e = new Error('introuvable'); e.name='NotFoundError'; throw e; }
+      return mkFile(name, found);
+    },
+    values(){
+      return (async function*(){ for(const f of await window.desktopFs.list()) yield mkFile(f.name, f); })();
+    }
+  };
+}
+window.__flushAndReady = async ()=>{
+  try{
+    // À la fermeture : on annule les temporisations et on écrit tout de suite l'état complet dans le dossier
+    Object.keys(saveTimers).forEach(k=>clearTimeout(saveTimers[k]));
+    clearTimeout(folderFlushTimer);
+    while(folderFlushing) await new Promise(r=>setTimeout(r,50));
+    if(folderOnlyOn() && state.loaded && !folderWriteBlocked) await writeBackupNow();
+  }catch(e){}
+  return true;
+};
 function withTimeout(p, ms, fallback){
   return new Promise(resolve=>{
     let done=false; const t=setTimeout(()=>{ if(!done){ done=true; console.error('Délai dépassé ('+ms+' ms)'); resolve(fallback); } }, ms);
@@ -2496,6 +2541,16 @@ async function idbGet(key){
   }catch(e){ return null; }
 }
 async function initBackupFolder(){
+  if(window.desktopFs){
+    try{
+      const info = await window.desktopFs.info();
+      backupDirHandle = makeDesktopDirHandle(info.dir);
+      backupFolderNeedsPermission = false;
+      folderOnly = true;
+      desktopFsEmpty = !(await window.desktopFs.list()).some(f=>/^ComAgentCo_sauvegarde.*\.json$/i.test(f.name));
+    }catch(e){ console.error('Dossier des données (PC) indisponible', e); }
+    return;
+  }
   if(!fsAccessSupported()) return;
   try{
     const handle = await idbGet('backupDir');
@@ -2516,6 +2571,11 @@ async function initBackupFolder(){
   }catch(e){ /* pas de second dossier mémorisé */ }
 }
 async function chooseBackupFolder(){
+  if(window.desktopFs){
+    const p = await window.desktopFs.chooseFolder();
+    if(p){ showToast('Dossier des données changé : fermez puis rouvrez ComAgentCo pour charger les données de ce dossier.', 8000); }
+    return;
+  }
   if(!fsAccessSupported()){
     showToast("Cette fonction nécessite Chrome ou Edge. Utilisez le bouton « Télécharger une sauvegarde » à la place.");
     return;
@@ -3129,23 +3189,23 @@ function renderMarques(){
   <div class="topbar">
     <div>
       <h1>Fournisseurs</h1>
-      <div class="sub">${state.brands.length} fournisseur(s) référencé(s)</div>
+      <div class="sub">${visibleBrands().length} fournisseur(s) référencé(s)${state.brands.some(b=>b.hidden)?` · <label style="cursor:pointer;"><input type="checkbox" ${ui.showHiddenBrands?'checked':''} onchange="ui.showHiddenBrands=this.checked;render();"> afficher les ${state.brands.filter(b=>b.hidden).length} masqué(s)</label>`:''}</div>
     </div>
     <button class="btn btn-primary" onclick="openBrandForm()">+ Ajouter un fournisseur</button>
   </div>
-  ${state.brands.length===0 ? emptyState('◆','Aucun fournisseur pour le moment','Ajoutez les fournisseurs que vous représentez pour commencer.') : `
+  ${(ui.showHiddenBrands?state.brands:visibleBrands()).length===0 ? emptyState('◆','Aucun fournisseur pour le moment','Ajoutez les fournisseurs que vous représentez pour commencer.') : `
   <div class="grid grid-4">
-    ${(()=>{ const tarifCounts = tarifCountsByBrand(); return state.brands.map(b=>{
+    ${(()=>{ const tarifCounts = tarifCountsByBrand(); return (ui.showHiddenBrands ? state.brands : visibleBrands()).map(b=>{
       const ca = caForBrand(b.id, null);
       const nbTarifs = tarifCounts.get(b.id)||0;
       return `
-      <div class="card card-pad" style="cursor:pointer;" onclick="openBrandForm('${b.id}')" title="Cliquer pour voir le détail">
+      <div class="card card-pad" style="cursor:pointer;${b.hidden?'opacity:.55;':''}" onclick="openBrandForm('${b.id}')" title="Cliquer pour voir le détail">
         <div style="display:flex;align-items:center;gap:9px;min-width:0;">
           ${b.logo?`<img src="${b.logo}" alt="" style="width:30px;height:30px;object-fit:contain;border-radius:6px;border:1px solid var(--line);background:#fff;flex-shrink:0;">`:''}
           <div class="chip" style="background:${brandBg(b.id)};color:${brandText(b.id)};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span class="sq"></span>${escapeHtml(b.name)}</div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:12px;font-size:12px;">
-          <span style="color:var(--muted);">${nbTarifs} référence(s)</span>
+          <span style="color:var(--muted);">${b.hidden?'Masqué · ':''}${nbTarifs} référence(s)</span>
           <span class="num" style="font-weight:700;">${fmtMoney(ca)}</span>
         </div>
       </div>`;
@@ -3223,6 +3283,8 @@ function openBrandForm(id){
           <div class="field"><label>Nom du fournisseur *</label><input type="text" id="f_name" value="${b?escapeHtml(b.name):''}" placeholder="Ex. Nordik Design"></div>
           <div class="field" style="max-width:140px;"><label>Commission (%)</label><input type="number" id="f_tauxCommission" min="0" max="100" step="0.01" value="${b&&b.tauxCommission!==undefined?b.tauxCommission:''}" placeholder="Ex. 5"></div>
         </div>
+        <div class="field"><label style="display:flex;gap:8px;align-items:center;font-weight:600;cursor:pointer;"><input type="checkbox" id="f_hidden" ${b&&b.hidden?'checked':''}> Masquer ce fournisseur</label>
+          <div class="helper">Il disparaît des listes, filtres, choix et statistiques. Ses devis, tarifs et données sont conservés ; décochez pour le réafficher (onglet Fournisseurs › « afficher les masqués »).</div></div>
         <div class="field-row">
           <div class="field" style="max-width:140px;"><label>Civilité</label>
             <select id="f_civilite">${civOpts.map(c=>`<option value="${c}" ${b&&b.civilite===c?'selected':''}>${c||'—'}</option>`).join('')}</select>
@@ -3454,6 +3516,7 @@ function saveBrand(id){
   const data = {
     code: document.getElementById('f_code').value.trim(),
     name,
+    hidden: !!(document.getElementById('f_hidden')||{}).checked,
     tauxCommission: parseFloat(document.getElementById('f_tauxCommission').value)||0,
     francoPort: parseFloat(document.getElementById('f_francoPort').value)||0,
     fraisPort: parseFloat(document.getElementById('f_fraisPort').value)||0,
@@ -4349,7 +4412,7 @@ function renderEmailing(){
     <div class="field" style="margin-bottom:0;max-width:220px;">
       <select onchange="ui.emailingBrandFilter=this.value; render();" title="Ne montre que les clients situés dans un département où vous représentez ce fournisseur">
         <option value="all">Tous les fournisseurs</option>
-        ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.emailingBrandFilter===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+        ${visibleBrands(ui.emailingBrandFilter).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.emailingBrandFilter===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select>
     </div>
     <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);font-weight:600;">
@@ -5130,7 +5193,7 @@ function clientRemisesRowsHtml(){
     <tr>
       <td><select onchange="clientDraftRemises[${i}].brandId=this.value; refreshClientRemisesTable();">
         <option value="" ${!r.brandId?'selected':''}>Tous les fournisseurs</option>
-        ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${r.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+        ${visibleBrands(r.brandId).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${r.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select></td>
       <td><input type="text" list="dl_famillesArticles_${i}" value="${escapeHtml(r.familleArticle||'')}" placeholder="Toutes les familles" onchange="clientDraftRemises[${i}].familleArticle=this.value;">${datalistHtml('dl_famillesArticles_'+i,'famillesArticles',r.brandId)}</td>
       <td><input type="number" min="0" max="100" step="0.01" value="${r.remise1||0}" onchange="clientDraftRemises[${i}].remise1=parseFloat(this.value)||0;"></td>
@@ -6085,7 +6148,7 @@ function xfRefreshLists(){
 }
 function openExportFournisseurMois(){
   const ym = todayStr().slice(0,7);
-  const brands = state.brands.slice();
+  const brands = visibleBrands();
   if(brands.length===0){ showToast('Aucun fournisseur.'); return; }
   xfFam = new Set(); xfSub = new Set();
   const box = 'border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;padding:4px;background:#fff;';
@@ -6776,7 +6839,7 @@ function renderTarifs(){
   ${state.brands.length===0?emptyState('▤','Ajoutez d\'abord un fournisseur','Les tarifs sont rattachés à un fournisseur. Créez vos fournisseurs dans l\'onglet dédié.'):`
   ${backupRiskBannerHtml()}
   <div class="grid grid-3">
-    ${(()=>{ const tarifCounts = tarifCountsByBrand(); return state.brands.map(b=>{
+    ${(()=>{ const tarifCounts = tarifCountsByBrand(); return visibleBrands().map(b=>{
       const nb = tarifCounts.get(b.id)||0;
       return `
       <div class="card card-pad" style="cursor:pointer;" onclick="ui.tarifsView='detail'; ui.tarifsBrandFilter='${b.id}'; ui.tarifsSearch=''; ui.tarifsPage=0; render();">
@@ -7284,7 +7347,7 @@ function renderListesPrixNets(){
         countsByBrand.set(t.brandId, (countsByBrand.get(t.brandId)||0)+1);
         countsByListe.set(t.listeId, (countsByListe.get(t.listeId)||0)+1);
       });
-      return state.brands.map(b=>{
+      return visibleBrands().map(b=>{
       const listes = listesForBrand(b.id);
       const totalRefs = countsByBrand.get(b.id)||0;
       const assigned = pnAssignedClientsForBrand(b.id);
@@ -7671,7 +7734,7 @@ function openPrixNetForm(id){
     <div class="modal-body">
       <div class="field-row">
         <div class="field"><label>Fournisseur *</label>
-          <select id="pn_brand" onchange="refreshPnFormListeOptions()">${state.brands.map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
+          <select id="pn_brand" onchange="refreshPnFormListeOptions()">${visibleBrands(defaultBrand).map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
         </div>
         <div class="field"><label>Liste de prix nets *</label>
           <div style="display:flex;gap:6px;">
@@ -7768,7 +7831,7 @@ function openImportModalPN(){
     <div class="modal-body">
       <div class="field-row">
         <div class="field"><label>Fournisseur de destination *</label>
-          <select id="impPN_brand" onchange="refreshImportPNListeOptions()">${state.brands.map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
+          <select id="impPN_brand" onchange="refreshImportPNListeOptions()">${visibleBrands(defaultBrand).map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
         </div>
         <div class="field"><label>Liste de prix nets *</label>
           <div style="display:flex;gap:6px;">
@@ -7941,7 +8004,7 @@ function openTarifForm(id){
     <div class="modal-head"><h3>${t?'Modifier la référence':'Nouvelle référence'}</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
       <div class="field"><label>Fournisseur *</label>
-        <select id="f_brand" onchange="refreshTarifFamilleDatalist()">${state.brands.map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
+        <select id="f_brand" onchange="refreshTarifFamilleDatalist()">${visibleBrands(defaultBrand).map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
       </div>
       <div class="field-row">
         <div class="field"><label>Référence *</label><input type="text" id="f_ref" value="${t?escapeHtml(t.reference):''}"></div>
@@ -8076,7 +8139,7 @@ function openImportModal(defaultTarget){
     <div class="modal-head"><h3>Importer des tarifs (Excel ou CSV)</h3><button class="close-x" onclick="closeModal()">✕</button></div>
     <div class="modal-body">
       <div class="field"><label>Fournisseur de destination *</label>
-        <select id="imp_brand">${state.brands.map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
+        <select id="imp_brand">${visibleBrands(defaultBrand).map(b=>`<option value="${b.id}" ${b.id===defaultBrand?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
       </div>
       <div class="field"><label>Prix importé</label>
         <input type="hidden" id="imp_target" value="prixCatalogue">
@@ -8320,7 +8383,7 @@ function renderRechercheClientResults(){
 const debouncedRenderRechercheClientResults = debounce(renderRechercheClientResults, 150);
 function rechercheBrandPillsHtml(){
   const cur = ui.rechercheBrand || 'all';
-  const brands = state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  const brands = visibleBrands().slice().sort((a,b)=>a.name.localeCompare(b.name));
   return `<div class="pill-select">
     <button class="${cur==='all'?'active':''}" onclick="setRechercheBrand('all')">Tous les fournisseurs</button>
     ${brands.map(b=>`<button class="${cur===b.id?'active':''}" onclick="setRechercheBrand('${b.id}')">${escapeHtml(b.name)}</button>`).join('')}
@@ -8528,7 +8591,7 @@ function renderParametres(){
       <div class="card card-pad">
         <div class="section-title">Sauvegarde automatique</div>
         ${folderStatus}
-        ${(fsAccessSupported() && backupDirHandle && !backupFolderNeedsPermission) ? `
+        ${(!window.desktopFs && fsAccessSupported() && backupDirHandle && !backupFolderNeedsPermission) ? `
           <div style="margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;">
             <div style="font-weight:600;margin-bottom:4px;">Stockage : dossier uniquement</div>
             <div class="helper">${folderOnly
@@ -8716,7 +8779,7 @@ function openParamItemForm(listKey, id){
       ${hasBrand?`<div class="field"><label>Fournisseur de rattachement</label>
         <select id="pi_brand">
           <option value="">Tous les fournisseurs</option>
-          ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${it&&it.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+          ${visibleBrands(it&&it.brandId).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${it&&it.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
         </select>
       </div>`:''}
       ${hasFamille?`<div class="field"><label>Famille de rattachement</label>
@@ -9007,7 +9070,7 @@ function renderDevis(){
         <div class="field" style="margin-bottom:0;max-width:200px;">
           <select onchange="ui.devisFilterBrand=this.value; updateDevisListOnly();">
             <option value="all" ${(!ui.devisFilterBrand||ui.devisFilterBrand==='all')?'selected':''}>Tous les fournisseurs</option>
-            ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.devisFilterBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+            ${visibleBrands(ui.devisFilterBrand).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.devisFilterBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
           </select>
         </div>
         <details class="filter-details">
@@ -9584,7 +9647,7 @@ function commissionsTotals(){
   if(state.brands.length===0) return {ca:0, commission:0};
   const year = ui.commissionsYear || 0;
   const month = year ? (ui.commissionsMonth||0) : 0;
-  const brandsList = ui.commissionsBrand==='all' ? state.brands : state.brands.filter(b=>b.id===ui.commissionsBrand);
+  const brandsList = ui.commissionsBrand==='all' ? visibleBrands() : state.brands.filter(b=>b.id===ui.commissionsBrand);
 
   if(year && month){
     const ca = brandsList.reduce((s,b)=>s+(getCommissionEntry(b.id, year, month).ca||0),0);
@@ -9631,7 +9694,7 @@ function commissionsBrandTotalForFilters(brandId){
   return {ca, commission};
 }
 function renderCommissionsTop5(){
-  const rows = state.brands.map(b=>({b, ...commissionsBrandTotalForFilters(b.id)}));
+  const rows = visibleBrands().map(b=>({b, ...commissionsBrandTotalForFilters(b.id)}));
   const topCa = rows.filter(r=>r.ca>0).sort((a,b)=>b.ca-a.ca).slice(0,5);
   const topCommission = rows.filter(r=>r.commission>0).sort((a,b)=>b.commission-a.commission).slice(0,5);
   const periodLabel = ui.commissionsYear ? (ui.commissionsMonth ? `${MOIS_LABELS[ui.commissionsMonth-1]} ${ui.commissionsYear}` : `Année ${ui.commissionsYear}`) : 'Toutes périodes confondues';
@@ -9700,7 +9763,7 @@ function renderCommissions(){
     <div class="field" style="margin-bottom:0;max-width:220px;"><label style="margin-bottom:4px;">Fournisseur</label>
       <select onchange="ui.commissionsBrand=this.value; render();">
         <option value="all" ${ui.commissionsBrand==='all'?'selected':''}>Tous les fournisseurs</option>
-        ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.commissionsBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+        ${visibleBrands(ui.commissionsBrand).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.commissionsBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select>
     </div>
     <div class="field" style="margin-bottom:0;">
@@ -9765,7 +9828,7 @@ function renderCommissionsTableInner(){
   if(state.brands.length===0) return emptyState('%','Aucun fournisseur','Ajoutez vos fournisseurs pour saisir leurs commissions.');
   const year = ui.commissionsYear || 0;
   const month = year ? (ui.commissionsMonth||0) : 0;
-  const brandsList = ui.commissionsBrand==='all' ? state.brands : state.brands.filter(b=>b.id===ui.commissionsBrand);
+  const brandsList = ui.commissionsBrand==='all' ? visibleBrands() : state.brands.filter(b=>b.id===ui.commissionsBrand);
   if(brandsList.length===0) return emptyState('%','Fournisseur introuvable','Sélectionnez un autre fournisseur.');
 
   if(year && month){
@@ -10451,7 +10514,7 @@ function openEditDevisLineModal(i){
       <div class="field-row">
         <div class="field"><label>Fournisseur</label>
           <select onchange="draft.lines[${i}].brandId=this.value; refreshDevisModal();">
-            ${state.brands.map(b=>`<option value="${b.id}" ${l.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+            ${visibleBrands(l.brandId).map(b=>`<option value="${b.id}" ${l.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
           </select>
         </div>
         <div class="field"><label>Référence</label><input type="text" value="${escapeHtml(l.reference||'')}" onchange="draft.lines[${i}].reference=this.value; draft.lines[${i}].tarifId=null; refreshDevisModal();"></div>
@@ -10879,7 +10942,7 @@ function devisFormHtml(){
         <div class="field" style="max-width:200px;"><label>Fournisseur</label>
           <select id="d_filterBrand" onchange="draft.filterBrandId=this.value; refreshDevisModal();">
             <option value="" ${!draft.filterBrandId?'selected':''}>Tous les fournisseurs</option>
-            ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${draft.filterBrandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+            ${visibleBrands(draft.filterBrandId).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${draft.filterBrandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
           </select>
           <div class="helper">Filtre la recherche de référence ci-dessous.</div>
         </div>
@@ -11121,7 +11184,7 @@ function devisLinesEditorHtml(){
             <div class="field" style="margin-bottom:8px;"><label>Référence</label><input type="text" id="fl_ref" placeholder="Ex. DIVERS-01"></div>
             <div class="field" style="margin-bottom:8px;"><label>Désignation</label><input type="text" id="fl_desig" placeholder="Ex. Prestation sur mesure"></div>
             <div class="field" style="margin-bottom:8px;max-width:220px;"><label>Fournisseur</label>
-              <select id="fl_brand">${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${(draft.filterBrandId||devisSoleBrandId())===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
+              <select id="fl_brand">${visibleBrands((draft.filterBrandId||devisSoleBrandId())).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${(draft.filterBrandId||devisSoleBrandId())===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}</select>
             </div>
           </div>
           <div style="display:flex;gap:8px;">
@@ -13303,7 +13366,7 @@ function renderRapport(){
   if(state.brands.length===0){
     return `<div class="topbar"><div><h1>Rapport</h1><div class="sub">Synthèse d'activité par fournisseur</div></div></div>${emptyState('▩',"Ajoutez d'abord un fournisseur","Le rapport se construit fournisseur par fournisseur.")}`;
   }
-  if(!ui.rapportBrand || !state.brands.some(b=>b.id===ui.rapportBrand)) ui.rapportBrand = state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name))[0].id;
+  if(!ui.rapportBrand || !state.brands.some(b=>b.id===ui.rapportBrand)) ui.rapportBrand = visibleBrands().concat(state.brands).slice().sort((a,b)=>a.name.localeCompare(b.name))[0].id;
   const years = availableYears();
   if(!ui.rapportYear || !years.includes(ui.rapportYear)) ui.rapportYear = years[0] || new Date().getFullYear();
   const data = computeRapportData(ui.rapportBrand, ui.rapportYear, ui.rapportMonth);
@@ -13361,7 +13424,7 @@ function renderRapport(){
     <div class="field" style="margin-bottom:0;max-width:260px;">
       <label>Fournisseur</label>
       <select onchange="ui.rapportBrand=this.value; render();">
-        ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.rapportBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+        ${visibleBrands(ui.rapportBrand).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${ui.rapportBrand===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select>
     </div>
     <div class="field" style="margin-bottom:0;max-width:140px;">
@@ -13687,7 +13750,7 @@ function renderTempsGains(){
   // Importance par fournisseur : même principe (rentabilité horaire), mais avec le CA de l'onglet Commissions
   // (saisie manuelle par fournisseur/année/mois) plutôt que le CA calculé à partir des devis, et un temps passé
   // basé sur les fournisseurs cochés sur chaque rendez-vous des clients actuellement filtrés.
-  const brandRows = state.brands.map(b=>{
+  const brandRows = visibleBrands().map(b=>{
     let minutes = 0, visites = 0;
     clientsScope.forEach(c=>{
       (c.history||[]).forEach(h=>{
@@ -14258,7 +14321,7 @@ function renderAgendaImportRows(){
           </select></td>
           <td><select onchange="agendaImportRows[${i}].brandId=this.value; agendaImportRows[${i}].include=!!(this.value||agendaImportRows[${i}].clientId);">
             <option value="">— Aucune —</option>
-            ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${m.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+            ${visibleBrands(m.brandId).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${m.brandId===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
           </select></td>
           <td><input type="number" min="0" step="5" value="${m.dureeMin}" onchange="agendaImportRows[${i}].dureeMin=parseInt(this.value,10)||0;"></td>
         </tr>
@@ -14461,7 +14524,7 @@ function commissionsCaForMonth(brandId, year, month){
     return getCommissionEntry(brandId, year, month).ca || 0;
   }
   let total = 0;
-  state.brands.forEach(b=>{ total += (getCommissionEntry(b.id, year, month).ca || 0); });
+  visibleBrands().forEach(b=>{ total += (getCommissionEntry(b.id, year, month).ca || 0); });
   return total;
 }
 function caVvaEffectiveMonth(year, brandId, clientId, month){
@@ -14695,7 +14758,7 @@ function renderDashboard(){
   // Nombre de devis/marchés par fournisseur, ventilé par apporteur d'affaire (toutes années confondues
   // sur l'année sélectionnée, tous statuts, dans le périmètre filtré ci-dessus).
   const scopedYearDevis = state.devis.filter(d=>yearOf(d.date)===y && inDashboardScope(d));
-  const brandApporteurRows = state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>{
+  const brandApporteurRows = visibleBrands().slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>{
     const ds = scopedYearDevis.filter(d=>(d.lines||[]).some(l=>l.brandId===b.id));
     const agent = ds.filter(d=>d.apporteurAffaire==='Agent').length;
     const distrib = ds.filter(d=>d.apporteurAffaire==='Distributeur').length;
@@ -14809,7 +14872,7 @@ function renderDashboard(){
     <div class="field" style="margin-bottom:0;max-width:200px;">
       <select onchange="ui.dashboardBrand=this.value; render();">
         <option value="all" ${brandFilter==='all'?'selected':''}>Tous les fournisseurs</option>
-        ${state.brands.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${brandFilter===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
+        ${visibleBrands(brandFilter).slice().sort((a,b)=>a.name.localeCompare(b.name)).map(b=>`<option value="${b.id}" ${brandFilter===b.id?'selected':''}>${escapeHtml(b.name)}</option>`).join('')}
       </select>
     </div>
     <div class="field" style="margin-bottom:0;max-width:220px;">
@@ -14986,7 +15049,7 @@ function initDashboardCharts(){
   const acceptedYear = state.devis.filter(d=>isDevisWon(d) && yearOf(d.date)===y && inDashboardScope(d));
   const caSource = ui.dashboardCaSource||'devis';
 
-  const brandData = state.brands.filter(b=>brandFilter==='all'||b.id===brandFilter).map(b=>{
+  const brandData = visibleBrands(brandFilter!=='all'?brandFilter:null).filter(b=>brandFilter==='all'||b.id===brandFilter).map(b=>{
     let total;
     if(caSource==='vva'){
       total = caVvaTotal(y, b.id, clientFilter);
